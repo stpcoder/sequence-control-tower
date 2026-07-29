@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist-web/
+release/
+coverage/
+.vite/
+.DS_Store
+*.log
+data/
+!docs/**/*.log
+omh-store-upload/

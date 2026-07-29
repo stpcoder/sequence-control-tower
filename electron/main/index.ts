@@ -1,0 +1,136 @@
+import { app, BrowserWindow, dialog, Menu, session } from 'electron'
+import { join } from 'node:path'
+import { AnalysisService } from './analysis-service'
+import { ArtifactService } from './artifact-service'
+import { registerIpc, unregisterIpc } from './ipc'
+import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
+import { WikiService } from './wiki-service'
+import { IPC_CHANNELS } from '../shared/contracts'
+
+let mainWindow: BrowserWindow | null = null
+
+function allowedNavigation(target: string): boolean {
+  if (app.isPackaged) return target.startsWith('file://')
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  if (!rendererUrl) return target.startsWith('file://')
+  try {
+    return new URL(target).origin === new URL(rendererUrl).origin
+  } catch {
+    return false
+  }
+}
+
+function createWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 1480,
+    height: 940,
+    minWidth: 1100,
+    minHeight: 680,
+    show: false,
+    backgroundColor: '#0b0f14',
+    autoHideMenuBar: true,
+    title: 'Sequence Intelligence Control Tower',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      spellcheck: false,
+      webviewTag: false,
+      navigateOnDragDrop: false,
+      devTools: !app.isPackaged
+    }
+  })
+
+  window.once('ready-to-show', () => window.show())
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-navigate', (event, target) => {
+    if (!allowedNavigation(target)) event.preventDefault()
+  })
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
+
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    void window.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+  return window
+}
+
+async function bootstrap(): Promise<void> {
+  const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
+  const artifacts = new ArtifactService(dataRoot)
+  const llmConfig = new LlmConfigService(dataRoot)
+  const llm = new OpenAiCompatibleClient(llmConfig)
+  const wiki = new WikiService(dataRoot, artifacts)
+  const analysis = new AnalysisService(dataRoot, artifacts, llmConfig, llm, (job) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.analysisUpdate, job)
+    })
+  })
+  await Promise.all([
+    artifacts.initialize(),
+    llmConfig.initialize(),
+    wiki.initialize(),
+    analysis.initialize()
+  ])
+  registerIpc({ artifacts, analysis, llmConfig, wiki })
+
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false)
+  })
+  session.defaultSession.setPermissionCheckHandler(() => false)
+  if (app.isPackaged) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'"
+          ]
+        }
+      })
+    })
+  }
+  Menu.setApplicationMenu(null)
+  mainWindow = createWindow()
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+const hasLock = app.requestSingleInstanceLock()
+if (!hasLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  })
+
+  app
+    .whenReady()
+    .then(async () => {
+      app.setAppUserModelId('com.sequence-intelligence.control-tower')
+      await bootstrap()
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
+      })
+    })
+    .catch(() => {
+      dialog.showErrorBox(
+        'Sequence Control Tower',
+        '로컬 데이터 저장소를 초기화하지 못했습니다. 디스크 공간과 사용자 권한을 확인해 주세요.'
+      )
+      app.quit()
+    })
+}
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => unregisterIpc())

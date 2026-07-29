@@ -1,0 +1,144 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example: v0.1.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Publish as a pre-release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package-windows:
+    name: Package and publish Windows installers
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $package = Get-Content "package.json" -Raw | ConvertFrom-Json
+          $expectedTag = "v$($package.version)"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Release tag '$env:RELEASE_TAG' must match package.json version '$expectedTag'."
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit packaged dependencies
+        run: npm audit --omit=dev
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build NSIS, portable, and ZIP packages
+        run: npm run dist:win
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Prepare stable release asset names
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path "release-assets" -Force | Out-Null
+
+          $executables = @(Get-ChildItem -Path "release" -Recurse -File -Filter "*.exe")
+          $setup = $executables |
+            Where-Object { $_.Name -match "(?i)(setup|installer)" } |
+            Select-Object -First 1
+          $portable = $executables |
+            Where-Object { $_.Name -match "(?i)portable" } |
+            Select-Object -First 1
+
+          if (-not $setup) {
+            throw "NSIS setup executable was not found under release/."
+          }
+          if (-not $portable) {
+            $portable = $executables |
+              Where-Object {
+                $_.FullName -ne $setup.FullName -and
+                $_.FullName -notmatch "(?i)(win-unpacked|unpacked)"
+              } |
+              Select-Object -First 1
+          }
+          if (-not $portable) {
+            throw "Portable executable was not found under release/."
+          }
+
+          Copy-Item $setup.FullName "release-assets/Sequence-Control-Tower-Setup.exe"
+          Copy-Item $portable.FullName "release-assets/Sequence-Control-Tower-Portable.exe"
+
+          $zipPackage = Get-ChildItem -Path "release" -Recurse -File -Filter "*.zip" |
+            Select-Object -First 1
+          if ($zipPackage) {
+            Copy-Item $zipPackage.FullName "release-assets/Sequence-Control-Tower-Windows.zip"
+          } else {
+            $unpacked = Get-ChildItem -Path "release" -Recurse -Directory |
+              Where-Object { $_.Name -eq "win-unpacked" } |
+              Select-Object -First 1
+            if (-not $unpacked) {
+              throw "Neither a ZIP package nor a win-unpacked directory was found."
+            }
+            Compress-Archive -Path "$($unpacked.FullName)\*" -DestinationPath "release-assets/Sequence-Control-Tower-Windows.zip"
+          }
+
+          Get-ChildItem "release-assets" -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            } |
+            Set-Content -Encoding utf8 "release-assets/SHA256SUMS.txt"
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sequence-control-tower-${{ env.RELEASE_TAG }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Sequence Control Tower ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          files: release-assets/*
