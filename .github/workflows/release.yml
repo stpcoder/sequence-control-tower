@@ -34,6 +34,18 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          # Build the immutable tag selected by either trigger. A manual run
+          # must never publish the currently selected branch under another tag.
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 1
+
+      - name: Resolve release source commit
+        id: release_source
+        shell: pwsh
+        run: |
+          $commit = git rev-parse HEAD
+          "sha=$commit" >> $env:GITHUB_OUTPUT
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -129,7 +141,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.release_source.outputs.sha }}
           name: Sequence Control Tower ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}

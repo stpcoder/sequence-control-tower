@@ -20,7 +20,14 @@ Workflow는 Windows에서 type-check/test/build 후 다음 고정 이름으로 R
 
 ## 수동 배포
 
-GitHub에서 **Actions → Windows Release → Run workflow**를 선택하고 `package.json`과 동일한 `v0.2.0` 형식의 tag를 입력합니다. pre-release를 선택한 경우 `/releases/latest/download` 링크의 대상이 되지 않을 수 있으므로 일반 사용자에게는 Release 페이지 링크를 전달합니다.
+수동 실행도 이미 원격에 존재하는 tag만 빌드합니다. 먼저 tag를 생성해 push한 뒤 GitHub에서 **Actions → Windows Release → Run workflow**를 선택하고 같은 `v0.2.0` tag를 입력합니다.
+
+```bash
+git tag -a v0.2.0 -m "Sequence Control Tower v0.2.0"
+git push origin v0.2.0
+```
+
+Workflow는 현재 선택한 branch가 아니라 입력한 tag commit을 checkout합니다. tag가 없거나 tag의 `package.json` version과 입력값이 다르면 중단됩니다. pre-release를 선택한 경우 `/releases/latest/download` 링크의 대상이 되지 않을 수 있으므로 일반 사용자에게는 Release 페이지 링크를 전달합니다.
 
 ## Windows 코드 서명
 

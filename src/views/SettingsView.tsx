@@ -9,15 +9,32 @@ export function SettingsView() {
   const [apiKey, setApiKey] = useState('')
   const [summary, setSummary] = useState<LlmConfigSummary | null>(null)
   const [message, setMessage] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
+  const refreshSummary = async (announce = true) => {
     const api = window.sequenceIntelligence
-    if (!api) return
-    void api.settings.getLlm().then((current) => {
+    if (!api) {
+      if (announce) setMessage('웹 미리보기에서는 Gateway 설정 상태를 조회하지 않습니다.')
+      return
+    }
+    setRefreshing(true)
+    try {
+      const current = await api.settings.getLlm()
       setSummary(current)
       if (current.baseUrl) setBaseUrl(current.baseUrl)
       if (current.model) setModel(current.model)
-    }).catch(() => setMessage('저장된 LLM 설정을 읽지 못했습니다.'))
+      if (announce) {
+        setMessage(current.configured ? '이 PC에 적용된 Gateway 설정을 다시 읽었습니다.' : 'Gateway가 설정되지 않아 로컬 fallback을 사용합니다.')
+      }
+    } catch {
+      setMessage('저장된 LLM 설정을 읽지 못했습니다.')
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshSummary(false)
   }, [])
 
   const save = async () => {
@@ -45,9 +62,9 @@ export function SettingsView() {
         <aside className="settings-index">
           <span>환경 설정</span>
           <button className="active"><CloudCog size={16} /> AI Gateway</button>
-          <button><Database size={16} /> Local Storage</button>
-          <button><SlidersHorizontal size={16} /> Parser Profiles</button>
-          <button><ServerCog size={16} /> Equipment Agents</button>
+          <button disabled title="PoC에서는 자동 관리됩니다"><Database size={16} /> Local Storage <small>자동</small></button>
+          <button disabled title="고객사별 adapter 확장 지점입니다"><SlidersHorizontal size={16} /> Parser Profiles <small>확장</small></button>
+          <button disabled title="실장기 제어는 시뮬레이션 범위입니다"><ServerCog size={16} /> Equipment Agents <small>다음 단계</small></button>
         </aside>
 
         <section className="settings-content guide-llm-settings">
@@ -57,7 +74,7 @@ export function SettingsView() {
             <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>사내 OpenAI-compatible endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></div>
             <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>Sequence 설명 및 질의에 사용할 모델</span></label><input id="model" value={model} onChange={(event) => setModel(event.target.value)} /></div>
             <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.apiKeyConfigured ? '현재 key가 설정되어 있습니다' : '입력하지 않으면 기존 key 유지'}</span></label><div className="secret-input"><KeyRound size={15} /><input id="key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.apiKeyConfigured ? '••••••••••••••••' : '선택 사항'} /><button type="button" onClick={() => setApiKey('')}>지우기</button></div></div>
-            <div className="connection-test"><span><i className={summary?.configured ? '' : 'idle'} /> {summary?.configured ? `Gateway configured · ${summary.source}` : '로컬 fallback 활성화'}</span><button><RotateCw size={14} /> 연결 상태 새로고침</button></div>
+            <div className="connection-test"><span><i className={summary?.configured ? '' : 'idle'} /> {summary?.configured ? `Gateway configured · ${summary.source}` : '로컬 fallback 활성화'}</span><button type="button" disabled={refreshing} onClick={() => void refreshSummary()}><RotateCw size={14} /> {refreshing ? '설정 확인 중' : '설정 상태 새로고침'}</button></div>
           </div>
 
           <div className="settings-two-column">
