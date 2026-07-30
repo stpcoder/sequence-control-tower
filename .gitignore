@@ -6,6 +6,6 @@ coverage/
 .vite/
 .DS_Store
 *.log
-data/
+/data/
 !docs/**/*.log
 omh-store-upload/
