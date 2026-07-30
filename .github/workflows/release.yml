@@ -125,14 +125,6 @@ jobs:
             } |
             Set-Content -Encoding utf8 "release-assets/SHA256SUMS.txt"
 
-      - name: Upload packaged artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: sequence-control-tower-${{ env.RELEASE_TAG }}
-          path: release-assets/*
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
