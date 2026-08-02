@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family: 'Manrope Variable', 'Noto Sans KR Variable', sans-serif;
+  font-family: 'Pretendard', 'Segoe UI', sans-serif;
   font-synthesis: none;
   --bg: #0b0e0d;
   --bg-deep: #070908;
@@ -480,6 +480,56 @@ button:disabled {
   min-height: 0;
   flex: 1;
   overflow: auto;
+}
+
+.workbench-is-open {
+  --sidebar: 66px;
+  background: #0c0e10;
+}
+
+.workbench-is-open .content-shell {
+  overflow: hidden;
+  padding: 8px;
+}
+
+.workbench-is-open .navigation {
+  padding: 12px 7px 10px;
+}
+
+.workbench-is-open .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.workbench-is-open .brand > div:last-child,
+.workbench-is-open .workspace-label,
+.workbench-is-open .workspace-card,
+.workbench-is-open .nav-item > span,
+.workbench-is-open .agent-health > div:not(.agent-health-icon),
+.workbench-is-open .agent-health > i,
+.workbench-is-open .build-version {
+  display: none;
+}
+
+.workbench-is-open .nav-list {
+  gap: 5px;
+  margin-top: 18px;
+}
+
+.workbench-is-open .nav-item {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 44px;
+  padding: 0;
+  place-items: center;
+}
+
+.workbench-is-open .agent-health {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 42px;
+  padding: 5px;
+  place-items: center;
 }
 
 .view {

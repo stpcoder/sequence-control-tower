@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
 import { ArtifactService } from './artifact-service'
 import { registerIpc, unregisterIpc } from './ipc'
@@ -8,9 +9,21 @@ import { WikiService } from './wiki-service'
 import { IPC_CHANNELS } from '../shared/contracts'
 
 let mainWindow: BrowserWindow | null = null
+const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
+
+function isExactPackagedRenderer(target: string): boolean {
+  try {
+    const actual = new URL(target)
+    const expected = new URL(packagedRendererUrl)
+    actual.hash = ''
+    return actual.href === expected.href
+  } catch {
+    return false
+  }
+}
 
 function allowedNavigation(target: string): boolean {
-  if (app.isPackaged) return target.startsWith('file://')
+  if (app.isPackaged) return isExactPackagedRenderer(target)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (!rendererUrl) return target.startsWith('file://')
   try {

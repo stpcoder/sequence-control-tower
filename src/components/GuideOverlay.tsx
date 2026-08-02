@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import type { AppPage } from '../data/demo'
 
 const labels: Record<AppPage, { selector: string; number: number; label: string }[]> = {
+  workbench: [
+    { selector: '.workbench-sidebar', number: 1, label: '여러 폴더의 로그 탐색' },
+    { selector: '.workbench-editor-shell', number: 2, label: '검색 중심 읽기 전용 로그 뷰어' },
+    { selector: '.decision-panel', number: 3, label: '근거·판정·Recipe 저장' },
+  ],
   tower: [
     { selector: '.guide-project-overview', number: 1, label: '프로젝트 목적과 현재 핵심 판단' },
     { selector: '.guide-project-lineage', number: 2, label: '평가 Revision 계보' },

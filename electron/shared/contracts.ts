@@ -37,7 +37,18 @@ export interface ArtifactRecord {
   importedAt: string
   lastSeenAt: string
   importCount: number
+  /** Safe, display-only locations. Absolute source and object-store paths never leave main. */
+  sources?: ArtifactSourceLocation[]
   fingerprint?: SequenceFingerprint
+}
+
+export interface ArtifactSourceLocation {
+  /** Stable opaque identity for the selected root; never contains the root path. */
+  rootId: string
+  /** The selected folder's basename, stripped of control characters. */
+  folderLabel: string
+  /** POSIX-style path relative to that selected folder. */
+  relativePath: string
 }
 
 export interface ArtifactImportOptions {
@@ -65,6 +76,73 @@ export interface ArtifactTextPreview {
   truncated: boolean
   totalBytes: number
   encoding: 'utf-8'
+}
+
+export type ArtifactSearchMode = 'literal' | 'regex'
+
+export interface ArtifactSearchInput {
+  artifactIds: string[]
+  query: string
+  mode?: ArtifactSearchMode
+  caseSensitive?: boolean
+  /** Number of detailed matches returned. Counts continue after this cap. */
+  maxMatches?: number
+  /** Context lines included before and after each returned match. */
+  contextLines?: number
+}
+
+export interface ArtifactSearchMatch {
+  artifactId: string
+  fileName: string
+  lineNumber: number
+  /** One-based UTF-16 columns, matching the desktop editor. */
+  columnStart: number
+  columnEnd: number
+  lineText: string
+  lineTruncated: boolean
+  before: string[]
+  after: string[]
+}
+
+export interface ArtifactSearchFileResult {
+  artifactId: string
+  fileName: string
+  matchCount: number
+  searchedLineCount: number
+  error?: string
+}
+
+export interface ArtifactSearchResult {
+  query: string
+  mode: ArtifactSearchMode
+  caseSensitive: boolean
+  matches: ArtifactSearchMatch[]
+  totalMatchCount: number
+  truncated: boolean
+  files: ArtifactSearchFileResult[]
+}
+
+export interface ArtifactLineWindowInput {
+  artifactId: string
+  /** One-based first line. */
+  startLine: number
+  lineCount?: number
+}
+
+export interface ArtifactLine {
+  lineNumber: number
+  text: string
+  truncated: boolean
+}
+
+export interface ArtifactLineWindow {
+  artifactId: string
+  startLine: number
+  lines: ArtifactLine[]
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
+  /** Present when the end of the file was reached during this request. */
+  totalLines?: number
 }
 
 export interface SimilarArtifact {
@@ -169,6 +247,19 @@ export interface LlmConfigSummary {
   }
 }
 
+export interface LlmModelDiscoveryInput {
+  /** Optional unsaved URL from the settings form; otherwise uses effective saved/env config. */
+  baseUrl?: string
+  /** Optional unsaved token. It is used for this request only and never returned. */
+  apiKey?: string
+}
+
+export interface LlmModelDiscoveryResult {
+  models: string[]
+  latencyMs: number
+  truncated: boolean
+}
+
 export interface WikiEntryInput {
   artifactId: string
   parentArtifactId?: string
@@ -216,6 +307,8 @@ export interface SequenceIntelligenceApi {
     importFolder(options?: ArtifactImportOptions): Promise<ArtifactImportResult>
     list(): Promise<ArtifactRecord[]>
     getTextPreview(artifactId: string, maxChars?: number): Promise<ArtifactTextPreview>
+    search(input: ArtifactSearchInput): Promise<ArtifactSearchResult>
+    getLineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow>
     findSimilar(artifactId: string, limit?: number): Promise<SimilarArtifact[]>
   }
   analysis: {
@@ -227,6 +320,7 @@ export interface SequenceIntelligenceApi {
   settings: {
     getLlm(): Promise<LlmConfigSummary>
     saveLlm(input: LlmConfigInput): Promise<LlmConfigSummary>
+    discoverModels(input?: LlmModelDiscoveryInput): Promise<LlmModelDiscoveryResult>
   }
   wiki: {
     save(input: WikiEntryInput): Promise<WikiEntryRecord>
@@ -241,6 +335,8 @@ export const IPC_CHANNELS = {
   artifactImportFolder: 'artifact:import-folder',
   artifactList: 'artifact:list',
   artifactPreview: 'artifact:preview',
+  artifactSearch: 'artifact:search',
+  artifactLineWindow: 'artifact:line-window',
   artifactSimilar: 'artifact:similar',
   analysisStart: 'analysis:start',
   analysisGet: 'analysis:get',
@@ -248,6 +344,7 @@ export const IPC_CHANNELS = {
   analysisUpdate: 'analysis:update',
   settingsGetLlm: 'settings:get-llm',
   settingsSaveLlm: 'settings:save-llm',
+  settingsDiscoverModels: 'settings:discover-models',
   wikiSave: 'wiki:save',
   wikiList: 'wiki:list',
   wikiExport: 'wiki:export'

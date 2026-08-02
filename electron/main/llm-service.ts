@@ -1,6 +1,11 @@
 import { safeStorage } from 'electron'
 import { join } from 'node:path'
-import type { LlmConfigInput, LlmConfigSummary } from '../shared/contracts'
+import type {
+  LlmConfigInput,
+  LlmConfigSummary,
+  LlmModelDiscoveryInput,
+  LlmModelDiscoveryResult
+} from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
 
 interface SavedLlmConfig {
@@ -8,6 +13,7 @@ interface SavedLlmConfig {
   baseUrl: string
   model: string
   encryptedApiKey?: string
+  apiKeyOrigin?: string
   updatedAt?: string
 }
 
@@ -52,6 +58,10 @@ function cleanModel(value: string): string {
   return model
 }
 
+function urlOrigin(value: string): string {
+  return value ? new URL(validateBaseUrl(value)).origin : ''
+}
+
 function canPersistApiKeySecurely(): boolean {
   if (!safeStorage.isEncryptionAvailable()) return false
   // Electron's Linux `basic_text` backend is obfuscation, not secret storage.
@@ -61,9 +71,47 @@ function canPersistApiKeySecurely(): boolean {
   return true
 }
 
+const MODEL_DISCOVERY_TIMEOUT_MS = 10_000
+const MAX_DISCOVERED_MODELS = 100
+const MAX_MODELS_RESPONSE_BYTES = 1024 * 1024
+
+async function readResponseTextCapped(response: Response, maxBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error('LLM_MODELS_RESPONSE_TOO_LARGE')
+  }
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let received = 0
+  let text = ''
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      received += chunk.value.byteLength
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        throw new Error('LLM_MODELS_RESPONSE_TOO_LARGE')
+      }
+      text += decoder.decode(chunk.value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function sanitizeModelId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200)
+  return cleaned || null
+}
+
 export class LlmConfigService {
   private readonly store: AtomicJsonStore<SavedLlmConfig>
   private sessionApiKey: string | undefined
+  private sessionApiKeyOrigin: string | undefined
 
   constructor(dataRoot: string) {
     this.store = new AtomicJsonStore(join(dataRoot, 'config', 'llm.json'), {
@@ -83,21 +131,39 @@ export class LlmConfigService {
     const apiKey = input.apiKey?.trim()
 
     await this.store.update((draft) => {
+      const previousOrigin = urlOrigin(draft.baseUrl)
+      const nextOrigin = urlOrigin(baseUrl)
       draft.baseUrl = baseUrl
       draft.model = model
       draft.updatedAt = new Date().toISOString()
       if (input.clearApiKey) {
         delete draft.encryptedApiKey
+        delete draft.apiKeyOrigin
         this.sessionApiKey = undefined
+        this.sessionApiKeyOrigin = undefined
       } else if (apiKey) {
         if (canPersistApiKeySecurely()) {
           draft.encryptedApiKey = safeStorage.encryptString(apiKey).toString('base64')
+          draft.apiKeyOrigin = nextOrigin || undefined
           this.sessionApiKey = undefined
+          this.sessionApiKeyOrigin = undefined
         } else {
           // Never degrade to plaintext. Keep it for this process only.
           delete draft.encryptedApiKey
+          delete draft.apiKeyOrigin
           this.sessionApiKey = apiKey
+          this.sessionApiKeyOrigin = nextOrigin || undefined
         }
+      } else if (previousOrigin !== nextOrigin) {
+        // A secret is scoped to the host where it was entered. Changing hosts
+        // without entering a new key must never carry the old credential over.
+        delete draft.encryptedApiKey
+        delete draft.apiKeyOrigin
+        this.sessionApiKey = undefined
+        this.sessionApiKeyOrigin = undefined
+      } else if (draft.encryptedApiKey && !draft.apiKeyOrigin && nextOrigin) {
+        // Safe migration for configs written before key-origin binding existed.
+        draft.apiKeyOrigin = nextOrigin
       }
     })
     return this.summary()
@@ -106,10 +172,15 @@ export class LlmConfigService {
   async effective(): Promise<EffectiveLlmConfig> {
     const saved = await this.store.read()
     const encryptedKey = this.decrypt(saved.encryptedApiKey)
+    const baseUrl = validateBaseUrl(process.env.SEQ_LLM_BASE_URL ?? saved.baseUrl)
+    const effectiveOrigin = urlOrigin(baseUrl)
+    const savedKeyOrigin = saved.apiKeyOrigin ?? urlOrigin(saved.baseUrl)
+    const originBoundEncryptedKey = savedKeyOrigin === effectiveOrigin ? encryptedKey : undefined
+    const originBoundSessionKey = this.sessionApiKeyOrigin === effectiveOrigin ? this.sessionApiKey : undefined
     return {
-      baseUrl: validateBaseUrl(process.env.SEQ_LLM_BASE_URL ?? saved.baseUrl),
+      baseUrl,
       model: cleanModel(process.env.SEQ_LLM_MODEL ?? saved.model),
-      apiKey: process.env.SEQ_LLM_API_KEY ?? encryptedKey ?? this.sessionApiKey,
+      apiKey: process.env.SEQ_LLM_API_KEY ?? originBoundEncryptedKey ?? originBoundSessionKey,
       requestsPerMinute: integerEnvironment('SEQ_LLM_RPM', 8, 1, 10_000),
       tokensPerMinute: integerEnvironment('SEQ_LLM_TPM', 80_000, 1_000, 10_000_000),
       timeoutMs: integerEnvironment('SEQ_LLM_TIMEOUT_MS', 60_000, 5_000, 300_000),
@@ -166,6 +237,71 @@ export class LlmConfigService {
         tokensPerMinute: effective.tokensPerMinute,
         timeoutMs: effective.timeoutMs
       }
+    }
+  }
+
+  /**
+   * One explicit, user-triggered compatibility request. This deliberately does
+   * not share the analysis limiter/retry path and never saves or returns a key.
+   */
+  async discoverModels(input: LlmModelDiscoveryInput = {}): Promise<LlmModelDiscoveryResult> {
+    const effective = await this.effective()
+    const providedBaseUrl = input.baseUrl?.trim()
+    const baseUrl = validateBaseUrl(providedBaseUrl || effective.baseUrl)
+    if (!baseUrl) throw new Error('LLM Base URL을 입력해 주세요.')
+    const providedApiKey = input.apiKey?.trim()
+    const mayReuseEffectiveKey = !providedBaseUrl || (
+      Boolean(effective.baseUrl) && new URL(baseUrl).origin === new URL(effective.baseUrl).origin
+    )
+    // A saved secret belongs to its configured origin. Never silently send it
+    // to a newly typed host just because the token field was left blank.
+    const apiKey = providedApiKey || (mayReuseEffectiveKey ? effective.apiKey : undefined)
+    const endpoint = `${baseUrl}/models`
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), MODEL_DISCOVERY_TIMEOUT_MS)
+    const startedAt = performance.now()
+    try {
+      const headers: Record<string, string> = { accept: 'application/json' }
+      if (apiKey) headers.authorization = `Bearer ${apiKey}`
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers,
+        redirect: 'error',
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new Error(`LLM_MODELS_HTTP_${response.status}`)
+      }
+      const bodyText = await readResponseTextCapped(response, MAX_MODELS_RESPONSE_BYTES)
+      let parsed: { data?: Array<{ id?: unknown }> }
+      try {
+        parsed = JSON.parse(bodyText) as { data?: Array<{ id?: unknown }> }
+      } catch {
+        throw new Error('LLM_MODELS_INVALID_JSON_RESPONSE')
+      }
+      if (!Array.isArray(parsed.data)) throw new Error('LLM_MODELS_INVALID_RESPONSE')
+      const allModels = parsed.data
+        .map((item) => sanitizeModelId(item?.id))
+        .filter((model): model is string => Boolean(model))
+        .filter((model) => !apiKey || (model !== apiKey && (apiKey.length < 4 || !model.includes(apiKey))))
+      const uniqueModels = [...new Set(allModels)]
+      return {
+        models: uniqueModels.slice(0, MAX_DISCOVERED_MODELS),
+        latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        truncated: uniqueModels.length > MAX_DISCOVERED_MODELS
+      }
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('LLM_MODEL_DISCOVERY_TIMEOUT')
+      const message = error instanceof Error ? error.message : ''
+      if (/^LLM_MODELS_(?:HTTP_\d{3}|RESPONSE_TOO_LARGE|INVALID_JSON_RESPONSE|INVALID_RESPONSE)$/.test(message)) {
+        throw error
+      }
+      // Native networking errors can contain implementation details. Keep the
+      // IPC error stable and ensure an auth token can never be reflected back.
+      throw new Error('LLM_MODEL_DISCOVERY_FAILED')
+    } finally {
+      clearTimeout(timeout)
     }
   }
 

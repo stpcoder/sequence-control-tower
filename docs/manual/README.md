@@ -1,15 +1,17 @@
 # Sequence Control Tower 사용자 매뉴얼
 
+- [Log Workbench — 여러 폴더 검색, 판정, Recipe 저장](00-log-workbench.md)
+
 이 매뉴얼은 “버튼을 전부 설명하는 문서”가 아니라, 엔지니어가 새 Sequence를 기록하고 검토한 뒤 프로젝트 지식으로 남기는 가장 짧은 흐름을 안내합니다.
 
 ## 5분 시작 순서
 
 1. [Windows 설치 및 제거](windows-installation.md)에 따라 설치형 또는 portable 앱을 준비합니다.
-2. [Settings](05-settings.md)에서 사내 AI 연결과 적용 중인 사용량 제한을 확인합니다.
-3. [Sequence Inbox](02-smart-intake.md)에 `.seq`를 추가하고 알고 있는 만큼만 짧게 코멘트합니다.
-4. 분석 queue의 완료 또는 deterministic fallback 상태를 확인합니다.
-5. [Semantic Review](03-sequence-review.md)에서 결과를 승인해 Wiki에 저장하고 [Knowledge Cases](06-knowledge-cases.md)에서 Markdown으로 내보냅니다. [Project Tower](01-project-control-tower.md)와 [Evaluation Agent](07-agent-interaction.md)는 향후 연결할 평가 지식 UX를 보여줍니다.
-6. [Equipment Console](04-equipment-console.md)에서 원격 PC/실장기 모니터링 simulation을 확인합니다.
+2. [Log Workbench](00-log-workbench.md)에서 여러 `.log` 폴더를 열고 `Ctrl+F`로 대표 로그를 확인합니다.
+3. 결과를 판정하고 `이 분석 방법을 저장`한 뒤 전체 로그에 미리 적용합니다.
+4. [Settings](05-settings.md)에서 필요한 경우에만 사내 AI URL·token을 연결하고 모델을 확인합니다.
+5. [Sequence Inbox](02-smart-intake.md)와 [Semantic Review](03-sequence-review.md)에서 `.seq` 목적과 변경을 승인해 Wiki에 저장합니다.
+6. [Project Tower](01-project-control-tower.md), [Knowledge Cases](06-knowledge-cases.md), [Equipment Console](04-equipment-console.md)에서 프로젝트 지식과 모니터링 흐름을 확인합니다.
 
 ## 화면 표기 규칙
 

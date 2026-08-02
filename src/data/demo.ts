@@ -1,4 +1,4 @@
-export type AppPage = 'tower' | 'inbox' | 'review' | 'console' | 'knowledge' | 'settings'
+export type AppPage = 'workbench' | 'tower' | 'inbox' | 'review' | 'console' | 'knowledge' | 'settings'
 
 export type RunStatus = 'pass' | 'fail' | 'review' | 'running' | 'ready' | 'offline'
 
