@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AnalysisJobSnapshot,
   ArtifactImportOptions,
+  ArtifactLineWindowInput,
+  ArtifactSearchInput,
   LlmConfigInput,
+  LlmModelDiscoveryInput,
   SequenceIntelligenceApi,
   StartAnalysisInput,
   WikiEntryInput
@@ -20,6 +23,10 @@ const api: SequenceIntelligenceApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.artifactList),
     getTextPreview: (artifactId: string, maxChars?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactPreview, artifactId, maxChars),
+    search: (input: ArtifactSearchInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.artifactSearch, input),
+    getLineWindow: (input: ArtifactLineWindowInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.artifactLineWindow, input),
     findSimilar: (artifactId: string, limit?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactSimilar, artifactId, limit)
   },
@@ -35,7 +42,9 @@ const api: SequenceIntelligenceApi = {
   },
   settings: {
     getLlm: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGetLlm),
-    saveLlm: (input: LlmConfigInput) => ipcRenderer.invoke(IPC_CHANNELS.settingsSaveLlm, input)
+    saveLlm: (input: LlmConfigInput) => ipcRenderer.invoke(IPC_CHANNELS.settingsSaveLlm, input),
+    discoverModels: (input?: LlmModelDiscoveryInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.settingsDiscoverModels, input)
   },
   wiki: {
     save: (input: WikiEntryInput) => ipcRenderer.invoke(IPC_CHANNELS.wikiSave, input),

@@ -4,7 +4,7 @@
 
 # Sequence Control Tower
 
-**평가용 Git + Sequence Intelligence + 원격 실장기 Control Tower**를 하나의 Windows 데스크톱 경험으로 묶은 PoC입니다.
+**VS Code형 Log Workbench + 평가용 Git + Sequence Intelligence + 원격 실장기 Control Tower**를 하나의 Windows 데스크톱 경험으로 묶은 PoC입니다.
 
 [![CI](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml/badge.svg)](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/stpcoder/sequence-control-tower?display_name=tag&sort=semver)](https://github.com/stpcoder/sequence-control-tower/releases/latest)
@@ -20,13 +20,15 @@
 
 처음 설치하거나 portable 배포판을 사용하려면 [Windows 설치 및 제거 가이드](docs/manual/windows-installation.md)를 먼저 확인하세요.
 
-![Semantic Review — 평가 목적, 의미 기반 diff, 근거 기반 Finding](docs/images/manual-03-review.jpg)
+![Log Workbench — 여러 폴더 검색, 판정 근거, Recipe 후보](docs/images/manual-00-log-workbench.jpg)
 
 ## 왜 필요한가
 
 평가 현장에는 이미 수많은 `.seq`가 있지만, 대개 “왜 이 Sequence를 만들었는가”, “어느 파일에서 파생됐는가”, “그 결과 무엇을 알게 됐는가”가 파일 안에 남아 있지 않습니다. Excel은 알고 있는 사실을 사람이 다시 입력해야 하고, Git diff는 바뀐 줄은 보여줘도 평가 의도와 결과의 의미까지 설명하지 못합니다.
 
 Sequence Control Tower는 파일을 무리하게 해석하지 않습니다. 파일에서 확인된 사실, AI가 추론한 맥락, 엔지니어가 승인한 지식을 구분하고, 꼭 필요한 정보가 없을 때만 짧게 질문합니다.
+
+Log Workbench에서는 엔지니어가 평소처럼 `Ctrl+F`로 찾고 결과를 판정하면, 그 검색 이력을 검토 가능한 Recipe 후보로 바꿉니다. Python 코드를 매번 새로 만들거나 수천 개 로그를 Notepad++로 하나씩 열지 않고, 애매한 로그만 다시 확인하는 것이 목표입니다.
 
 ```text
 SEQ 수집 → 문법/조건 추출 → 유사 Sequence와 계보 탐색
@@ -46,6 +48,14 @@ SEQ 수집 → 문법/조건 추출 → 유사 Sequence와 계보 탐색
 
 Windows 앱에서 현재 실제로 연결된 기능은 다음과 같습니다.
 
+- 여러 Windows 폴더 동시 선택, 하위 `.log` 재귀 수집과 동일 SHA의 복수 파일 인스턴스 보존
+- 같은 경로를 다시 수집하면 최신 SHA만 작업 목록에 표시하되 과거 내용의 판정·근거는 새 내용에 승계하지 않음
+- VS Code형 읽기 전용 로그 뷰어, 240줄 지연 로딩과 절대 줄 번호 이동
+- 현재/전체 로그의 literal·정규식·대소문자·단어 단위 로컬 스트리밍 검색
+- `Ctrl+F`, `Ctrl+Shift+F`, `Enter`, `Shift+Enter`, `Escape` 단축키
+- 검색 이력과 판정 근거 분리, 엔지니어 확인 후에만 후보 Recipe 저장
+- PASS, TEST/TRAINING FAIL, SYSTEM HALT/REBOOT, INCOMPLETE, UNKNOWN, EXCLUDED 판정
+- 저장된 Recipe와 새 후보의 동일 우선순위·충돌 판정, 기존 엔지니어 결과 보호, 예외 보류(기본 LLM 호출 0회)
 - 파일·폴더 선택과 SHA-256 content-addressed 원본 보존
 - 선택 사항인 짧은 사용자 코멘트를 포함한 분석 작업 등록과 상태 표시
 - 로컬 TypeScript 엔진의 SEQ 문법 파싱, Sequence DNA·fingerprint 추출과 유사 후보 계산
@@ -59,15 +69,21 @@ Windows 앱에서 현재 실제로 연결된 기능은 다음과 같습니다.
 
 Project Tower와 Evaluation Agent 대화는 제품 방향을 검증하는 **sample data 기반 UX demo**입니다. Inbox·Semantic Review·Knowledge Cases는 실제 데이터가 있으면 그 결과를 우선 표시하고, 데이터가 없거나 분석 전이면 sample fallback을 보여줍니다. Equipment Console도 실제 장비가 아닌 **모니터링 simulation**입니다. 실제 Serial 제어, 원격 PC 연결, 전원·Flash·중단 기능은 이번 PoC 범위에 포함하지 않습니다.
 
-### 1. Project Control Tower
+### 1. Log Workbench
+
+여러 폴더의 `.log`를 Explorer에서 열고, 현재 파일 또는 전체 파일을 검색합니다. 결과 판정 후 `이 분석 방법을 저장`을 승인해야 검색 이력이 판정 근거로 승격됩니다. 원문·snippet·절대 경로는 Recipe 저장소에 넣지 않으며, 전체 적용은 사내 LLM이 아니라 로컬 검색 엔진으로 실행합니다.
+
+사용법과 단축키는 [Log Workbench 매뉴얼](docs/manual/00-log-workbench.md)을 참고하세요.
+
+### 2. Project Control Tower
 
 고객사별 Campaign, Sequence revision, Run, Finding을 한 흐름으로 보는 목표 UX입니다. 현재 Project Tower는 sample project를 사용하며 실제로 가져온 파일의 계보를 자동 반영하는 단계는 아직 포함하지 않습니다.
 
-### 2. Smart Intake
+### 3. Smart Intake
 
 SEQ 파일 또는 폴더를 선택하고 “고온 fail 때문에 clk를 나눈 버전”처럼 짧은 메모를 남기면 원본을 보존하고 분석 queue에 등록합니다. 완료 상태와 LLM/fallback 여부, 추출 DNA, 유사 부모 후보, 필요한 질문을 같은 Inbox에서 확인할 수 있습니다.
 
-### 3. Sequence Review
+### 4. Sequence Review
 
 화면의 중심을 원시 line diff가 아니라 아래 네 가지로 구성했습니다. 실제 분석 항목을 선택하면 그 결과를 표시하며, 승인 버튼은 로컬 Knowledge Wiki 저장 API에 연결됩니다. 실제 데이터가 없을 때만 sample interaction을 보여줍니다.
 
@@ -78,7 +94,7 @@ SEQ 파일 또는 폴더를 선택하고 “고온 fail 때문에 clk를 나눈 
 
 AI 설명에는 추출 근거와 변경 항목을 연결하고, 모르는 목적은 `Unknown`으로 남깁니다. 사용자가 승인하기 전에는 `Verified` 지식으로 저장하지 않습니다.
 
-### 4. Equipment Console
+### 5. Equipment Console
 
 원격 데스크톱을 네 개씩 열지 않고 PC·slot별 핵심 상태를 요약하는 목표 UX입니다.
 
@@ -159,7 +175,9 @@ Base URL, model, API key는 Settings에서 저장할 수 있습니다. 운영 PC
 
 API key는 Electron main process에서만 다루며 renderer로 반환하지 않습니다. OS 암호화 저장소를 사용할 수 없으면 평문으로 저장하지 않고 해당 실행 session에서만 유지합니다.
 
-Settings의 상태 새로고침은 endpoint에 시험 요청을 보내지 않고 이 PC에 적용된 설정을 다시 읽습니다. 실제 연결은 Sequence 분석 요청에서 확인되며, 실패하면 로컬 deterministic summary로 완료됩니다. 인증서, proxy, endpoint 정책은 사내 보안 기준을 따르세요.
+Settings 화면 진입 시에는 endpoint 요청 없이 이 PC에 적용된 설정만 읽습니다. 실제 분석 연결이 실패하면 로컬 deterministic summary로 완료되며, 인증서·proxy·endpoint 정책은 사내 보안 기준을 따르세요.
+
+`연결 확인 · 모델 찾기`를 사용하면 저장 전에 Base URL과 token으로 `/models`를 정확히 한 번 조회합니다. 재시도하지 않고 10초에 중단하며, 확인된 모델을 자동 선택하거나 기존 수동 모델명을 유지할 수 있습니다.
 
 ## 데이터와 보안 원칙
 
@@ -178,8 +196,8 @@ Settings의 상태 새로고침은 endpoint에 시험 요청을 보내지 않고
 - `Windows Release`: `v*` tag push 또는 Actions의 수동 실행으로 NSIS 설치형, portable 실행 파일, ZIP, SHA-256 목록을 게시합니다.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 수동 배포는 먼저 원격에 tag를 push한 뒤 GitHub의 **Actions → Windows Release → Run workflow**에서 같은 tag를 입력합니다. Workflow는 branch가 아니라 입력한 tag commit을 checkout해 빌드합니다. 고정된 asset 이름을 사용하므로 README의 최신 다운로드 버튼은 새 버전에서도 그대로 동작합니다.

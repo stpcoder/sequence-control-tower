@@ -8,9 +8,14 @@ import {
   type SaveDialogOptions
 } from 'electron'
 import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type {
   ArtifactImportOptions,
+  ArtifactLineWindowInput,
+  ArtifactSearchInput,
   LlmConfigInput,
+  LlmModelDiscoveryInput,
   StartAnalysisInput,
   WikiEntryInput
 } from '../shared/contracts'
@@ -27,10 +32,26 @@ interface Services {
   wiki: WikiService
 }
 
+const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
+
+function isExactPackagedRenderer(frameUrl: string): boolean {
+  try {
+    const actual = new URL(frameUrl)
+    const expected = new URL(packagedRendererUrl)
+    // Hash navigation remains inside the same immutable renderer document.
+    actual.hash = ''
+    return actual.href === expected.href
+  } catch {
+    return false
+  }
+}
+
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
   const frameUrl = event.senderFrame?.url
   if (!frameUrl) return false
-  if (app.isPackaged) return frameUrl.startsWith('file://')
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) return false
+  if (app.isPackaged) return isExactPackagedRenderer(frameUrl)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (!rendererUrl) return frameUrl.startsWith('file://')
   try {
@@ -85,21 +106,27 @@ export function registerIpc(services: Services): void {
     const options = (rawOptions ?? {}) as ArtifactImportOptions
     const owner = BrowserWindow.fromWebContents(event.sender)
     const pickerOptions: OpenDialogOptions = {
-      title: 'Sequence 폴더 가져오기',
-      properties: ['openDirectory']
+      title: '분석할 로그 폴더 선택',
+      properties: ['openDirectory', 'multiSelections']
     }
     const result = owner
       ? await dialog.showOpenDialog(owner, pickerOptions)
       : await dialog.showOpenDialog(pickerOptions)
-    if (result.canceled || !result.filePaths[0]) {
+    if (result.canceled || !result.filePaths.length) {
       return { cancelled: true, artifacts: [], failures: [], skippedCount: 0 }
     }
-    return services.artifacts.importFolder(result.filePaths[0], options)
+    return services.artifacts.importFolders(result.filePaths, options)
   })
 
   handle(IPC_CHANNELS.artifactList, () => services.artifacts.list())
   handle(IPC_CHANNELS.artifactPreview, (_event, id, maxChars) =>
     services.artifacts.preview(String(id ?? ''), Number(maxChars) || undefined)
+  )
+  handle(IPC_CHANNELS.artifactSearch, (_event, input) =>
+    services.artifacts.search(input as ArtifactSearchInput)
+  )
+  handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
+    services.artifacts.lineWindow(input as ArtifactLineWindowInput)
   )
   handle(IPC_CHANNELS.artifactSimilar, (_event, id, limit) =>
     services.artifacts.findSimilar(String(id ?? ''), Number(limit) || undefined)
@@ -114,6 +141,9 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())
   handle(IPC_CHANNELS.settingsSaveLlm, (_event, input) =>
     services.llmConfig.save(input as LlmConfigInput)
+  )
+  handle(IPC_CHANNELS.settingsDiscoverModels, (_event, input) =>
+    services.llmConfig.discoverModels((input ?? {}) as LlmModelDiscoveryInput)
   )
 
   handle(IPC_CHANNELS.wikiSave, (_event, input) => services.wiki.save(input as WikiEntryInput))

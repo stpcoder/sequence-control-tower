@@ -11,6 +11,7 @@ import { KnowledgeView } from './views/KnowledgeView'
 import { ReviewView } from './views/ReviewView'
 import { SettingsView } from './views/SettingsView'
 import { TowerView } from './views/TowerView'
+import { WorkbenchView } from './views/WorkbenchView'
 import type {
   AnalysisJobSnapshot,
   AnalysisResult,
@@ -27,6 +28,7 @@ import {
 } from './state/workspace'
 
 const pages: Record<AppPage, { eyebrow: string; title: string }> = {
+  workbench: { eyebrow: 'LOCAL LOG ANALYSIS', title: 'Log Workbench' },
   tower: { eyebrow: 'PROJECT / QUALCOMM PRODUCT A', title: 'Project Tower' },
   inbox: { eyebrow: 'KNOWLEDGE INTAKE', title: 'Sequence Inbox' },
   review: { eyebrow: 'SEQ-1051 ↔ SEQ-1054', title: 'Semantic Review' },
@@ -37,7 +39,7 @@ const pages: Record<AppPage, { eyebrow: string; title: string }> = {
 
 function readInitialPage(): AppPage {
   const value = new URLSearchParams(window.location.search).get('screen')
-  return value && value in pages ? value as AppPage : 'tower'
+  return value && value in pages ? value as AppPage : 'workbench'
 }
 
 export default function App() {
@@ -220,6 +222,7 @@ export default function App() {
 
   const content = (() => {
     switch (activePage) {
+      case 'workbench': return <WorkbenchView onNotify={notify} />
       case 'tower': return <TowerView onReview={() => openReview()} onInbox={() => navigate('inbox')} />
       case 'inbox': return <InboxView
         workspaceItems={workspaceArtifacts}
@@ -248,10 +251,10 @@ export default function App() {
   })()
 
   return (
-    <div className={`app-shell ${agentOpen ? 'agent-is-open' : ''}`}>
+    <div className={`app-shell ${agentOpen ? 'agent-is-open' : ''} ${activePage === 'workbench' ? 'workbench-is-open' : ''}`}>
       <Navigation active={activePage} onChange={navigate} onAgentOpen={() => setAgentOpen(true)} />
       <main className="main-shell">
-        <TopBar title={pages[activePage].title} eyebrow={pages[activePage].eyebrow} onUpload={importSequence} />
+        {activePage === 'workbench' ? null : <TopBar title={pages[activePage].title} eyebrow={pages[activePage].eyebrow} onUpload={importSequence} />}
         <div className="content-shell">{content}</div>
       </main>
       <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} onOpen={() => setAgentOpen(true)} />
