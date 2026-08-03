@@ -36,7 +36,7 @@
 
 .analysis-app .nav-item span {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 620;
   line-height: 1;
   letter-spacing: -.02em;
@@ -53,6 +53,10 @@
   --data-line-soft: #272c34;
   --data-muted: #a6adb8;
   --data-dim: #777f8c;
+  --data-type-body: 13.5px;
+  --data-type-secondary: 12px;
+  --data-type-heading: 20px;
+  --data-type-section: 16px;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -62,7 +66,7 @@
   color: #eef0f3;
   background: #121419;
   font-family: Pretendard, 'Segoe UI', sans-serif;
-  font-size: 14px;
+  font-size: var(--data-type-body);
 }
 
 .data-view button,
@@ -105,14 +109,14 @@
 
 .data-view-header h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--data-type-heading);
   font-weight: 690;
   letter-spacing: -.035em;
 }
 
 .data-view-header span {
   color: var(--data-dim);
-  font-size: 14px;
+  font-size: var(--data-type-secondary);
 }
 
 .data-actions {
@@ -168,7 +172,7 @@
   outline: 0;
   color: #edf0f4;
   background: transparent;
-  font-size: 14px;
+  font-size: var(--data-type-body);
 }
 
 .data-filter-bar select {
@@ -232,7 +236,7 @@
   border-bottom: 1px solid var(--data-line-soft);
   overflow: hidden;
   color: #b8bec8;
-  font-size: 14px;
+  font-size: var(--data-type-body);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -328,7 +332,7 @@
 .row-note,
 .pivot-table th small {
   color: #87909d;
-  font-size: 14px;
+  font-size: var(--data-type-secondary);
   font-weight: 520;
 }
 
@@ -420,11 +424,11 @@
 
 .data-empty strong {
   color: #c6cbd3;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .data-empty span {
-  font-size: 14px;
+  font-size: var(--data-type-secondary);
 }
 
 .patterns-view {
@@ -453,14 +457,14 @@
 
 .pattern-section-heading h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--data-type-section);
   font-weight: 670;
   letter-spacing: -.025em;
 }
 
 .pattern-section-heading > span {
   color: var(--data-dim);
-  font-size: 14px;
+  font-size: var(--data-type-secondary);
 }
 
 .pattern-section-heading label {

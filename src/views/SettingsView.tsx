@@ -112,10 +112,10 @@ export function SettingsView() {
           <div className="settings-title"><h2>LLM 연결</h2><p>OpenAI-compatible 사내 API를 연결합니다. API key는 이 PC에만 저장됩니다.</p></div>
 
           <div className="settings-card">
-            <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>/v1 endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://internal-vllm.company.local/v1" /></div>
+            <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>/v1 endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://llm-gateway.example/v1" /></div>
             <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>{models.length ? `${models.length}개 확인됨` : '모델 ID'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="예: qwen3-32b" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
             <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · key 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.apiKeyConfigured ? '••••••••••••••••' : '선택 사항'} /><button type="button" onClick={() => setApiKey('')}>지우기</button></div></div>
-            <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured ? `연결됨 · ${summary.source}` : '로컬 분석 사용 중'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={15} /> {discovering ? '연결 중' : '모델 확인'}</button></div>
+            <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured ? `연결됨 · ${summary.source}` : '로컬 규칙 엔진 사용 중'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={15} /> {discovering ? '연결 중' : '모델 목록 확인'}</button></div>
           </div>
 
           <div className="settings-two-column">
@@ -129,9 +129,9 @@ export function SettingsView() {
             <div className="settings-card compact-card">
               <div className="settings-section-title"><strong>로컬 분석</strong></div>
               <ul className="offline-list">
-                <li><Check size={15} /> 문법 파싱 · fingerprint</li>
-                <li><Check size={15} /> 유사도 · 부모 후보</li>
-                <li><Check size={15} /> SHA-256 · diff 후보</li>
+                <li><Check size={15} /> 로그 검색 · 정규식</li>
+                <li><Check size={15} /> 판정 규칙 · 근거 줄</li>
+                <li><Check size={15} /> 결과표 · 패턴 집계</li>
               </ul>
               <p className="settings-note">LLM이 느리거나 제한되어도 로그 분석은 계속됩니다.</p>
             </div>
