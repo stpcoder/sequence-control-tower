@@ -156,4 +156,30 @@ describe('LLM model discovery', () => {
     await rejection
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it.each([401, 403, 404, 429, 503])('returns a stable HTTP %s error from /models without retrying', async (status) => {
+    const config = await service()
+    const fetchMock = vi.fn(async () => new Response('{"detail":"private gateway detail"}', { status }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(config.discoverModels({
+      baseUrl: 'http://internal-vllm.example/v1',
+      apiKey: 'never-reflect-this-token'
+    })).rejects.toThrow(`LLM_MODELS_HTTP_${status}`)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['malformed JSON', 'not-json', 'LLM_MODELS_INVALID_JSON_RESPONSE'],
+    ['missing data array', '{"object":"list"}', 'LLM_MODELS_INVALID_RESPONSE']
+  ])('rejects %s from /models without retrying', async (_label, body, errorCode) => {
+    const config = await service()
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(config.discoverModels({
+      baseUrl: 'http://internal-vllm.example/v1'
+    })).rejects.toThrow(errorCode)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

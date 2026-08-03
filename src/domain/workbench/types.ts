@@ -1,5 +1,6 @@
 export type ResultLabel =
   | "PASS"
+  | "DIAG_FAIL"
   | "TEST_FAIL"
   | "TRAINING_FAIL"
   | "SYSTEM_HALT"
@@ -10,6 +11,7 @@ export type ResultLabel =
 
 export const RESULT_LABELS: readonly ResultLabel[] = [
   "PASS",
+  "DIAG_FAIL",
   "TEST_FAIL",
   "TRAINING_FAIL",
   "SYSTEM_HALT",
@@ -77,6 +79,8 @@ export interface RuleClause {
     target: SearchTarget;
   };
   sourceObservationId: string;
+  /** Explicit engineer-authored ordering; never inferred from search history. */
+  order?: { afterClauseId: string };
 }
 
 export interface RecipeRule {
@@ -114,7 +118,8 @@ export type EvaluationExceptionCode =
   | "INVALID_PATTERN"
   | "LOW_CONFIDENCE"
   | "MISSING_EVIDENCE"
-  | "EVIDENCE_ERROR";
+  | "EVIDENCE_ERROR"
+  | "INVALID_RULE";
 
 export interface EvaluationException {
   code: EvaluationExceptionCode;
@@ -126,7 +131,19 @@ export interface ClauseEvaluation {
   clauseId: string;
   satisfied: boolean;
   occurrenceCount: number;
+  firstOccurrence?: EvidenceOccurrence;
+  lastOccurrence?: EvidenceOccurrence;
+  orderSatisfied?: boolean;
   error?: string;
+}
+
+export interface EvidenceOccurrence {
+  target: SearchTarget;
+  lineNumber?: number;
+  columnStart: number;
+  columnEnd: number;
+  excerpt?: string;
+  excerptTruncated?: boolean;
 }
 
 export interface MatchedRuleEvaluation {
@@ -147,6 +164,8 @@ export interface DocumentEvaluation {
 export interface PrecomputedClauseEvidence {
   clauseId: string;
   occurrenceCount?: number;
+  firstOccurrence?: EvidenceOccurrence;
+  lastOccurrence?: EvidenceOccurrence;
   error?: string;
 }
 

@@ -36,6 +36,7 @@ describe("teach-by-search recipe engine", () => {
 
     const selected = selectDecisionEvidence(observations, [observations[0].id]);
     expect(selected[0].role).toBe("decision_evidence");
+    expect(selectDecisionEvidence(selected, [])[0].role).toBe("search_history");
   });
 
   it("requires an engineer decision and compiles only selected decision evidence", () => {

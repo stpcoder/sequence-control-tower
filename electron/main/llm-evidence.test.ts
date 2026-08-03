@@ -51,6 +51,26 @@ describe('minimal LLM evidence', () => {
     expect(redacted).toContain('CLK=10660 VDD=0.91')
   })
 
+  it('redacts bearer credentials, JWTs, and absolute paths on Windows, UNC, and POSIX hosts', () => {
+    const redacted = redactSensitiveText([
+      'Authorization: Bearer top.secret-token',
+      'jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signature123',
+      'source="C:\\Program Files\\Customer A\\run.log"',
+      'share=\\\\lab-server\\customer-a\\raw\\run.log',
+      'posix=/opt/customer-a/private/run.log',
+      'CLK=10660'
+    ].join(' '), 1_000)
+
+    expect(redacted).not.toContain('top.secret-token')
+    expect(redacted).not.toContain('eyJhbGciOiJIUzI1NiJ9')
+    expect(redacted).not.toContain('Program Files')
+    expect(redacted).not.toContain('lab-server')
+    expect(redacted).not.toContain('/opt/customer-a')
+    expect(redacted).toContain('Bearer <SECRET>')
+    expect(redacted).toContain('<ABS_PATH>')
+    expect(redacted).toContain('CLK=10660')
+  })
+
   it('sends only structured facts, changes, counts, and short provenance', () => {
     const evidence = buildMinimalLlmEvidence({
       request,
@@ -96,5 +116,19 @@ describe('minimal LLM evidence', () => {
     expect(prompt).not.toContain('R58M1234567890')
     expect(prompt).not.toContain('0x1234567890abcdef')
     expect(prompt.length).toBeLessThan(8_000)
+  })
+
+  it('never includes an absolute source path even if malformed artifact metadata supplies one', () => {
+    const evidence = buildMinimalLlmEvidence({
+      request,
+      fileName: 'D:\\Customer Secret\\Project Q\\boundary.seq',
+      fingerprint,
+      changes: []
+    })
+    const serialized = JSON.stringify(evidence)
+
+    expect(serialized).not.toContain('Customer Secret')
+    expect(serialized).not.toContain('Project Q')
+    expect(evidence.file.name).toBe('<ABS_PATH>')
   })
 })

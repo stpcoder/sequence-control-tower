@@ -1,0 +1,4 @@
+@PASS stale_previous_run
+BOOT_COMPLETE
+STRESSAPP PASS cycles=20
+HIDAG START mode=DIAG

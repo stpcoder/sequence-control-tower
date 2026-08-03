@@ -2,8 +2,9 @@ import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
-import { buildMacMenuTemplate } from './app-menu'
+import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from './app-menu'
 import { ArtifactService } from './artifact-service'
+import { EvaluationStore } from './evaluation-store'
 import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
@@ -65,6 +66,14 @@ function createWindow(): BrowserWindow {
     if (!allowedNavigation(target)) event.preventDefault()
   })
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  if (process.platform !== 'darwin') {
+    window.webContents.on('before-input-event', (event, input) => {
+      const command = rendererCommandForDesktopShortcut(input)
+      if (!command) return
+      event.preventDefault()
+      sendRendererCommand(command)
+    })
+  }
 
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -111,6 +120,7 @@ function installApplicationMenu(): void {
 async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
   const artifacts = new ArtifactService(dataRoot)
+  const evaluations = new EvaluationStore(dataRoot)
   const llmConfig = new LlmConfigService(dataRoot)
   const llm = new OpenAiCompatibleClient(llmConfig)
   const wiki = new WikiService(dataRoot, artifacts)
@@ -121,11 +131,12 @@ async function bootstrap(): Promise<void> {
   })
   await Promise.all([
     artifacts.initialize(),
+    evaluations.initialize(),
     llmConfig.initialize(),
     wiki.initialize(),
     analysis.initialize()
   ])
-  registerIpc({ artifacts, analysis, llmConfig, wiki })
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)

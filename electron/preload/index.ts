@@ -1,9 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AnalysisJobSnapshot,
+  ArtifactEvidenceInput,
   ArtifactImportOptions,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
+  EvaluationApproveMetadataInput,
+  EvaluationProjectRequest,
+  EvaluationSaveBatchInput,
+  EvaluationSaveDecisionInput,
+  EvaluationSaveRecipeInput,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   RendererCommand,
@@ -34,6 +40,8 @@ const api: SequenceIntelligenceApi = {
       ipcRenderer.invoke(IPC_CHANNELS.artifactPreview, artifactId, maxChars),
     search: (input: ArtifactSearchInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactSearch, input),
+    inspectEvidence: (input: ArtifactEvidenceInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.artifactInspectEvidence, input),
     getLineWindow: (input: ArtifactLineWindowInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactLineWindow, input),
     findSimilar: (artifactId: string, limit?: number) =>
@@ -59,6 +67,14 @@ const api: SequenceIntelligenceApi = {
     save: (input: WikiEntryInput) => ipcRenderer.invoke(IPC_CHANNELS.wikiSave, input),
     list: () => ipcRenderer.invoke(IPC_CHANNELS.wikiList),
     export: (entryId: string) => ipcRenderer.invoke(IPC_CHANNELS.wikiExport, entryId)
+  },
+  evaluations: {
+    bootstrap: (input: EvaluationProjectRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationBootstrap, input),
+    getSnapshot: (input: EvaluationProjectRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationGetSnapshot, input),
+    saveDecision: (input: EvaluationSaveDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveDecision, input),
+    saveRecipe: (input: EvaluationSaveRecipeInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipe, input),
+    saveBatch: (input: EvaluationSaveBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveBatch, input),
+    approveMetadata: (input: EvaluationApproveMetadataInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationApproveMetadata, input)
   }
 }
 

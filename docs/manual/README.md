@@ -1,47 +1,32 @@
-# Sequence Control Tower 사용자 매뉴얼
+# 사용자 매뉴얼
 
-- [Log Workbench — 여러 폴더 검색, 판정, Recipe 저장](00-log-workbench.md)
+- [Log Workbench: 검색 → 판정 → 규칙 → 예외 → 결과표 → 패턴](00-log-workbench.md)
 - [Windows 설치 및 제거](windows-installation.md)
 - [macOS 설치](macos-installation.md)
+- [사내 LLM 설정](05-settings.md)
 
-이 매뉴얼은 “버튼을 전부 설명하는 문서”가 아니라, 엔지니어가 새 Sequence를 기록하고 검토한 뒤 프로젝트 지식으로 남기는 가장 짧은 흐름을 안내합니다.
+## 5분 시작
 
-## 5분 시작 순서
+1. 운영체제 가이드에 따라 앱을 설치합니다.
+2. `로그`에서 여러 `.log` 폴더를 엽니다.
+3. 대표 로그를 `Ctrl+F`로 확인하고 결과를 선택합니다.
+4. 판정에 실제로 사용한 검색만 선택해 규칙을 저장합니다.
+5. 전체 로그에 적용한 뒤 예외만 원문에서 다시 봅니다.
+6. `결과표`를 CSV/TSV로 전달하고 `패턴`에서 조건별 이상을 drill-down합니다.
 
-1. 운영체제에 따라 [Windows 설치 및 제거](windows-installation.md) 또는 [macOS 설치](macos-installation.md) 가이드로 앱을 준비합니다.
-2. [Log Workbench](00-log-workbench.md)에서 여러 `.log` 폴더를 열고 `Ctrl+F`로 대표 로그를 확인합니다.
-3. 결과를 판정하고 `이 분석 방법을 저장`한 뒤 전체 로그에 미리 적용합니다.
-4. [Settings](05-settings.md)에서 필요한 경우에만 사내 AI URL·token을 연결하고 모델을 확인합니다.
-5. [Sequence Inbox](02-smart-intake.md)와 [Semantic Review](03-sequence-review.md)에서 `.seq` 목적과 변경을 승인해 Wiki에 저장합니다.
-6. [Project Tower](01-project-control-tower.md), [Knowledge Cases](06-knowledge-cases.md), [Equipment Console](04-equipment-console.md)에서 프로젝트 지식과 모니터링 흐름을 확인합니다.
+화면은 `로그 / 결과표 / 패턴 / 설정` 네 개만 사용합니다. 이전 PoC의 Sequence Inbox, Semantic Review, Project Tower, Equipment Console은 현재 주 제품 흐름에서 제거됐습니다.
 
-## 화면 표기 규칙
+## 데이터 상태
 
-매뉴얼 스크린샷의 빨간 박스와 번호는 “먼저 확인하거나 조작할 곳”만 표시합니다. 장식 요소와 단순 상태 아이콘에는 번호를 붙이지 않습니다.
-
-| 표기 | 의미 |
-|---|---|
-| 빨간 실선 박스 | 사용자가 클릭하거나 입력해야 하는 영역 |
-| 빨간 점선 박스 | 결과를 반드시 확인해야 하는 영역 |
-| `① ② ③` | 권장 조작 순서 |
-| 회색 `참고` | 선택 사항 또는 고급 정보 |
-
-지식 상태는 다음 의미로 사용합니다.
-
-| 상태 | 의미 | 사용자의 행동 |
-|---|---|---|
-| Extracted | 파일에서 직접 확인한 사실 | 원문 근거가 맞는지 확인 |
-| Inferred | Agent가 맥락으로 추론한 내용 | 승인·수정·보류 중 선택 |
-| Verified | 엔지니어가 확인한 지식 | 이후 유사 Sequence에 재사용 |
-| Unknown | 현재 자료로 알 수 없음 | 필요할 때만 질문에 답변 |
-
-## PoC 범위
-
-현재 PoC는 파일/폴더 import, SHA-256 원본 보존, 로컬 SEQ 분석, 최소 evidence redaction, 사내 LLM queue와 fallback, 실제 Inbox·Semantic Review, 승인형 Wiki 저장과 Markdown 내보내기까지 Windows/macOS UI에 연결합니다. 이 화면들은 실제 데이터가 없을 때만 sample fallback을 표시합니다. Project Tower와 Evaluation Agent 대화는 sample data 기반 UX demo이고, Equipment Console도 실제 Serial 제어가 아닌 **모니터링 UX simulation**입니다. 실제 장비 제어에는 별도의 Windows Equipment Agent와 안전 정책이 필요합니다.
+- `후보`: 파일명·로그 또는 로컬 규칙이 만든 값. 엔지니어가 아직 확정하지 않음
+- `승인`: 엔지니어가 해당 artifact SHA에 대해 확인한 metadata 값
+- `확정`: 엔지니어가 저장한 결과 판정
+- `검토 필요`: 규칙 결과, 충돌, 근거 누락, 새 SHA처럼 사람이 확인해야 하는 상태
+- `UNKNOWN`: 현재 근거와 규칙으로 안전하게 판정할 수 없음
 
 ## 문제 해결
 
-- AI 응답이 늦어도 화면을 닫거나 파일을 다시 올릴 필요가 없습니다. 로컬 분석 결과는 먼저 저장되고 AI 작업은 queue 상태로 남아야 합니다.
-- 같은 파일을 다시 올렸다면 SHA-256이 동일한 원본은 중복 저장하지 않고 기존 기록으로 안내합니다.
-- 추론이 틀렸다면 단순히 삭제하기보다 수정 또는 보류 사유를 남겨야 이후 제안이 개선됩니다.
-- 원본 SEQ, 로그, API key가 포함된 화면은 외부 공유용 스크린샷에 노출하지 마세요.
+- LLM이 느리거나 끊겨도 폴더 import·검색·로컬 판정은 계속 사용할 수 있습니다.
+- 같은 내용을 여러 폴더에서 가져오면 원문은 중복 저장하지 않지만 결과표의 실제 파일 행은 유지합니다.
+- 결과가 예상과 다르면 규칙을 바로 공통화하지 말고 예외 이유와 근거 줄을 확인합니다.
+- 회사 로그, API key, 장비 인증 정보가 포함된 화면을 외부에 공유하지 마세요.

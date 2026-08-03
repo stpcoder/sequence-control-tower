@@ -58,7 +58,21 @@ describe("precomputed recipe evaluation", () => {
     const fromText = evaluateDocument({ id: "log-1", text: "stressapp started\nsystem stopped" }, [halt]);
     const fromCounts = evaluatePrecomputedEvidence(evidence("log-1", [halt]), [halt]);
 
-    expect(fromCounts).toEqual(fromText);
+    expect(fromCounts).toMatchObject({
+      sourceId: fromText.sourceId,
+      result: fromText.result,
+      selectedRuleId: fromText.selectedRuleId,
+      matchedRules: [{
+        ruleId: "halt",
+        label: "SYSTEM_HALT",
+        clauseEvaluations: fromText.matchedRules[0].clauseEvaluations.map(({ clauseId, satisfied, occurrenceCount }) => ({
+          clauseId,
+          satisfied,
+          occurrenceCount,
+        })),
+      }],
+      exceptions: fromText.exceptions,
+    });
     expect(fromCounts.result).toBe("SYSTEM_HALT");
   });
 

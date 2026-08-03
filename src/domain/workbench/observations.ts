@@ -84,7 +84,8 @@ export function selectDecisionEvidence(
   observationIds: readonly string[],
 ): SearchObservation[] {
   const selected = new Set(observationIds);
-  return observations.map((observation) =>
-    selected.has(observation.id) ? { ...observation, role: "decision_evidence" } : observation,
-  );
+  return observations.map((observation) => ({
+    ...observation,
+    role: selected.has(observation.id) ? "decision_evidence" : "search_history",
+  }));
 }

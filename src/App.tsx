@@ -1,95 +1,225 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Check, Info, X } from 'lucide-react'
-import { AgentPanel } from './components/AgentPanel'
-import { GuideOverlay } from './components/GuideOverlay'
 import { Navigation } from './components/Navigation'
-import { TopBar } from './components/TopBar'
-import type { AppPage } from './data/demo'
-import { ConsoleView } from './views/ConsoleView'
-import { InboxView } from './views/InboxView'
-import { KnowledgeView } from './views/KnowledgeView'
-import { ReviewView } from './views/ReviewView'
-import { SettingsView } from './views/SettingsView'
-import { TowerView } from './views/TowerView'
-import { WorkbenchView } from './views/WorkbenchView'
-import type {
-  AnalysisJobSnapshot,
-  AnalysisResult,
-  ArtifactRecord,
-  WikiEntryInput,
-  WikiEntryRecord,
-  WikiExportResult,
-} from '../electron/shared/contracts'
+import { isAppPage, type AppPage } from './state/appNavigation'
 import {
-  mergeArtifacts,
-  type SavedKnowledgeDetail,
-  type WorkspaceArtifact,
-  upsertWikiEntries,
-} from './state/workspace'
+  projectLogRecords,
+  type LogResultRecord,
+  type MetadataApprovalsBySource,
+  type PatternAxis,
+} from './state/logRecords'
+import { PatternsView } from './views/PatternsView'
+import { ResultsView } from './views/ResultsView'
+import { SettingsView } from './views/SettingsView'
+import {
+  artifactFiles,
+  DEMO_LOGS,
+  dedupeWorkbenchFiles,
+  WorkbenchView,
+  type WorkbenchDecision,
+  type WorkbenchFile,
+  type WorkbenchRecipeDraft,
+  type PrecomputedBatchResolution,
+} from './views/WorkbenchView'
+import './data-views.css'
+import type {
+  EvaluationBatchExceptionCode,
+  EvaluationBatchOutcomeInput,
+  EvaluationProjectSnapshot,
+  EvaluationRecipeRule,
+} from '../electron/shared/contracts'
+import type { RecipeRule } from './domain/workbench'
 
-const pages: Record<AppPage, { eyebrow: string; title: string }> = {
-  workbench: { eyebrow: 'LOCAL LOG ANALYSIS', title: 'Log Workbench' },
-  tower: { eyebrow: 'PROJECT / QUALCOMM PRODUCT A', title: 'Project Tower' },
-  inbox: { eyebrow: 'KNOWLEDGE INTAKE', title: 'Sequence Inbox' },
-  review: { eyebrow: 'SEQ-1051 ↔ SEQ-1054', title: 'Semantic Review' },
-  console: { eyebrow: 'EQUIPMENT-PC-03 / 4-SLOT', title: 'Equipment Console' },
-  knowledge: { eyebrow: 'VERIFIED MEMORY', title: 'Knowledge Cases' },
-  settings: { eyebrow: 'LOCAL WORKSPACE', title: 'Settings' },
+const PROJECT_ID = 'log-workbench'
+
+export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null): WorkbenchFile[] {
+  if (!snapshot) return [...files]
+  const decisions = new Map(snapshot.decisions.map((decision) => [
+    `${decision.source.sourceId}\u0000${decision.source.artifactId}`,
+    decision,
+  ]))
+  const outcomes = new Map<string, EvaluationProjectSnapshot['batches'][number]['outcomes'][number]>()
+  snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
+    outcomes.set(`${outcome.source.sourceId}\u0000${outcome.source.artifactId}`, outcome)
+  }))
+  return files.map((file) => {
+    if (!file.artifactId) return file
+    const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
+    const key = `${file.id}\u0000${file.artifactId}`
+    const decision = decisions.get(key)
+    const outcome = outcomes.get(key)
+    return {
+      ...base,
+      ...(decision ? { decision: decision.result } : {}),
+      ...(outcome ? {
+        ruleResult: outcome.result,
+        ruleNeedsReview: Boolean(outcome.exceptionCode) || outcome.result === 'UNKNOWN',
+      } : {}),
+    }
+  })
+}
+
+export function projectMetadataApprovals(
+  files: readonly WorkbenchFile[],
+  snapshot: EvaluationProjectSnapshot | null,
+): MetadataApprovalsBySource {
+  if (!snapshot) return {}
+  const exactArtifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
+  const latest = new Map<string, EvaluationProjectSnapshot['metadataApprovals'][number]>()
+  snapshot.metadataApprovals.forEach((approval) => {
+    if (exactArtifacts.get(approval.source.sourceId) !== approval.source.artifactId) return
+    latest.set(`${approval.source.sourceId}\u0000${approval.fieldKey}`, approval)
+  })
+  const bySource: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
+  latest.forEach((approval) => {
+    bySource[approval.source.sourceId] ??= {}
+    bySource[approval.source.sourceId][approval.fieldKey] = {
+      approval: approval.approval,
+      ...(approval.candidateValue ? { candidateValue: approval.candidateValue } : {}),
+      ...(approval.approvedValue ? { approvedValue: approval.approvedValue } : {}),
+    }
+  })
+  return bySource
+}
+
+export function projectEvidenceCounts(
+  files: readonly WorkbenchFile[],
+  snapshot: EvaluationProjectSnapshot | null,
+): Record<string, number> {
+  if (!snapshot) return {}
+  const artifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
+  const counts: Record<string, number> = {}
+  snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
+    if (artifacts.get(outcome.source.sourceId) === outcome.source.artifactId) {
+      counts[outcome.source.sourceId] = outcome.evidenceRefs.length
+    }
+  }))
+  snapshot.decisions.forEach((decision) => {
+    if (artifacts.get(decision.source.sourceId) === decision.source.artifactId) {
+      counts[decision.source.sourceId] = decision.evidenceRefs.length
+    }
+  })
+  return counts
+}
+
+function batchExceptionCode(resolution: PrecomputedBatchResolution, sourceId: string): EvaluationBatchExceptionCode | undefined {
+  if (resolution.conflictIds.includes(sourceId)) return 'RULE_CONFLICT'
+  const code = resolution.evaluations[sourceId]?.exceptions[0]?.code
+  if (code === 'NO_MATCH' || code === 'RULE_CONFLICT') return code
+  if (code === 'MISSING_EVIDENCE' || code === 'EVIDENCE_ERROR') return 'SEARCH_ERROR'
+  return code ? 'OTHER' : undefined
 }
 
 function readInitialPage(): AppPage {
   const value = new URLSearchParams(window.location.search).get('screen')
-  return value && value in pages ? value as AppPage : 'workbench'
+  if (value === 'tower') return 'results'
+  if (value === 'console') return 'patterns'
+  return isAppPage(value) ? value : 'workbench'
+}
+
+function initialFiles(): WorkbenchFile[] {
+  return window.sequenceIntelligence ? [] : DEMO_LOGS
 }
 
 export default function App() {
   const [activePage, setActivePage] = useState<AppPage>(readInitialPage)
-  const [agentOpen, setAgentOpen] = useState(() => new URLSearchParams(window.location.search).get('agent') === '1')
+  const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
+  const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
+  const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
+  const [previewMetadataApprovals, setPreviewMetadataApprovals] = useState<MetadataApprovalsBySource>({})
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
-  const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([])
-  const [jobsByArtifact, setJobsByArtifact] = useState<Record<string, AnalysisJobSnapshot>>({})
-  const [analysesByArtifact, setAnalysesByArtifact] = useState<Record<string, AnalysisResult>>({})
-  const [commentsByArtifact, setCommentsByArtifact] = useState<Record<string, string>>({})
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
-  const [wikiEntries, setWikiEntries] = useState<WikiEntryRecord[]>([])
-  const [savedKnowledge, setSavedKnowledge] = useState<Record<string, SavedKnowledgeDetail>>({})
-  const jobArtifactIds = useRef<Record<string, string>>({})
-  const pollTimers = useRef<Record<string, number>>({})
-  const guideMode = useMemo(() => new URLSearchParams(window.location.search).get('guide') === '1', [])
+  const evaluationSnapshotRef = useRef<EvaluationProjectSnapshot | null>(null)
+  const evaluationQueue = useRef<Promise<void>>(Promise.resolve())
+  const shownStorageNotice = useRef('')
 
   const notify = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, tone })
   }, [])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'j') {
-        event.preventDefault()
-        setAgentOpen((current) => !current)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+  const navigate = useCallback((page: AppPage) => {
+    setActivePage(page)
+    const query = new URLSearchParams(window.location.search)
+    query.set('screen', page)
+    window.history.replaceState(null, '', `${window.location.pathname}?${query.toString()}`)
   }, [])
+
+  const acceptEvaluationSnapshot = useCallback((snapshot: EvaluationProjectSnapshot) => {
+    evaluationSnapshotRef.current = snapshot
+    setEvaluationSnapshot(snapshot)
+    setFiles((current) => hydrateEvaluation(current, snapshot))
+    if (snapshot.storageNotice && shownStorageNotice.current !== snapshot.storageNotice.backupFileName) {
+      shownStorageNotice.current = snapshot.storageNotice.backupFileName
+      notify(`손상된 분석 저장소를 ${snapshot.storageNotice.backupFileName}으로 보존하고 복구했습니다.`, 'info')
+    }
+  }, [notify])
+
+  const enqueueEvaluation = useCallback((
+    operation: (snapshot: EvaluationProjectSnapshot) => Promise<{ snapshot: EvaluationProjectSnapshot }>,
+    failureMessage: string,
+  ): Promise<void> => {
+    const api = window.sequenceIntelligence
+    if (!api?.evaluations) return Promise.resolve()
+    const task = evaluationQueue.current.then(async () => {
+      let snapshot = evaluationSnapshotRef.current ?? await api.evaluations.bootstrap({ projectId: PROJECT_ID })
+      let result: { snapshot: EvaluationProjectSnapshot }
+      try {
+        result = await operation(snapshot)
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('EVALUATION_REVISION_CONFLICT')) throw error
+        snapshot = await api.evaluations.getSnapshot({ projectId: PROJECT_ID })
+        result = await operation(snapshot)
+      }
+      acceptEvaluationSnapshot(result.snapshot)
+    })
+    evaluationQueue.current = task.catch(() => undefined)
+    return task.catch((error) => {
+      notify(error instanceof Error ? `${failureMessage}: ${error.message}` : failureMessage, 'error')
+      throw error
+    })
+  }, [acceptEvaluationSnapshot, notify])
+
+  useEffect(() => {
+    const api = window.sequenceIntelligence
+    if (!api) return undefined
+    let active = true
+    void api.artifacts.list().then((artifacts) => {
+      if (!active) return
+      const logs = dedupeWorkbenchFiles(artifacts
+        .filter((artifact) => artifact.extension.replace(/^\./, '').toLowerCase() === 'log')
+        .flatMap(artifactFiles))
+      setFiles(hydrateEvaluation(logs, evaluationSnapshotRef.current))
+      setSelectedFileId((current) => current && logs.some((file) => file.id === current) ? current : logs[0]?.id ?? null)
+    }).catch((error) => {
+      if (active) notify(error instanceof Error ? error.message : '저장된 로그를 불러오지 못했습니다.', 'error')
+    })
+    return () => { active = false }
+  }, [notify])
+
+  useEffect(() => {
+    const api = window.sequenceIntelligence
+    if (!api?.evaluations) return undefined
+    let active = true
+    void api.evaluations.bootstrap({ projectId: PROJECT_ID }).then((snapshot) => {
+      if (active) acceptEvaluationSnapshot(snapshot)
+    }).catch((error) => {
+      if (active) notify(error instanceof Error ? `분석 결과 저장소를 열지 못했습니다: ${error.message}` : '분석 결과 저장소를 열지 못했습니다.', 'error')
+    })
+    return () => { active = false }
+  }, [acceptEvaluationSnapshot, notify])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
     if (!api?.app.onCommand) return undefined
     return api.app.onCommand((command) => {
       if (command === 'preferences') {
-        setActivePage('settings')
+        navigate('settings')
         return
       }
-      setActivePage('workbench')
-      // Allow a newly selected Workbench to mount before forwarding the
-      // native menu action into its renderer-owned passive-effect listener.
-      window.requestAnimationFrame(() => {
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('sequence-control-tower:command', { detail: command }))
-        }, 0)
-      })
+      navigate('workbench')
+      window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('sequence-control-tower:command', { detail: command })))
     })
-  }, [])
+  }, [navigate])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -97,192 +227,190 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  const acceptJobSnapshot = useCallback((job: AnalysisJobSnapshot, fallbackArtifactId?: string) => {
-    const artifactId = job.result?.artifactId ?? fallbackArtifactId ?? jobArtifactIds.current[job.id]
-    if (!artifactId) return
-    jobArtifactIds.current[job.id] = artifactId
-    setJobsByArtifact((current) => ({ ...current, [artifactId]: job }))
-    if (job.result) {
-      setAnalysesByArtifact((current) => ({ ...current, [artifactId]: job.result! }))
+  const metadataApprovals = useMemo<MetadataApprovalsBySource>(() => {
+    const persisted = projectMetadataApprovals(files, evaluationSnapshot)
+    const merged: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
+    for (const [sourceId, fields] of Object.entries(persisted)) merged[sourceId] = { ...fields }
+    for (const [sourceId, fields] of Object.entries(previewMetadataApprovals)) {
+      merged[sourceId] = { ...(merged[sourceId] ?? {}), ...fields }
     }
+    return merged
+  }, [evaluationSnapshot, files, previewMetadataApprovals])
+
+  const persistedEvidenceCounts = useMemo(
+    () => projectEvidenceCounts(files, evaluationSnapshot),
+    [evaluationSnapshot, files],
+  )
+
+  const records = useMemo(
+    () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals),
+    [evidenceCounts, files, metadataApprovals, persistedEvidenceCounts],
+  )
+
+  const durableRules = useMemo<readonly RecipeRule[] | undefined>(() => {
+    if (!window.sequenceIntelligence?.evaluations || !evaluationSnapshot) return undefined
+    const latestRecipes = new Map(evaluationSnapshot.recipes.map((recipe) => [recipe.recipeId, recipe]))
+    const rules = new Map<string, RecipeRule>()
+    latestRecipes.forEach((recipe) => recipe.rules.forEach((rule) => rules.set(rule.id, rule as RecipeRule)))
+    return [...rules.values()]
+  }, [evaluationSnapshot])
+
+  const updateFiles = useCallback((next: WorkbenchFile[]) => {
+    setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+    setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
   }, [])
 
-  const pollJob = useCallback((jobId: string, artifactId: string) => {
-    const api = window.sequenceIntelligence
-    if (!api) return
-    const poll = async () => {
-      try {
-        const latest = await api.analysis.get(jobId)
-        if (!latest) return
-        acceptJobSnapshot(latest, artifactId)
-        if (!['completed', 'failed', 'cancelled'].includes(latest.status)) {
-          pollTimers.current[jobId] = window.setTimeout(() => void poll(), 900)
-        }
-      } catch {
-        pollTimers.current[jobId] = window.setTimeout(() => void poll(), 1800)
-      }
+  const updateDecision = useCallback(async (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => {
+    if (!file.artifactId || !window.sequenceIntelligence?.evaluations) {
+      setFiles((current) => current.map((item) => item.id === file.id ? { ...item, decision } : item))
+      return
     }
-    pollTimers.current[jobId] = window.setTimeout(() => void poll(), 350)
-  }, [acceptJobSnapshot])
+    await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveDecision({
+      projectId: PROJECT_ID,
+      expectedRevision: snapshot.revision,
+      source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
+      result: decision,
+      evidenceRefs: evidenceLines.map((lineNumber) => ({ artifactId: file.artifactId!, lineNumber })),
+    }), '엔지니어 판정을 저장하지 못했습니다')
+  }, [enqueueEvaluation])
 
-  useEffect(() => {
-    const api = window.sequenceIntelligence
-    if (!api) return undefined
-    let active = true
-    void Promise.all([api.artifacts.list(), api.wiki.list()])
-      .then(([storedArtifacts, storedWiki]) => {
-        if (!active) return
-        setArtifacts(storedArtifacts)
-        setWikiEntries(storedWiki)
-        if (storedArtifacts[0]) setSelectedArtifactId((current) => current ?? storedArtifacts[0].id)
-      })
-      .catch((error) => {
-        if (active) notify(error instanceof Error ? error.message : '로컬 작업공간을 불러오지 못했습니다.', 'error')
-      })
-    const unsubscribe = api.analysis.onJobUpdate((job) => acceptJobSnapshot(job))
-    return () => {
-      active = false
-      unsubscribe()
-      Object.values(pollTimers.current).forEach((timer) => window.clearTimeout(timer))
-      pollTimers.current = {}
-    }
-  }, [acceptJobSnapshot, notify])
-
-  const workspaceArtifacts = useMemo<WorkspaceArtifact[]>(() => artifacts.map((artifact) => ({
-    artifact,
-    job: jobsByArtifact[artifact.id],
-    analysis: analysesByArtifact[artifact.id],
-    userComment: commentsByArtifact[artifact.id],
-  })), [analysesByArtifact, artifacts, commentsByArtifact, jobsByArtifact])
-
-  const addArtifacts = useCallback((incoming: ArtifactRecord[]) => {
-    setArtifacts((current) => mergeArtifacts(current, incoming))
-    if (incoming[0]) setSelectedArtifactId(incoming[0].id)
+  const updateEvidenceCount = useCallback((fileId: string, count: number) => {
+    setEvidenceCounts((current) => current[fileId] === count ? current : { ...current, [fileId]: count })
   }, [])
 
-  const queueAnalyses = useCallback(async (incoming: ArtifactRecord[], userComment: string) => {
-    const api = window.sequenceIntelligence
-    if (!api) throw new Error('데스크톱 앱에서만 실제 분석을 실행할 수 있습니다.')
-    const comment = userComment.trim()
-    if (comment) {
-      setCommentsByArtifact((current) => ({
+  const saveRecipeRevision = useCallback(async (draft: WorkbenchRecipeDraft) => {
+    if (!draft.rule) return
+    await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveRecipe({
+      projectId: PROJECT_ID,
+      expectedRevision: snapshot.revision,
+      recipeId: draft.rule!.id,
+      name: `${draft.decision} 판정 규칙`,
+      rules: [draft.rule!] as EvaluationRecipeRule[],
+    }), '분석 규칙을 저장하지 못했습니다')
+  }, [enqueueEvaluation])
+
+  const updateBatchResults = useCallback(async (resolution: PrecomputedBatchResolution) => {
+    if (!window.sequenceIntelligence?.evaluations) {
+      const exceptions = new Set(resolution.exceptionIds)
+      setFiles((current) => current.map((file) => Object.prototype.hasOwnProperty.call(resolution.outcomes, file.id)
+        ? { ...file, ruleResult: resolution.outcomes[file.id], ruleNeedsReview: exceptions.has(file.id) }
+        : file))
+      return
+    }
+    await enqueueEvaluation(async (snapshot) => {
+      const persistedRuleSet = await window.sequenceIntelligence!.evaluations.saveRecipe({
+        projectId: PROJECT_ID,
+        expectedRevision: snapshot.revision,
+        recipeId: 'active-batch-ruleset',
+        name: 'Applied batch rule set',
+        rules: resolution.appliedRules as EvaluationRecipeRule[],
+      })
+      const durableSnapshot = persistedRuleSet.snapshot
+      const decisionBySource = new Map(durableSnapshot.decisions.map((decision) => [
+        `${decision.source.sourceId}\u0000${decision.source.artifactId}`,
+        decision,
+      ]))
+      const outcomes: EvaluationBatchOutcomeInput[] = files.flatMap((file) => {
+        if (!file.artifactId || !Object.prototype.hasOwnProperty.call(resolution.outcomes, file.id)) return []
+        const evaluation = resolution.evaluations[file.id]
+        const selectedRule = evaluation?.matchedRules.find((rule) => rule.ruleId === evaluation.selectedRuleId)
+        const evidenceRefs = selectedRule?.clauseEvaluations.flatMap((clause) => {
+          const occurrence = clause.firstOccurrence ?? clause.lastOccurrence
+          return occurrence?.lineNumber ? [{
+            artifactId: file.artifactId!,
+            lineNumber: occurrence.lineNumber,
+            columnStart: occurrence.columnStart,
+            columnEnd: occurrence.columnEnd,
+            matcherId: clause.clauseId,
+          }] : []
+        }) ?? []
+        const conflict = decisionBySource.get(`${file.id}\u0000${file.artifactId}`)
+        const exceptionCode = batchExceptionCode(resolution, file.id)
+        return [{
+          source: { sourceId: file.id, artifactId: file.artifactId, sourceKey: file.sourceKey ?? file.id },
+          result: resolution.outcomes[file.id],
+          outcomeSource: file.decision ? 'engineer-preserved' : resolution.outcomes[file.id] === 'UNKNOWN' ? 'unknown' : 'rule',
+          ...(evaluation?.selectedRuleId ? { matchedRuleId: evaluation.selectedRuleId } : {}),
+          ...(evidenceRefs.length ? { evidenceRefs } : {}),
+          ...(exceptionCode ? { exceptionCode } : {}),
+          ...(resolution.conflictIds.includes(file.id) && conflict ? { conflictingDecisionId: conflict.id } : {}),
+        }]
+      })
+      return window.sequenceIntelligence!.evaluations.saveBatch({
+        projectId: PROJECT_ID,
+        expectedRevision: durableSnapshot.revision,
+        status: 'completed',
+        recipeRevisionIds: [persistedRuleSet.recipe.id],
+        outcomes,
+      })
+    }, '일괄 판정 결과를 저장하지 못했습니다')
+  }, [enqueueEvaluation, files])
+
+  const approveMetadata = useCallback(async (record: LogResultRecord, field: PatternAxis, value: string) => {
+    const file = files.find((item) => item.id === record.id)
+    if (!file?.artifactId) {
+      setPreviewMetadataApprovals((current) => ({
         ...current,
-        ...Object.fromEntries(incoming.map((artifact) => [artifact.id, comment])),
+        [record.id]: {
+          ...(current[record.id] ?? {}),
+          [field]: { approval: 'approved', candidateValue: value, approvedValue: value },
+        },
       }))
-    }
-    const queued: AnalysisJobSnapshot[] = []
-    for (const artifact of incoming) {
-      const job = await api.analysis.start({
-        artifactId: artifact.id,
-        userComment: comment || undefined,
-        projectContext: 'Qualcomm · Product A',
-      })
-      jobArtifactIds.current[job.id] = artifact.id
-      acceptJobSnapshot(job, artifact.id)
-      pollJob(job.id, artifact.id)
-      queued.push(job)
-    }
-    return queued
-  }, [acceptJobSnapshot, pollJob])
-
-  const saveKnowledgeEntry = useCallback(async (input: WikiEntryInput): Promise<WikiEntryRecord | null> => {
-    const api = window.sequenceIntelligence
-    if (!api) {
-      notify('웹 미리보기에서는 Wiki 저장을 시뮬레이션만 합니다.', 'info')
-      return null
+      notify(`웹 미리보기에서 ${field} 후보를 승인했습니다.`, 'info')
+      return
     }
     try {
-      const record = await api.wiki.save(input)
-      setWikiEntries((current) => upsertWikiEntries(current, record))
-      setSavedKnowledge((current) => ({ ...current, [record.id]: { record, input } }))
-      notify(`${record.title}을 Knowledge Wiki에 저장했습니다.`)
-      return record
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Knowledge Wiki에 저장하지 못했습니다.', 'error')
-      return null
+      await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadata({
+        projectId: PROJECT_ID,
+        expectedRevision: snapshot.revision,
+        source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
+        fieldKey: field,
+        candidateValue: value,
+        approvedValue: value,
+        extractorId: `default-filename-${field}-v1`,
+        approval: 'approved',
+      }), '메타데이터 후보를 승인하지 못했습니다')
+      notify(`${record.fileName}의 ${field} 후보를 승인했습니다.`)
+    } catch {
+      // enqueueEvaluation already surfaced the durable-store failure.
     }
-  }, [notify])
+  }, [enqueueEvaluation, files, notify])
 
-  const exportKnowledgeEntry = useCallback(async (entryId: string): Promise<WikiExportResult | null> => {
-    const api = window.sequenceIntelligence
-    if (!api) {
-      notify('Markdown 내보내기는 데스크톱 앱에서 사용할 수 있습니다.', 'info')
-      return null
-    }
-    try {
-      const result = await api.wiki.export(entryId)
-      if (result.cancelled) notify('Markdown 내보내기를 취소했습니다.', 'info')
-      else notify(`${result.fileName ?? 'Wiki 문서'}를 내보냈습니다.`)
-      return result
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Markdown을 내보내지 못했습니다.', 'error')
-      return null
-    }
-  }, [notify])
+  const openFile = useCallback((fileId: string) => {
+    setSelectedFileId(fileId)
+    navigate('workbench')
+  }, [navigate])
 
-  const navigate = (page: AppPage) => {
-    setActivePage(page)
-    const query = new URLSearchParams(window.location.search)
-    query.set('screen', page)
-    window.history.replaceState(null, '', `${window.location.pathname}?${query.toString()}`)
-  }
-
-  const importSequence = () => {
-    navigate('inbox')
-    notify('가져오기 대기함을 열었습니다. 원본은 선택 후 SHA-256으로 보존됩니다.', 'info')
-  }
-
-  const openReview = (artifactId?: string) => {
-    if (artifactId) setSelectedArtifactId(artifactId)
-    navigate('review')
-  }
-
-  const selectedWorkspace = workspaceArtifacts.find((item) => item.artifact.id === selectedArtifactId)
-
-  const content = (() => {
-    switch (activePage) {
-      case 'workbench': return <WorkbenchView onNotify={notify} />
-      case 'tower': return <TowerView onReview={() => openReview()} onInbox={() => navigate('inbox')} />
-      case 'inbox': return <InboxView
-        workspaceItems={workspaceArtifacts}
-        selectedArtifactId={selectedArtifactId}
-        onSelectArtifact={setSelectedArtifactId}
-        onArtifactsImported={addArtifacts}
-        onQueueAnalyses={queueAnalyses}
-        onReview={openReview}
-        onSaveKnowledge={saveKnowledgeEntry}
-        onNotify={notify}
-      />
-      case 'review': return <ReviewView
-        workspaceItem={selectedWorkspace}
-        onSaveKnowledge={saveKnowledgeEntry}
-        onNotify={notify}
-      />
-      case 'console': return <ConsoleView />
-      case 'knowledge': return <KnowledgeView
-        entries={wikiEntries}
-        savedKnowledge={savedKnowledge}
-        onExport={exportKnowledgeEntry}
-        onNotify={notify}
-      />
-      case 'settings': return <SettingsView />
-    }
-  })()
+  const content = activePage === 'workbench' ? (
+    <WorkbenchView
+      files={files}
+      durableRules={durableRules}
+      selectedFileId={selectedFileId ?? undefined}
+      onFilesChange={updateFiles}
+      onSelectedFileChange={setSelectedFileId}
+      onEvidenceCountChange={updateEvidenceCount}
+      onDecision={updateDecision}
+      onSaveRecipe={saveRecipeRevision}
+      onBatchResults={updateBatchResults}
+      onNotify={notify}
+    />
+  ) : activePage === 'results' ? (
+    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onNotify={notify} />
+  ) : activePage === 'patterns' ? (
+    <PatternsView records={records} onOpenFile={openFile} />
+  ) : <SettingsView />
 
   return (
-    <div className={`app-shell ${agentOpen ? 'agent-is-open' : ''} ${activePage === 'workbench' ? 'workbench-is-open' : ''}`}>
-      <Navigation active={activePage} onChange={navigate} onAgentOpen={() => setAgentOpen(true)} />
+    <div className="app-shell analysis-app" data-page={activePage}>
+      <Navigation active={activePage} onChange={navigate} />
       <main className="main-shell">
-        {activePage === 'workbench' ? null : <TopBar title={pages[activePage].title} eyebrow={pages[activePage].eyebrow} onUpload={importSequence} />}
         <div className="content-shell">{content}</div>
       </main>
-      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} onOpen={() => setAgentOpen(true)} />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}
         {toast.message}
-        <button onClick={() => setToast(null)}><X size={14} /></button>
+        <button onClick={() => setToast(null)} aria-label="알림 닫기"><X size={14} /></button>
       </div> : null}
-      {guideMode ? <GuideOverlay page={activePage} /> : null}
     </div>
   )
 }

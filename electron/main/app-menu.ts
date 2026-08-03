@@ -7,6 +7,25 @@ export interface MacMenuOptions {
   sendCommand(command: RendererCommand): void
 }
 
+export interface DesktopShortcutInput {
+  type: string
+  key: string
+  control: boolean
+  meta: boolean
+  alt: boolean
+  shift: boolean
+}
+
+/** Windows has no application menu, so app-level accelerators are mapped here. */
+export function rendererCommandForDesktopShortcut(input: DesktopShortcutInput): RendererCommand | null {
+  if (input.type !== 'keyDown' || !input.control || input.meta || input.alt) return null
+  const key = input.key.toLocaleLowerCase()
+  if (key === 'o' && !input.shift) return 'open-logs'
+  if (key === 'f') return input.shift ? 'find-workspace' : 'find'
+  if (key === ',' && !input.shift) return 'preferences'
+  return null
+}
+
 /** Pure template factory so native menu wiring can be verified without Electron UI. */
 export function buildMacMenuTemplate({
   appName,

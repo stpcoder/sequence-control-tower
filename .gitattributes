@@ -1,0 +1,1 @@
+tests/fixtures/soc-logs/environment/*hot-pass-crlf.log -text -diff

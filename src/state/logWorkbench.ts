@@ -9,7 +9,7 @@ import type {
 
 export const LOG_WORKBENCH_SCHEMA_VERSION = 1 as const;
 export const MAX_PERSISTED_OBSERVATIONS = 2_000;
-export const MAX_PERSISTED_DECISIONS = 1_000;
+export const MAX_PERSISTED_DECISIONS = 10_000;
 export const MAX_PERSISTED_RULES = 500;
 export const MAX_PERSISTED_RECIPES = 100;
 
@@ -58,6 +58,7 @@ export interface SaveLogWorkbenchResult {
 
 const resultLabels = new Set<ResultLabel>([
   "PASS",
+  "DIAG_FAIL",
   "TEST_FAIL",
   "TRAINING_FAIL",
   "SYSTEM_HALT",
@@ -198,6 +199,10 @@ function sanitizeClause(value: unknown): RuleClause | null {
   if (value.matcher.kind !== "literal" && value.matcher.kind !== "regex") return null;
   if (value.matcher.target !== "content" && value.matcher.target !== "file_name" && value.matcher.target !== "path") return null;
   if (typeof value.matcher.caseSensitive !== "boolean") return null;
+  const afterClauseId = value.order === undefined
+    ? undefined
+    : isRecord(value.order) ? safeIdentifier(value.order.afterClauseId) : null;
+  if (afterClauseId === null) return null;
 
   return {
     id,
@@ -209,6 +214,7 @@ function sanitizeClause(value: unknown): RuleClause | null {
       target: value.matcher.target,
     },
     sourceObservationId,
+    ...(afterClauseId ? { order: { afterClauseId } } : {}),
   };
 }
 

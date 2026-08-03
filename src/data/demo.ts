@@ -1,4 +1,5 @@
-export type AppPage = 'workbench' | 'tower' | 'inbox' | 'review' | 'console' | 'knowledge' | 'settings'
+/** Legacy showcase routes retained only by the unmounted guide component. */
+export type DemoPage = 'workbench' | 'tower' | 'inbox' | 'review' | 'console' | 'knowledge' | 'settings'
 
 export type RunStatus = 'pass' | 'fail' | 'review' | 'running' | 'ready' | 'offline'
 

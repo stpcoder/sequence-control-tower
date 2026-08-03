@@ -3,6 +3,7 @@ import type {
   ClauseEvaluation,
   DocumentEvaluation,
   EngineerDecision,
+  EvidenceOccurrence,
   EvaluationException,
   LogDocument,
   MatchedRuleEvaluation,
@@ -94,32 +95,81 @@ function targetText(document: LogDocument, target: SearchTarget): string {
   return document.text;
 }
 
-function countLiteral(haystack: string, needle: string, caseSensitive: boolean): number {
+function matchLiteral(haystack: string, needle: string, caseSensitive: boolean): {
+  count: number;
+  firstIndex?: number;
+  lastIndex?: number;
+} {
   const source = caseSensitive ? haystack : haystack.toLocaleLowerCase();
   const query = caseSensitive ? needle : needle.toLocaleLowerCase();
-  if (!query) return 0;
+  if (!query) return { count: 0 };
 
   let count = 0;
   let offset = 0;
+  let firstIndex: number | undefined;
+  let lastIndex: number | undefined;
   while (offset <= source.length - query.length) {
     const foundAt = source.indexOf(query, offset);
     if (foundAt < 0) break;
     count += 1;
+    firstIndex ??= foundAt;
+    lastIndex = foundAt;
     offset = foundAt + Math.max(query.length, 1);
   }
-  return count;
+  return { count, firstIndex, lastIndex };
+}
+
+function occurrenceAt(
+  target: SearchTarget,
+  text: string,
+  start: number,
+  end: number,
+): EvidenceOccurrence {
+  const lineStart = target === "content" ? text.lastIndexOf("\n", Math.max(0, start - 1)) + 1 : 0;
+  const lineEndCandidate = target === "content" ? text.indexOf("\n", end) : -1;
+  const lineEnd = lineEndCandidate < 0 ? text.length : lineEndCandidate;
+  const line = text.slice(lineStart, lineEnd).replace(/\r$/, "");
+  const maximum = 320;
+  const localAnchor = Math.max(0, start - lineStart);
+  const excerptStart = Math.max(0, Math.min(localAnchor - Math.floor(maximum / 2), line.length - maximum));
+  const excerptEnd = Math.min(line.length, excerptStart + maximum);
+  const lineNumber = target === "content"
+    ? text.slice(0, lineStart).split("\n").length
+    : undefined;
+  return {
+    target,
+    ...(lineNumber === undefined ? {} : { lineNumber }),
+    columnStart: start - lineStart + 1,
+    columnEnd: end - lineStart + 1,
+    excerpt: `${excerptStart > 0 ? "…" : ""}${line.slice(excerptStart, excerptEnd)}${excerptEnd < line.length ? "…" : ""}`,
+    excerptTruncated: excerptStart > 0 || excerptEnd < line.length,
+  };
 }
 
 function evaluateClause(document: LogDocument, clause: RuleClause): ClauseEvaluation {
   const value = targetText(document, clause.matcher.target);
   let occurrenceCount = 0;
+  let firstIndex: number | undefined;
+  let lastIndex: number | undefined;
+  let firstMatchedLength = 0;
+  let lastMatchedLength = 0;
 
   try {
     if (clause.matcher.kind === "literal") {
-      occurrenceCount = countLiteral(value, clause.matcher.pattern, clause.matcher.caseSensitive);
+      const matches = matchLiteral(value, clause.matcher.pattern, clause.matcher.caseSensitive);
+      occurrenceCount = matches.count;
+      firstIndex = matches.firstIndex;
+      lastIndex = matches.lastIndex;
+      firstMatchedLength = clause.matcher.pattern.length;
+      lastMatchedLength = clause.matcher.pattern.length;
     } else {
       const flags = clause.matcher.caseSensitive ? "g" : "gi";
-      occurrenceCount = [...value.matchAll(new RegExp(clause.matcher.pattern, flags))].length;
+      const matches = [...value.matchAll(new RegExp(clause.matcher.pattern, flags))];
+      occurrenceCount = matches.length;
+      firstIndex = matches[0]?.index;
+      lastIndex = matches.at(-1)?.index;
+      firstMatchedLength = matches[0]?.[0].length ?? 0;
+      lastMatchedLength = matches.at(-1)?.[0].length ?? 0;
     }
   } catch (error) {
     return {
@@ -135,7 +185,104 @@ function evaluateClause(document: LogDocument, clause: RuleClause): ClauseEvalua
     clauseId: clause.id,
     satisfied: clause.presence === "present" ? isPresent : !isPresent,
     occurrenceCount,
+    ...(firstIndex === undefined ? {} : {
+      firstOccurrence: occurrenceAt(
+        clause.matcher.target,
+        value,
+        firstIndex,
+        firstIndex + firstMatchedLength,
+      ),
+    }),
+    ...(lastIndex === undefined ? {} : {
+      lastOccurrence: occurrenceAt(clause.matcher.target, value, lastIndex, lastIndex + lastMatchedLength),
+    }),
   };
+}
+
+/**
+ * Produces the same bounded clause evidence shape as the main-process stream
+ * inspector for in-memory/demo logs. Keeping this separate from evaluation
+ * lets the fail-closed precomputed path handle both sources identically.
+ */
+export function precomputeDocumentEvidence(
+  document: LogDocument,
+  rules: readonly RecipeRule[],
+): PrecomputedDocumentEvidence {
+  return {
+    sourceId: document.id,
+    rules: rules.map((rule) => ({
+      ruleId: rule.id,
+      clauses: rule.clauses.map((clause) => {
+        const evaluated = evaluateClause(document, clause);
+        return {
+          clauseId: clause.id,
+          occurrenceCount: evaluated.occurrenceCount,
+          ...(evaluated.firstOccurrence ? { firstOccurrence: evaluated.firstOccurrence } : {}),
+          ...(evaluated.lastOccurrence ? { lastOccurrence: evaluated.lastOccurrence } : {}),
+          ...(evaluated.error ? { error: evaluated.error } : {}),
+        };
+      }),
+    })),
+  };
+}
+
+function ruleOrderingError(rule: RecipeRule): string | null {
+  const clauses = new Map<string, RuleClause>();
+  for (const clause of rule.clauses) {
+    if (clauses.has(clause.id)) return `Rule ${rule.id} has duplicate clause ids.`;
+    clauses.set(clause.id, clause);
+  }
+  for (const clause of rule.clauses) {
+    const afterId = clause.order?.afterClauseId;
+    if (!afterId) continue;
+    const reference = clauses.get(afterId);
+    if (!reference || reference.id === clause.id) return `Rule ${rule.id} has an invalid order reference.`;
+    if (clause.presence !== "present" || reference.presence !== "present") {
+      return `Rule ${rule.id} applies ordering to an absence clause.`;
+    }
+    if (clause.matcher.target !== "content" || reference.matcher.target !== "content") {
+      return `Rule ${rule.id} applies ordering outside log content.`;
+    }
+    const seen = new Set([clause.id]);
+    let cursor: RuleClause | undefined = reference;
+    while (cursor?.order?.afterClauseId) {
+      if (seen.has(cursor.id)) return `Rule ${rule.id} contains a cyclic order.`;
+      seen.add(cursor.id);
+      cursor = clauses.get(cursor.order.afterClauseId);
+    }
+  }
+  return null;
+}
+
+function occurrencePosition(occurrence: EvidenceOccurrence): readonly [number, number] | null {
+  if (!Number.isSafeInteger(occurrence.lineNumber) || (occurrence.lineNumber ?? 0) < 1) return null;
+  if (!Number.isSafeInteger(occurrence.columnStart) || occurrence.columnStart < 1) return null;
+  return [occurrence.lineNumber!, occurrence.columnStart];
+}
+
+function applyClauseOrdering(rule: RecipeRule, evaluations: ClauseEvaluation[]): boolean {
+  const byId = new Map(evaluations.map((item) => [item.clauseId, item]));
+  let complete = true;
+  for (const clause of rule.clauses) {
+    const afterId = clause.order?.afterClauseId;
+    if (!afterId) continue;
+    const evaluation = byId.get(clause.id)!;
+    const reference = byId.get(afterId)!;
+    const currentPosition = evaluation.lastOccurrence && occurrencePosition(evaluation.lastOccurrence);
+    const referencePosition = reference.firstOccurrence && occurrencePosition(reference.firstOccurrence);
+    if (!currentPosition || !referencePosition) {
+      evaluation.satisfied = false;
+      evaluation.orderSatisfied = false;
+      if (evaluation.occurrenceCount > 0 && !currentPosition) complete = false;
+      if (reference.occurrenceCount > 0 && !referencePosition) complete = false;
+      continue;
+    }
+    const after = currentPosition[0] > referencePosition[0]
+      || (currentPosition[0] === referencePosition[0] && currentPosition[1] > referencePosition[1]);
+    evaluation.orderSatisfied = after;
+    evaluation.satisfied = evaluation.satisfied && reference.satisfied && after;
+  }
+  return complete;
 }
 
 const scopePrecedence = {
@@ -226,6 +373,11 @@ export function evaluateDocument(
 ): DocumentEvaluation {
   const exceptions: EvaluationException[] = [];
   const matchedRules = rules.flatMap((rule) => {
+    const orderError = ruleOrderingError(rule);
+    if (orderError) {
+      exceptions.push({ code: "INVALID_RULE", message: orderError, ruleIds: [rule.id] });
+      return [];
+    }
     const clauseEvaluations = rule.clauses.map((clause) => evaluateClause(document, clause));
     const invalid = clauseEvaluations.filter((clause) => clause.error);
     if (invalid.length > 0) {
@@ -236,6 +388,7 @@ export function evaluateDocument(
       });
       return [];
     }
+    applyClauseOrdering(rule, clauseEvaluations);
     return clauseEvaluations.every((clause) => clause.satisfied)
       ? [{ ruleId: rule.id, label: rule.label, clauseEvaluations }]
       : [];
@@ -263,6 +416,11 @@ export function evaluatePrecomputedEvidence(
   }
 
   for (const rule of rules) {
+    const orderError = ruleOrderingError(rule);
+    if (orderError) {
+      exceptions.push({ code: "INVALID_RULE", message: orderError, ruleIds: [rule.id] });
+      continue;
+    }
     const ruleEvidence = evidenceByRule.get(rule.id);
     if (!ruleEvidence || duplicateRuleIds.has(rule.id)) {
       exceptions.push({
@@ -329,7 +487,18 @@ export function evaluatePrecomputedEvidence(
         clauseId: clause.id,
         occurrenceCount,
         satisfied: clause.presence === "present" ? present : !present,
+        ...(clauseEvidence.firstOccurrence ? { firstOccurrence: clauseEvidence.firstOccurrence } : {}),
+        ...(clauseEvidence.lastOccurrence ? { lastOccurrence: clauseEvidence.lastOccurrence } : {}),
       });
+    }
+
+    if (complete && !applyClauseOrdering(rule, clauseEvaluations)) {
+      exceptions.push({
+        code: "MISSING_EVIDENCE",
+        message: `Rule ${rule.id} has no valid occurrence provenance for ordered clauses.`,
+        ruleIds: [rule.id],
+      });
+      complete = false;
     }
 
     if (complete && clauseEvaluations.every((clause) => clause.satisfied)) {

@@ -17,6 +17,32 @@ afterEach(async () => {
 })
 
 describe('ArtifactService log workbench', () => {
+  it('imports multiple folders whose Windows-friendly names contain Korean text and spaces', async () => {
+    const root = await temporaryRoot()
+    const first = join(root, '고객사 A 로그')
+    const second = join(root, '고객사 B 로그')
+    await Promise.all([
+      mkdir(join(first, '샘플 01'), { recursive: true }),
+      mkdir(join(second, '샘플 02'), { recursive: true })
+    ])
+    await Promise.all([
+      writeFile(join(first, '샘플 01', '저온 평가.log'), 'stressapp\nhidag\n@PASS\n', 'utf8'),
+      writeFile(join(second, '샘플 02', '고온 평가.log'), 'stressapp\nhidag\n@FAIL\n', 'utf8')
+    ])
+
+    const service = new ArtifactService(join(root, '앱 데이터'))
+    await service.initialize()
+    const imported = await service.importFolders([first, second], { extensions: ['log'] })
+
+    expect(imported.failures).toEqual([])
+    expect(imported.artifacts).toHaveLength(2)
+    expect(imported.artifacts.flatMap((item) => item.sources ?? [])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ folderLabel: '고객사 A 로그', relativePath: '샘플 01/저온 평가.log' }),
+      expect.objectContaining({ folderLabel: '고객사 B 로그', relativePath: '샘플 02/고온 평가.log' })
+    ]))
+    expect(JSON.stringify(imported)).not.toContain(root)
+  })
+
   it('imports multiple folder trees while exposing only safe relative source metadata', async () => {
     const root = await temporaryRoot()
     const dataRoot = join(root, 'data')

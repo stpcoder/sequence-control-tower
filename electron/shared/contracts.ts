@@ -122,6 +122,66 @@ export interface ArtifactSearchResult {
   files: ArtifactSearchFileResult[]
 }
 
+/**
+ * A stable source row for recipe inspection. Multiple physical log files may
+ * share one content-addressed artifact while retaining different filenames.
+ */
+export interface ArtifactEvidenceSource {
+  sourceId: string
+  artifactId: string
+  rootId?: string
+  relativePath?: string
+}
+
+export type ArtifactEvidenceTarget = 'content' | 'file_name' | 'path'
+
+export interface ArtifactEvidenceSpec {
+  /** Caller-owned stable id, normally the recipe clause id. */
+  id: string
+  query: string
+  mode?: ArtifactSearchMode
+  caseSensitive?: boolean
+  target?: ArtifactEvidenceTarget
+}
+
+export interface ArtifactEvidenceOccurrence {
+  target: ArtifactEvidenceTarget
+  /** Present only for content matches. */
+  lineNumber?: number
+  /** One-based UTF-16 columns, matching the desktop editor. */
+  columnStart: number
+  columnEnd: number
+  /** Bounded display evidence; never an unbounded raw-log payload. */
+  excerpt: string
+  excerptTruncated: boolean
+}
+
+export interface ArtifactEvidenceItem {
+  specId: string
+  occurrenceCount?: number
+  firstOccurrence?: ArtifactEvidenceOccurrence
+  lastOccurrence?: ArtifactEvidenceOccurrence
+  error?: string
+}
+
+export interface ArtifactEvidenceSourceResult {
+  sourceId: string
+  artifactId: string
+  fileName: string
+  relativePath?: string
+  evidence: ArtifactEvidenceItem[]
+  error?: string
+}
+
+export interface ArtifactEvidenceInput {
+  sources: ArtifactEvidenceSource[]
+  specs: ArtifactEvidenceSpec[]
+}
+
+export interface ArtifactEvidenceResult {
+  sources: ArtifactEvidenceSourceResult[]
+}
+
 export interface ArtifactLineWindowInput {
   artifactId: string
   /** One-based first line. */
@@ -289,6 +349,207 @@ export interface WikiExportResult {
   fileName?: string
 }
 
+export type EvaluationResultLabel =
+  | 'PASS'
+  | 'DIAG_FAIL'
+  | 'TEST_FAIL'
+  | 'TRAINING_FAIL'
+  | 'SYSTEM_HALT'
+  | 'SYSTEM_REBOOT'
+  | 'INCOMPLETE'
+  | 'UNKNOWN'
+  | 'EXCLUDED'
+
+/** Renderer input. sourceKey is hashed in main and is never written to disk. */
+export interface EvaluationSourceInput {
+  sourceId: string
+  artifactId: string
+  sourceKey: string
+}
+
+/** Durable source identity. A decision is always bound to one exact artifact SHA. */
+export interface EvaluationSourceRef {
+  sourceId: string
+  artifactId: string
+  sourceKeyHash: string
+}
+
+export interface EvaluationEvidenceRef {
+  artifactId: string
+  lineNumber?: number
+  columnStart?: number
+  columnEnd?: number
+  matcherId?: string
+}
+
+export interface EvaluationDecisionRevision {
+  id: string
+  revision: number
+  source: EvaluationSourceRef
+  result: EvaluationResultLabel
+  decidedBy: 'engineer'
+  evidenceRefs: EvaluationEvidenceRef[]
+  createdAt: string
+  supersedesId?: string
+}
+
+export interface EvaluationRecipeClause {
+  id: string
+  presence: 'present' | 'absent'
+  matcher: {
+    kind: 'literal' | 'regex'
+    pattern: string
+    caseSensitive: boolean
+    target: 'content' | 'file_name' | 'path'
+  }
+  sourceObservationId?: string
+  order?: { afterClauseId: string }
+}
+
+export interface EvaluationRecipeRule {
+  id: string
+  label: Exclude<EvaluationResultLabel, 'UNKNOWN'>
+  status: 'candidate' | 'verified'
+  scope: { kind: 'analysis' | 'project' | 'customer' | 'global'; id?: string }
+  clauses: EvaluationRecipeClause[]
+  priority: number
+  confidence: number
+  repetition: number
+  createdFromSourceIds: string[]
+}
+
+export interface EvaluationRecipeRevision {
+  id: string
+  recipeId: string
+  revision: number
+  name: string
+  rules: EvaluationRecipeRule[]
+  createdAt: string
+  supersedesId?: string
+}
+
+export type EvaluationBatchExceptionCode =
+  | 'NO_MATCH'
+  | 'SEARCH_ERROR'
+  | 'RULE_CONFLICT'
+  | 'INVALID_METADATA'
+  | 'CANCELLED'
+  | 'OTHER'
+
+export interface EvaluationBatchOutcomeInput {
+  source: EvaluationSourceInput
+  result: EvaluationResultLabel
+  outcomeSource: 'rule' | 'engineer-preserved' | 'unknown'
+  matchedRuleId?: string
+  evidenceRefs?: EvaluationEvidenceRef[]
+  exceptionCode?: EvaluationBatchExceptionCode
+  conflictingDecisionId?: string
+}
+
+export interface EvaluationBatchOutcome extends Omit<EvaluationBatchOutcomeInput, 'source' | 'evidenceRefs'> {
+  source: EvaluationSourceRef
+  evidenceRefs: EvaluationEvidenceRef[]
+}
+
+export interface EvaluationBatchRun {
+  id: string
+  status: 'completed' | 'failed' | 'cancelled'
+  recipeRevisionIds: string[]
+  outcomes: EvaluationBatchOutcome[]
+  matchedCount: number
+  exceptionCount: number
+  startedAt: string
+  completedAt: string
+}
+
+export interface EvaluationMetadataApprovalRevision {
+  id: string
+  revision: number
+  source: EvaluationSourceRef
+  fieldKey: string
+  candidateValue?: string
+  approvedValue?: string
+  extractorId?: string
+  approval: 'approved' | 'rejected'
+  approvedBy: 'engineer'
+  createdAt: string
+  supersedesId?: string
+}
+
+export interface EvaluationStorageNotice {
+  kind: 'recovered-corrupt' | 'recovered-unsupported-version'
+  recoveredAt: string
+  /** Basename only; absolute userData paths never cross contextBridge. */
+  backupFileName: string
+}
+
+export interface EvaluationProjectSnapshot {
+  schemaVersion: 1
+  projectIdHash: string
+  revision: number
+  decisions: EvaluationDecisionRevision[]
+  recipes: EvaluationRecipeRevision[]
+  batches: EvaluationBatchRun[]
+  metadataApprovals: EvaluationMetadataApprovalRevision[]
+  storageNotice?: EvaluationStorageNotice
+}
+
+export interface EvaluationProjectRequest {
+  projectId: string
+}
+
+export interface EvaluationSaveDecisionInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  source: EvaluationSourceInput
+  result: EvaluationResultLabel
+  evidenceRefs?: EvaluationEvidenceRef[]
+}
+
+export interface EvaluationSaveRecipeInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  recipeId?: string
+  name: string
+  rules: EvaluationRecipeRule[]
+}
+
+export interface EvaluationSaveBatchInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  status: 'completed' | 'failed' | 'cancelled'
+  recipeRevisionIds: string[]
+  outcomes: EvaluationBatchOutcomeInput[]
+  startedAt?: string
+}
+
+export interface EvaluationApproveMetadataInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  source: EvaluationSourceInput
+  fieldKey: string
+  candidateValue?: string
+  approvedValue?: string
+  extractorId?: string
+  approval: 'approved' | 'rejected'
+}
+
+export interface EvaluationDecisionSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  decision: EvaluationDecisionRevision
+}
+
+export interface EvaluationRecipeSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  recipe: EvaluationRecipeRevision
+}
+
+export interface EvaluationBatchSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  batch: EvaluationBatchRun
+}
+
+export interface EvaluationMetadataSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  metadataApproval: EvaluationMetadataApprovalRevision
+}
+
 export interface AppStatus {
   version: string
   platform: NodeJS.Platform
@@ -311,6 +572,7 @@ export interface SequenceIntelligenceApi {
     list(): Promise<ArtifactRecord[]>
     getTextPreview(artifactId: string, maxChars?: number): Promise<ArtifactTextPreview>
     search(input: ArtifactSearchInput): Promise<ArtifactSearchResult>
+    inspectEvidence(input: ArtifactEvidenceInput): Promise<ArtifactEvidenceResult>
     getLineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow>
     findSimilar(artifactId: string, limit?: number): Promise<SimilarArtifact[]>
   }
@@ -330,6 +592,14 @@ export interface SequenceIntelligenceApi {
     list(): Promise<WikiEntryRecord[]>
     export(entryId: string): Promise<WikiExportResult>
   }
+  evaluations: {
+    bootstrap(input: EvaluationProjectRequest): Promise<EvaluationProjectSnapshot>
+    getSnapshot(input: EvaluationProjectRequest): Promise<EvaluationProjectSnapshot>
+    saveDecision(input: EvaluationSaveDecisionInput): Promise<EvaluationDecisionSaveResult>
+    saveRecipe(input: EvaluationSaveRecipeInput): Promise<EvaluationRecipeSaveResult>
+    saveBatch(input: EvaluationSaveBatchInput): Promise<EvaluationBatchSaveResult>
+    approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -340,6 +610,7 @@ export const IPC_CHANNELS = {
   artifactList: 'artifact:list',
   artifactPreview: 'artifact:preview',
   artifactSearch: 'artifact:search',
+  artifactInspectEvidence: 'artifact:inspect-evidence',
   artifactLineWindow: 'artifact:line-window',
   artifactSimilar: 'artifact:similar',
   analysisStart: 'analysis:start',
@@ -351,5 +622,11 @@ export const IPC_CHANNELS = {
   settingsDiscoverModels: 'settings:discover-models',
   wikiSave: 'wiki:save',
   wikiList: 'wiki:list',
-  wikiExport: 'wiki:export'
+  wikiExport: 'wiki:export',
+  evaluationBootstrap: 'evaluation:bootstrap',
+  evaluationGetSnapshot: 'evaluation:get-snapshot',
+  evaluationSaveDecision: 'evaluation:save-decision',
+  evaluationSaveRecipe: 'evaluation:save-recipe',
+  evaluationSaveBatch: 'evaluation:save-batch',
+  evaluationApproveMetadata: 'evaluation:approve-metadata'
 } as const

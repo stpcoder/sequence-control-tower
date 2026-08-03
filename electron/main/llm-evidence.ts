@@ -71,9 +71,15 @@ export function redactSensitiveText(raw: string, maxChars = MAX_VALUE_CHARS): st
   value = value
     // Explicit credentials/tokens are handled before generic identifiers.
     .replace(
-      /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|bearer|password|passwd|secret)\b\s*[:=]\s*[^\s,;]+/gi,
+      /\b(?:authorization\s*[:=]\s*)?bearer\s+[a-z0-9._~+/=-]+/gi,
+      'Bearer <SECRET>'
+    )
+    .replace(
+      /\b(?:api[_-]?key|x-api-key|access[_-]?token|refresh[_-]?token|password|passwd|secret)\b\s*[:=]\s*[^\s,;]+/gi,
       '<SECRET>'
     )
+    .replace(/\beyJ[a-z0-9_-]{6,}\.[a-z0-9_-]{6,}(?:\.[a-z0-9_-]{6,})?\b/gi, '<SECRET>')
+    .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[^\r\n]*/gi, '<SECRET>')
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '<EMAIL>')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '<IP>')
     .replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi, '<IPV6>')
@@ -86,8 +92,13 @@ export function redactSensitiveText(raw: string, maxChars = MAX_VALUE_CHARS): st
     .replace(/\badb\s+-s\s+[^\s,;]+/gi, 'adb -s <SERIAL>')
     .replace(/\b0x[0-9a-f]{8,}\b/gi, '<HEX>')
     .replace(/\b[0-9a-f]{20,}\b/gi, '<HEX>')
-    .replace(/\b[A-Za-z]:\\Users\\[^\\\s]+/g, '<USER_PATH>')
-    .replace(/\/(?:Users|home)\/[^/\s]+/g, '<USER_PATH>')
+    // Never send a local absolute path. Handle quoted Windows paths first so
+    // spaces cannot leave a partial directory name behind, then unquoted
+    // drive/UNC paths and POSIX paths with at least two segments.
+    .replace(/(["'])(?:[A-Za-z]:[\\/]|\\\\)[^"'\r\n]+\1/g, '<ABS_PATH>')
+    .replace(/\b[A-Za-z]:[\\/].*?(?=\s+[A-Za-z_][\w-]*\s*=|[,;)]|$)/g, '<ABS_PATH>')
+    .replace(/\\\\[^\\\s,;]+\\.*?(?=\s+[A-Za-z_][\w-]*\s*=|[,;)]|$)/g, '<ABS_PATH>')
+    .replace(/(^|[\s="'(])\/(?:[^/\s,;)"']+\/)+[^/\s,;)"']*/g, '$1<ABS_PATH>')
 
   // Catch long serial-like opaque values even when the producer omitted a
   // label. Do not redact ordinary all-letter command names or all-digit clocks.

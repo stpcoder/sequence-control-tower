@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import type { RendererCommand } from '../../electron/shared/contracts'
-import { buildMacMenuTemplate } from '../../electron/main/app-menu'
+import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from '../../electron/main/app-menu'
 
 function submenu(item: MenuItemConstructorOptions): MenuItemConstructorOptions[] {
   return item.submenu as MenuItemConstructorOptions[]
@@ -63,5 +63,32 @@ describe('macOS application menu', () => {
     expect(productionRoles).not.toContain('toggleDevTools')
     expect(developmentRoles).toContain('reload')
     expect(developmentRoles).toContain('toggleDevTools')
+  })
+})
+
+describe('Windows desktop shortcuts', () => {
+  const key = (value: string, options: Partial<Parameters<typeof rendererCommandForDesktopShortcut>[0]> = {}) =>
+    rendererCommandForDesktopShortcut({
+      type: 'keyDown',
+      key: value,
+      control: true,
+      meta: false,
+      alt: false,
+      shift: false,
+      ...options
+    })
+
+  it('routes Ctrl+O/F/Shift+F/comma without depending on a hidden native menu', () => {
+    expect(key('o')).toBe('open-logs')
+    expect(key('F')).toBe('find')
+    expect(key('f', { shift: true })).toBe('find-workspace')
+    expect(key(',')).toBe('preferences')
+  })
+
+  it('does not hijack unrelated or modified input', () => {
+    expect(key('o', { alt: true })).toBeNull()
+    expect(key('o', { meta: true })).toBeNull()
+    expect(key('o', { type: 'keyUp' })).toBeNull()
+    expect(key('x')).toBeNull()
   })
 })
