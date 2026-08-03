@@ -150,7 +150,7 @@ export function InboxView({
     const api = window.sequenceIntelligence
     if (!api) {
       setPendingArtifacts([])
-      setImportMessage('웹 미리보기에서는 데모 파일이 사용됩니다. Windows 앱에서 실제 파일 선택기가 열립니다.')
+      setImportMessage('웹 미리보기에서는 데모 파일이 사용됩니다. 데스크톱 앱에서 실제 파일 선택기가 열립니다.')
       return
     }
     setImportMessage('원본을 확인하고 있습니다…')

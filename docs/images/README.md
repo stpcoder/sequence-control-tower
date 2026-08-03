@@ -4,6 +4,7 @@
 
 | 파일 | 화면 | 빨간 박스 |
 |---|---|---|
+| `manual-00-log-workbench.jpg` | Log Workbench | ① 로그 폴더와 파일 ② 검색·근거 표시 ③ 판정·Recipe 저장 |
 | `manual-01-project-tower.jpg` | Project Tower | ① 목적/핵심 판단 ② 평가 계보 ③ Knowledge gaps |
 | `manual-02-intake.jpg` | Sequence Inbox | ① 파일/폴더 가져오기 ② 분류 대기함 ③ Agent 질문 |
 | `manual-03-review.jpg` | Semantic Review | ① Change story ② Semantic Diff ③ Finding |
@@ -14,7 +15,7 @@
 
 ## 캡처 규격
 
-- Windows 11, 앱 창 1440×900 기준으로 캡처
+- Windows 11 또는 macOS, 앱 창 1440×900 기준으로 캡처
 - JPEG, 1× scale, 브라우저/디버거/개인 경로가 보이지 않게 정리
 - 빨간색 `#E5484D`, 3px 실선, 8px radius
 - 번호 원은 빨간 배경과 흰색 굵은 글자, 지름 28px

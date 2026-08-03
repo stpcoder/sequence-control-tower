@@ -61,6 +61,7 @@ const MAX_LINE_WINDOW_TEXT_CHARS = 20_000
 const MAX_SEARCH_LOGICAL_LINE_CHARS = 4 * 1024 * 1024
 const MAX_MATCHES_PER_LOGICAL_LINE = 100_000
 const METADATA_BATCH_SIZE = 250
+const MAX_SOURCES_PER_ARTIFACT = MAX_FOLDER_FILES
 const LONG_LINE_ERROR = '한 줄이 4 MB를 초과해 안전하게 검색할 수 없습니다.'
 const MATCH_LIMIT_ERROR = '한 줄의 검색 결과가 너무 많아 중단했습니다.'
 const ZERO_WIDTH_REGEX_ERROR = '길이가 0인 일치를 만드는 정규식은 안전상 사용할 수 없습니다.'
@@ -77,6 +78,13 @@ interface PreparedArtifact {
   name: string
   source: ArtifactSourceLocation
   fingerprint?: SequenceFingerprint
+}
+
+function abortSearch(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const error = new Error('로그 검색이 취소되었습니다.')
+  error.name = 'AbortError'
+  throw error
 }
 
 async function hashFile(filePath: string): Promise<string> {
@@ -159,10 +167,6 @@ function sourceForSelectedFile(filePath: string): ArtifactSourceLocation {
     folderLabel: '선택한 파일',
     relativePath: safeSourcePart(basename(filePath), '이름 없는 파일')
   }
-}
-
-function sameSource(a: ArtifactSourceLocation, b: ArtifactSourceLocation): boolean {
-  return a.rootId === b.rootId && a.relativePath === b.relativePath
 }
 
 function displayName(record: ArtifactRecord): string {
@@ -255,14 +259,16 @@ function compileSearch(input: ArtifactSearchInput): {
   }
 }
 
-async function* streamTextLines(filePath: string): AsyncGenerator<string> {
+async function* streamTextLines(filePath: string, signal?: AbortSignal): AsyncGenerator<string> {
   const stream = createReadStream(filePath, { encoding: 'utf8' })
   let pending = ''
   try {
     for await (const chunk of stream) {
+      abortSearch(signal)
       pending += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
       let newline = pending.indexOf('\n')
       while (newline >= 0) {
+        abortSearch(signal)
         let line = pending.slice(0, newline)
         if (line.endsWith('\r')) line = line.slice(0, -1)
         if (line.length > MAX_SEARCH_LOGICAL_LINE_CHARS) throw new Error(LONG_LINE_ERROR)
@@ -312,15 +318,19 @@ export class ArtifactService {
     filePaths: string[],
     sources?: Map<string, ArtifactSourceLocation>
   ): Promise<ArtifactImportResult> {
-    const artifacts: ArtifactRecord[] = []
+    const importedIds = new Set<string>()
     const failures: ArtifactImportFailure[] = []
+    const fingerprintCache = new Map<string, SequenceFingerprint | undefined>()
+    const existing = await this.store.read()
+    Object.values(existing.artifacts).forEach((artifact) => fingerprintCache.set(artifact.id, artifact.fingerprint))
     for (let offset = 0; offset < filePaths.length; offset += METADATA_BATCH_SIZE) {
       const prepared: PreparedArtifact[] = []
       for (const filePath of filePaths.slice(offset, offset + METADATA_BATCH_SIZE)) {
         try {
           prepared.push(await this.prepareArtifact(
             filePath,
-            sources?.get(filePath) ?? sourceForSelectedFile(filePath)
+            sources?.get(filePath) ?? sourceForSelectedFile(filePath),
+            fingerprintCache
           ))
         } catch (error) {
           failures.push({ name: basename(filePath), reason: safeFailure(error) })
@@ -329,40 +339,53 @@ export class ArtifactService {
       if (!prepared.length) continue
       const now = new Date().toISOString()
       try {
+        const byHash = new Map<string, PreparedArtifact[]>()
+        prepared.forEach((item) => byHash.set(item.sha256, [...(byHash.get(item.sha256) ?? []), item]))
         const database = await this.store.update((draft) => {
-          for (const item of prepared) {
-            const previous = draft.artifacts[item.sha256]
-            draft.artifacts[item.sha256] = previous
+          for (const [sha256, group] of byHash) {
+            const item = group[0]
+            const previous = draft.artifacts[sha256]
+            const sourceMap = new Map<string, ArtifactSourceLocation>()
+            for (const source of [...(previous?.sources ?? []), ...group.map((entry) => entry.source)]) {
+              const key = `${source.rootId ?? ''}\0${source.relativePath}`
+              // A refreshed source belongs at the newest end of the bounded list.
+              sourceMap.delete(key)
+              sourceMap.set(key, source)
+            }
+            const boundedSources = [...sourceMap.values()].slice(-MAX_SOURCES_PER_ARTIFACT)
+            draft.artifacts[sha256] = previous
               ? {
                   ...previous,
-                  originalNames: [...new Set([...previous.originalNames, item.name])],
-                  sources: [...(previous.sources ?? []), item.source].filter(
-                    (source, index, all) => all.findIndex((candidate) => sameSource(candidate, source)) === index
-                  ).slice(-500),
+                  originalNames: [...new Set([...previous.originalNames, ...group.map((entry) => entry.name)])],
+                  sources: boundedSources,
                   lastSeenAt: now,
-                  importCount: previous.importCount + 1,
-                  fingerprint: previous.fingerprint ?? item.fingerprint
+                  importCount: previous.importCount + group.length,
+                  fingerprint: previous.fingerprint ?? group.find((entry) => entry.fingerprint)?.fingerprint
                 }
               : {
                   id: item.sha256,
                   sha256: item.sha256,
                   size: item.size,
                   extension: extname(item.name).toLowerCase(),
-                  originalNames: [item.name],
+                  originalNames: [...new Set(group.map((entry) => entry.name))],
                   importedAt: now,
                   lastSeenAt: now,
-                  importCount: 1,
-                  sources: [item.source],
-                  fingerprint: item.fingerprint
+                  importCount: group.length,
+                  sources: boundedSources,
+                  fingerprint: group.find((entry) => entry.fingerprint)?.fingerprint
                 }
           }
         })
-        artifacts.push(...prepared.map((item) => database.artifacts[item.sha256]))
+        byHash.forEach((_group, sha256) => {
+          if (database.artifacts[sha256]) importedIds.add(sha256)
+        })
       } catch (error) {
         const reason = safeFailure(error)
         failures.push(...prepared.map((item) => ({ name: item.name, reason })))
       }
     }
+    const database = await this.store.read()
+    const artifacts = [...importedIds].flatMap((id) => database.artifacts[id] ? [database.artifacts[id]] : [])
     return { cancelled: false, artifacts, failures, skippedCount: 0 }
   }
 
@@ -483,7 +506,8 @@ export class ArtifactService {
     }
   }
 
-  async search(input: ArtifactSearchInput): Promise<ArtifactSearchResult> {
+  async search(input: ArtifactSearchInput, signal?: AbortSignal): Promise<ArtifactSearchResult> {
+    abortSearch(signal)
     if (!input || !Array.isArray(input.artifactIds)) throw new Error('검색할 로그를 선택해 주세요.')
     const artifactIds = [...new Set(input.artifactIds.map(String))]
     if (!artifactIds.length) throw new Error('검색할 로그를 선택해 주세요.')
@@ -502,13 +526,21 @@ export class ArtifactService {
     const matches: ArtifactSearchMatch[] = []
     const files: ArtifactSearchFileResult[] = []
     let totalMatchCount = 0
+    // Clone metadata once. Calling require()/store.read() per artifact turns a
+    // 5k search into O(files × metadata-size) structured cloning.
+    const database = await this.store.read()
 
     for (const artifactId of artifactIds) {
-      let record: ArtifactRecord
-      try {
-        record = await this.require(artifactId)
-      } catch (error) {
-        files.push({ artifactId, fileName: artifactId.slice(0, 12), matchCount: 0, searchedLineCount: 0, error: safeFailure(error) })
+      abortSearch(signal)
+      const record = /^[a-f0-9]{64}$/.test(artifactId) ? database.artifacts[artifactId] : undefined
+      if (!record) {
+        files.push({
+          artifactId,
+          fileName: artifactId.slice(0, 12),
+          matchCount: 0,
+          searchedLineCount: 0,
+          error: '아티팩트를 찾을 수 없습니다.'
+        })
         continue
       }
       const fileResult: ArtifactSearchFileResult = {
@@ -520,7 +552,7 @@ export class ArtifactService {
       const before: string[] = []
       const pending: Array<{ match: ArtifactSearchMatch; remaining: number }> = []
       try {
-        for await (const line of streamTextLines(this.objectPath(artifactId))) {
+        for await (const line of streamTextLines(this.objectPath(artifactId), signal)) {
           fileResult.searchedLineCount += 1
           if (line.includes('\0')) throw new Error('이진 파일은 텍스트로 검색할 수 없습니다.')
 
@@ -559,6 +591,7 @@ export class ArtifactService {
           }
         }
       } catch (error) {
+        if (signal?.aborted) throw error
         fileResult.error = safeFailure(error)
       }
       files.push(fileResult)
@@ -635,7 +668,11 @@ export class ArtifactService {
       .slice(0, Math.min(Math.max(limit, 1), 30))
   }
 
-  private async prepareArtifact(filePath: string, source: ArtifactSourceLocation): Promise<PreparedArtifact> {
+  private async prepareArtifact(
+    filePath: string,
+    source: ArtifactSourceLocation,
+    fingerprintCache: Map<string, SequenceFingerprint | undefined>
+  ): Promise<PreparedArtifact> {
     const fileStat = await stat(filePath)
     if (!fileStat.isFile()) throw new Error('일반 파일만 가져올 수 있습니다.')
     if (fileStat.size > MAX_ARTIFACT_BYTES) throw new Error('파일 크기가 2 GB 제한을 초과했습니다.')
@@ -665,11 +702,12 @@ export class ArtifactService {
     }
 
     const name = basename(filePath)
-    let fingerprint: SequenceFingerprint | undefined
-    if (fileStat.size <= FINGERPRINT_MAX_BYTES) {
+    let fingerprint = fingerprintCache.get(sha256)
+    if (!fingerprintCache.has(sha256) && fileStat.size <= FINGERPRINT_MAX_BYTES) {
       const text = await readUtf8Prefix(filePath, FINGERPRINT_MAX_BYTES)
       if (text !== null) fingerprint = parseSequence(text, name)
     }
+    fingerprintCache.set(sha256, fingerprint)
 
     return { sha256, size: fileStat.size, name, source, fingerprint }
   }

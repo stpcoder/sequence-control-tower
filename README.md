@@ -4,21 +4,22 @@
 
 # Sequence Control Tower
 
-**VS Code형 Log Workbench + 평가용 Git + Sequence Intelligence + 원격 실장기 Control Tower**를 하나의 Windows 데스크톱 경험으로 묶은 PoC입니다.
+**VS Code형 Log Workbench + 평가용 Git + Sequence Intelligence + 원격 실장기 Control Tower**를 하나의 Windows/macOS 데스크톱 경험으로 묶은 PoC입니다.
 
 [![CI](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml/badge.svg)](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/stpcoder/sequence-control-tower?display_name=tag&sort=semver)](https://github.com/stpcoder/sequence-control-tower/releases/latest)
 
 [![Windows 설치형 다운로드](https://img.shields.io/badge/Windows-설치형_다운로드-0A66C2?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-Setup.exe)
 [![Windows 포터블 다운로드](https://img.shields.io/badge/Windows-포터블_다운로드-30363D?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-Portable.exe)
+[![macOS Universal 다운로드](https://img.shields.io/badge/macOS-Universal_DMG-1F6FEB?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-macOS-Universal.dmg)
 
-[ZIP 다운로드](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-Windows.zip) · [SHA-256 확인](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/SHA256SUMS.txt) · [모든 Release 보기](https://github.com/stpcoder/sequence-control-tower/releases)
+[Windows ZIP](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-Windows.zip) · [macOS ZIP](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-macOS-Universal.zip) · [Windows SHA-256](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/SHA256SUMS.txt) · [macOS SHA-256](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/SHA256SUMS-macOS.txt) · [모든 Release 보기](https://github.com/stpcoder/sequence-control-tower/releases)
 
 > 이 저장소는 현재 private입니다. 다운로드하려면 `stpcoder/sequence-control-tower` 읽기 권한이 있는 GitHub 계정으로 로그인해야 합니다. 위 링크는 공개 배포 링크가 아니며, 외부 `shields.io` 최신 버전 배지는 private 저장소 정보를 표시하지 못할 수 있습니다.
 >
 > 저장소를 다른 GitHub 조직이나 이름으로 옮기면 위 배지와 다운로드 링크의 `stpcoder/sequence-control-tower`를 함께 변경해야 합니다.
 
-처음 설치하거나 portable 배포판을 사용하려면 [Windows 설치 및 제거 가이드](docs/manual/windows-installation.md)를 먼저 확인하세요.
+처음 설치한다면 [Windows 설치 및 제거](docs/manual/windows-installation.md) 또는 [macOS 설치](docs/manual/macos-installation.md) 가이드를 먼저 확인하세요.
 
 ![Log Workbench — 여러 폴더 검색, 판정 근거, Recipe 후보](docs/images/manual-00-log-workbench.jpg)
 
@@ -46,9 +47,10 @@ SEQ 수집 → 문법/조건 추출 → 유사 Sequence와 계보 탐색
 
 ## 현재 PoC 범위
 
-Windows 앱에서 현재 실제로 연결된 기능은 다음과 같습니다.
+Windows와 macOS 데스크톱 앱에서 현재 실제로 연결된 기능은 다음과 같습니다.
 
 - 여러 Windows 폴더 동시 선택, 하위 `.log` 재귀 수집과 동일 SHA의 복수 파일 인스턴스 보존
+- 한 번에 최대 10,000개 로그 수집, 중복 원문의 단일 저장과 모든 파일 출처 보존
 - 같은 경로를 다시 수집하면 최신 SHA만 작업 목록에 표시하되 과거 내용의 판정·근거는 새 내용에 승계하지 않음
 - VS Code형 읽기 전용 로그 뷰어, 240줄 지연 로딩과 절대 줄 번호 이동
 - 현재/전체 로그의 literal·정규식·대소문자·단어 단위 로컬 스트리밍 검색
@@ -68,6 +70,16 @@ Windows 앱에서 현재 실제로 연결된 기능은 다음과 같습니다.
 - 앱 재시작 시 content-addressed artifact와 Wiki 목록 복원
 
 Project Tower와 Evaluation Agent 대화는 제품 방향을 검증하는 **sample data 기반 UX demo**입니다. Inbox·Semantic Review·Knowledge Cases는 실제 데이터가 있으면 그 결과를 우선 표시하고, 데이터가 없거나 분석 전이면 sample fallback을 보여줍니다. Equipment Console도 실제 장비가 아닌 **모니터링 simulation**입니다. 실제 Serial 제어, 원격 PC 연결, 전원·Flash·중단 기능은 이번 PoC 범위에 포함하지 않습니다.
+
+### 대량 로그 검증 결과
+
+대량 처리는 LLM이 아니라 Electron main process의 로컬 스트리밍 엔진이 담당합니다. 개발 장비의 opt-in 회귀 테스트에서 5,000개 고유 로그 가져오기는 약 4.35초, 전체 검색은 약 0.52초였고, 동일 내용 10,000개는 원문 한 벌과 10,000개 출처로 보존됐습니다. 100만 줄(약 25MB) 로그의 끝부분 검색은 약 0.22초였습니다. 수치는 저장장치와 로그 형태에 따라 달라지며 기능 보장이 아닌 회귀 기준입니다.
+
+- 새 검색을 시작하면 같은 화면의 이전 검색은 취소합니다.
+- 전체 match 수는 정확히 유지하되 화면에 반환하는 detail과 context는 제한합니다.
+- 2GB 초과 파일과 4MiB 초과 단일 logical line은 해당 파일만 실패로 격리합니다.
+- 폴더 가져오기는 현재 완료/부분 실패 알림만 제공하며 진행률과 취소 UI는 후속 과제입니다.
+- 수 GB 로그를 같은 깊은 위치에서 반복 탐색한다면 sparse line index를 추가하는 것이 다음 최적화입니다.
 
 ### 1. Log Workbench
 
@@ -123,13 +135,19 @@ SEQ 원본
 
 설치형, SmartScreen, portable/ZIP, 업데이트와 제거 방법은 [Windows 설치 및 제거 가이드](docs/manual/windows-installation.md)에 정리돼 있습니다.
 
+## macOS에서 설치
+
+macOS 12 Monterey 이상에서 Intel·Apple Silicon을 모두 포함한 Universal DMG를 사용할 수 있습니다. 위의 **macOS Universal 다운로드**를 받은 뒤 앱을 Applications로 옮기세요.
+
+현재 자동 빌드는 Apple Developer ID로 서명·공증되지 않은 PoC이므로 Gatekeeper가 첫 실행을 차단할 수 있습니다. 출처와 SHA-256을 확인하고 회사 보안 정책이 허용하는 경우에만 [macOS 설치 가이드](docs/manual/macos-installation.md)의 첫 실행 절차를 따르세요. 경고 없는 사내 배포에는 Developer ID 서명과 Apple notarization이 필요합니다.
+
 ## 개발 환경에서 실행
 
 요구 사항:
 
 - Node.js 22 LTS
 - npm 10 이상
-- Windows 10/11 권장(개발 UI는 macOS/Linux에서도 실행 가능)
+- Windows 10/11 또는 macOS 12 이상
 
 ```bash
 git clone https://github.com/stpcoder/sequence-control-tower.git
@@ -145,9 +163,10 @@ npm run typecheck
 npm test
 npm run build
 npm run dist:win
+npm run dist:mac
 ```
 
-Windows 산출물은 `release/` 아래에 생성됩니다.
+Windows/macOS 산출물은 `release/` 아래에 생성됩니다. 각 패키지는 해당 운영체제에서 빌드하세요.
 
 ## 사내 OpenAI-compatible API 설정
 
@@ -192,12 +211,13 @@ Settings 화면 진입 시에는 endpoint 요청 없이 이 PC에 적용된 설�
 
 ## GitHub Actions와 Release
 
-- `CI`: 모든 branch push와 Pull Request에서 Windows 기준 type-check, test, build를 실행합니다.
+- `CI`: 모든 branch push와 Pull Request에서 type-check, test, build를 실행합니다.
 - `Windows Release`: `v*` tag push 또는 Actions의 수동 실행으로 NSIS 설치형, portable 실행 파일, ZIP, SHA-256 목록을 게시합니다.
+- `macOS Release`: `v*` tag push로 unsigned Universal DMG/ZIP, SHA-256 목록과 Gatekeeper 안내를 같은 Release에 게시합니다.
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 수동 배포는 먼저 원격에 tag를 push한 뒤 GitHub의 **Actions → Windows Release → Run workflow**에서 같은 tag를 입력합니다. Workflow는 branch가 아니라 입력한 tag commit을 checkout해 빌드합니다. 고정된 asset 이름을 사용하므로 README의 최신 다운로드 버튼은 새 버전에서도 그대로 동작합니다.
@@ -208,7 +228,7 @@ git push origin v0.2.0
 
 ## 사용자 매뉴얼
 
-[Windows 설치 및 제거](docs/manual/windows-installation.md)와 화면별 빨간 박스 사용 가이드는 [docs/manual](docs/manual/README.md)을 참고하세요.
+[Windows 설치 및 제거](docs/manual/windows-installation.md), [macOS 설치](docs/manual/macos-installation.md), 화면별 빨간 박스 사용 가이드는 [docs/manual](docs/manual/README.md)을 참고하세요.
 
 ## 권장 다음 단계
 

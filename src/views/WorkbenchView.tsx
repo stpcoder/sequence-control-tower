@@ -16,19 +16,16 @@ import {
   ChevronsUp,
   Circle,
   CircleDot,
-  Files,
   FileText,
   Folder,
   FolderOpen,
   LoaderCircle,
-  PanelRightClose,
-  PanelRightOpen,
   Play,
-  Plus,
   Regex,
   RotateCcw,
   Search,
   SearchCode,
+  SlidersHorizontal,
   ShieldCheck,
   Sparkles,
   WholeWord,
@@ -38,6 +35,7 @@ import type {
   ArtifactRecord,
   ArtifactSearchInput,
   ArtifactSearchResult,
+  RendererCommand,
   SequenceIntelligenceApi,
 } from '../../electron/shared/contracts'
 import {
@@ -127,6 +125,7 @@ interface BatchPreview {
   error?: string
   outcomes?: Record<string, ResultLabel>
   conflicts?: number
+  exceptionIds?: string[]
 }
 
 interface CountEvidence {
@@ -373,6 +372,7 @@ export interface PrecomputedBatchResolution {
   matched: number
   exceptions: number
   conflicts: number
+  exceptionIds: string[]
 }
 
 export function resolvePrecomputedBatch(
@@ -385,6 +385,7 @@ export function resolvePrecomputedBatch(
   let matched = 0
   let exceptions = 0
   let conflicts = 0
+  const exceptionIds: string[] = []
   for (const file of files) {
     const evidence = evidenceBySource.get(file.id) ?? { sourceId: file.id, rules: [] }
     const evaluation = evaluatePrecomputedEvidence(evidence, rules)
@@ -393,10 +394,13 @@ export function resolvePrecomputedBatch(
     if (decisionConflict) conflicts += 1
     outcomes[file.id] = savedDecision ?? (decisionConflict ? 'UNKNOWN' : evaluation.result)
     const exceptional = decisionConflict || evaluation.result === 'UNKNOWN' || evaluation.exceptions.length > 0
-    if (exceptional) exceptions += 1
+    if (exceptional) {
+      exceptions += 1
+      exceptionIds.push(file.id)
+    }
     else matched += 1
   }
-  return { outcomes, matched, exceptions, conflicts }
+  return { outcomes, matched, exceptions, conflicts, exceptionIds }
 }
 
 function renderHighlightedLine(
@@ -460,7 +464,8 @@ export function WorkbenchView({
   const [recipeVisible, setRecipeVisible] = useState(false)
   const [recipeSaved, setRecipeSaved] = useState(false)
   const [batchPreview, setBatchPreview] = useState<BatchPreview>({ status: 'idle', matched: 0, exceptions: 0 })
-  const [rightOpen, setRightOpen] = useState(true)
+  const [showBatchExceptions, setShowBatchExceptions] = useState(false)
+  const [searchOptionsOpen, setSearchOptionsOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [invalidPattern, setInvalidPattern] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -497,13 +502,14 @@ export function WorkbenchView({
   const groupedFiles = useMemo(() => {
     const groups = new Map<string, WorkbenchFile[]>()
     for (const file of files) {
+      if (showBatchExceptions && !batchPreview.exceptionIds?.includes(file.id)) continue
       const origin = file.origin || file.relativePath?.split(/[\\/]/)[0] || 'Imported logs'
       const current = groups.get(origin) ?? []
       current.push(file)
       groups.set(origin, current)
     }
     return [...groups.entries()]
-  }, [files])
+  }, [batchPreview.exceptionIds, files, showBatchExceptions])
 
   const recipeObservations = useMemo(() => {
     if (!activeFile) return []
@@ -754,14 +760,21 @@ export function WorkbenchView({
     }
     setImporting(true)
     try {
-      const result = await api.artifacts.importFolder({ extensions: ['log'], maxFiles: 5000 })
+      const result = await api.artifacts.importFolder({ extensions: ['log'], maxFiles: 10000 })
       if (result.cancelled) return
       const imported = result.artifacts.flatMap(artifactFiles)
       const next = dedupeWorkbenchFiles([...files, ...imported])
       updateFiles(next)
       setExpandedOrigins((current) => new Set([...current, ...imported.map((file) => file.origin ?? 'Imported logs')]))
       if (imported[0]) selectFile(imported[0].id)
-      onNotify?.(`${imported.length}개 로그 메타데이터를 불러왔습니다. 내용은 열 때만 읽습니다.`, 'success')
+      const limitReached = 'limitReached' in result && result.limitReached === true
+      const partial = result.failures.length > 0 || result.skippedCount > 0 || limitReached
+      onNotify?.(
+        partial
+          ? `${imported.length}개 로그를 불러왔지만 일부는 처리하지 못했습니다${result.failures.length ? ` · 실패 ${result.failures.length}` : ''}${result.skippedCount ? ` · 제외 ${result.skippedCount}` : ''}${limitReached ? ' · 10,000개 제한 도달' : ''}.`
+          : `${imported.length}개 로그 메타데이터를 불러왔습니다. 내용은 열 때만 읽습니다.`,
+        partial ? 'info' : 'success',
+      )
     } catch (error) {
       onNotify?.(error instanceof Error ? error.message : '폴더를 불러오지 못했습니다.', 'error')
     } finally {
@@ -769,9 +782,20 @@ export function WorkbenchView({
     }
   }
 
+  useEffect(() => {
+    const handleAppCommand = (event: Event) => {
+      const command = (event as CustomEvent<RendererCommand>).detail
+      if (command === 'find') openSearch('file')
+      else if (command === 'find-workspace') openSearch('workspace')
+      else if (command === 'open-logs' && !importing) void importFolder()
+    }
+    window.addEventListener('sequence-control-tower:command', handleAppCommand)
+    return () => window.removeEventListener('sequence-control-tower:command', handleAppCommand)
+  }, [importing, openSearch, importFolder])
+
   const chooseDecision = (nextDecision: WorkbenchDecision) => {
     if (!activeFile) return
-    const existing = savedDecisions[activeFile.id] ?? decisions[activeFile.id]
+    const existing = savedDecisions[activeFile.id] ?? activeFile.decision
     if (existing && existing !== nextDecision) {
       setCandidateDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
       onNotify?.(`기존 ${existing} 판정은 유지하고 ${nextDecision}를 Recipe 후보로만 사용합니다.`, 'info')
@@ -787,6 +811,7 @@ export function WorkbenchView({
     setRecipeVisible(nextDecision !== 'UNKNOWN' && recipeObservations.length > 0)
     setRecipeSaved(false)
     setBatchPreview({ status: 'idle', matched: 0, exceptions: 0 })
+    setShowBatchExceptions(false)
   }
 
   const toggleEvidence = (line: number) => {
@@ -822,7 +847,7 @@ export function WorkbenchView({
         metadata: { id: rule.id, name: `${decision} 판정 Recipe`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
         rules: [rule],
       }
-      const existingDecision = savedDecisions[activeFile.id] ?? decisions[activeFile.id]
+      const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
       const confirmedDecision = existingDecision
         ? { ...engineerDecision, result: existingDecision }
         : engineerDecision
@@ -852,6 +877,7 @@ export function WorkbenchView({
   const applyBatch = async () => {
     if (!decision || decision === 'UNKNOWN' || !recipeObservations.length) return
     setBatchPreview({ status: 'running', matched: 0, exceptions: 0 })
+    setShowBatchExceptions(false)
     try {
       if (!activeFile) return
       const api = electronApi()
@@ -880,7 +906,7 @@ export function WorkbenchView({
           const artifactRows = files.filter((file) => file.artifactId)
           const artifactIds = [...new Set(artifactRows.flatMap((file) => file.artifactId ? [file.artifactId] : []))]
           if (artifactIds.length) {
-            if (!api) throw new Error('Windows 로컬 검색 서비스를 사용할 수 없습니다.')
+            if (!api) throw new Error('데스크톱 로컬 검색 서비스를 사용할 수 없습니다.')
             try {
               const result = await searchArtifactsBatched(api, artifactIds, {
                 query: clause.matcher.pattern,
@@ -955,25 +981,25 @@ export function WorkbenchView({
   }
 
   return (
-    <div className={`log-workbench ${rightOpen ? '' : 'workbench-right-closed'}`}>
-      <nav className="workbench-activity" aria-label="Workbench 도구">
-        <div className="workbench-mark" aria-hidden="true">LW</div>
-        <button className={sideMode === 'files' ? 'active' : ''} onClick={() => setSideMode('files')} aria-label="로그 탐색기" title="로그 탐색기"><Files size={19} /></button>
-        <button className={sideMode === 'search' ? 'active' : ''} onClick={() => { setSideMode('search'); openSearch('workspace') }} aria-label="모든 로그 검색" title="모든 로그 검색 (Ctrl+Shift+F)"><SearchCode size={19} /></button>
-        <span className="activity-spacer" />
-        <button onClick={() => setRightOpen((current) => !current)} aria-label="판정 패널 전환" title="판정 패널 전환">{rightOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button>
-      </nav>
-
+    <div className="log-workbench">
       <aside className="workbench-sidebar">
         <header>
-          <span>{sideMode === 'files' ? 'LOG EXPLORER' : 'SEARCH'}</span>
-          <button onClick={() => void importFolder()} disabled={importing} aria-label="폴더 추가" title="로그 폴더 추가">{importing ? <LoaderCircle className="wb-spin" size={15} /> : <Plus size={16} />}</button>
+          <div><strong>{sideMode === 'search' ? '전체 검색' : showBatchExceptions ? '예외 로그' : '로그'}</strong><span>{showBatchExceptions ? `${batchPreview.exceptions}개 확인 필요` : `${files.length}개 파일`}</span></div>
+          <button
+            onClick={() => {
+              if (sideMode === 'search') setSideMode('files')
+              else if (showBatchExceptions) setShowBatchExceptions(false)
+              else openSearch('workspace')
+            }}
+            aria-label={sideMode === 'search' || showBatchExceptions ? '로그 목록으로 돌아가기' : '모든 로그 검색'}
+            title={sideMode === 'search' || showBatchExceptions ? '로그 목록으로 돌아가기' : '모든 로그 검색'}
+          >{sideMode === 'search' || showBatchExceptions ? <X size={18} /> : <Search size={18} />}</button>
         </header>
 
         {sideMode === 'files' ? (
           <div className="folder-tree">
             <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
-              <FolderOpen size={15} /> 폴더 추가 <kbd>여러 번 선택 가능</kbd>
+              {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span><small>여러 폴더 추가 가능</small>
             </button>
             {groupedFiles.map(([origin, group]) => {
               const expanded = expandedOrigins.has(origin)
@@ -1016,12 +1042,12 @@ export function WorkbenchView({
             }) : searching ? (
               <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>전체 원본을 로컬에서 검색하고 있습니다.</span></div>
             ) : (
-              <div className="empty-search"><Search size={18} /><span><kbd>Ctrl Shift F</kbd>로 모든 로그에서 찾습니다.</span></div>
+              <div className="empty-search"><Search size={22} /><span><kbd>Ctrl Shift F</kbd>로 모든 로그에서 찾습니다.</span></div>
             )}
           </div>
         )}
 
-        <footer className="sidebar-status"><ShieldCheck size={13} /><span>원본은 읽기 전용</span><b>{files.length} logs</b></footer>
+        <footer className="sidebar-status"><ShieldCheck size={15} /><span>원본 보호됨</span><b>읽기 전용</b></footer>
       </aside>
 
       <main className="workbench-editor-shell">
@@ -1047,18 +1073,19 @@ export function WorkbenchView({
 
         {searchOpen ? (
           <div className="find-widget" role="search" aria-label={searchScope === 'file' ? '현재 로그 검색' : '모든 로그 검색'}>
-            <Search size={14} />
+            <Search size={18} />
             <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder={searchScope === 'file' ? '현재 로그에서 찾기' : `${files.length}개 로그에서 찾기`} aria-invalid={invalidPattern} />
-            <div className="search-toggles">
+            <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
+            <span className={invalidPattern || searchError ? 'invalid' : ''}>{searching ? '검색 중' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
+            <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
+            <button onClick={() => moveToHit(1)} disabled={!hits.length} aria-label="다음 검색 결과" title="다음 결과 (Enter)"><ChevronsDown size={18} /></button>
+            <button onClick={() => setSearchOpen(false)} aria-label="검색 닫기" title="닫기 (Escape)"><X size={18} /></button>
+            {searchOptionsOpen ? <div className="search-options-popover" aria-label="검색 옵션">
               {(Object.keys(options) as Array<keyof SearchOptions>).map((option) => {
                 const Icon = option === 'caseSensitive' ? CaseSensitive : option === 'wholeWord' ? WholeWord : Regex
-                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} aria-label={optionLabel(option)} title={optionLabel(option)} onClick={() => setOptions((current) => ({ ...current, [option]: !current[option] }))} key={option}><Icon size={15} /></button>
+                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} onClick={() => setOptions((current) => ({ ...current, [option]: !current[option] }))} key={option}><Icon size={16} /><span>{optionLabel(option)}</span>{options[option] ? <Check size={15} /> : null}</button>
               })}
-            </div>
-            <span className={invalidPattern || searchError ? 'invalid' : ''}>{searching ? '검색 중' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
-            <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={15} /></button>
-            <button onClick={() => moveToHit(1)} disabled={!hits.length} aria-label="다음 검색 결과" title="다음 결과 (Enter)"><ChevronsDown size={15} /></button>
-            <button onClick={() => setSearchOpen(false)} aria-label="검색 닫기" title="닫기 (Escape)"><X size={15} /></button>
+            </div> : null}
           </div>
         ) : null}
 
@@ -1080,37 +1107,28 @@ export function WorkbenchView({
         </div>
 
         <footer className="editor-statusbar">
-          <span><CircleDot size={12} /> READ ONLY</span>
-          <span>UTF-8</span><span>LF</span>
+          <span><ShieldCheck size={14} /> 원본 읽기 전용</span>
           <span className="status-spacer" />
-          <button onClick={() => openSearch('file')}><Search size={12} />찾기 <kbd>Ctrl F</kbd></button>
-          <button onClick={() => openSearch('workspace')}><SearchCode size={12} />전체 검색 <kbd>Ctrl Shift F</kbd></button>
-          <span>Ln {activeHit?.line ?? 1}</span>
+          <button onClick={() => openSearch('file')}><Search size={14} />현재 로그 찾기 <kbd>Ctrl F</kbd></button>
+          <button onClick={() => openSearch('workspace')}><SearchCode size={14} />전체 로그 찾기 <kbd>Ctrl Shift F</kbd></button>
         </footer>
       </main>
 
       <aside className="decision-panel" aria-label="로그 판정">
         <header>
-          <div><span>DECISION</span><strong>결과 판정</strong></div>
-          <span className="local-badge"><CircleDot size={11} />LOCAL FIRST</span>
+          <div><strong>결과 판정</strong><span>현재 로그의 결과를 선택하세요</span></div>
+          <span className="local-badge"><ShieldCheck size={13} />로컬 분석</span>
         </header>
 
         <div className="decision-content">
           <section className="signal-summary">
             <div><span>현재 파일</span><strong>{activeFile?.name}</strong></div>
-            <dl>
-              <div><dt>검색</dt><dd>{searchHistory[activeFile?.id ?? '']?.length ?? 0}</dd></div>
-              <div><dt>근거</dt><dd>{evidenceLines.length}</dd></div>
-              <div><dt>상태</dt><dd>{decision ? '확정' : '미정'}</dd></div>
-            </dl>
+            <p>검색 {searchHistory[activeFile?.id ?? '']?.length ?? 0}회 · 근거 {evidenceLines.length}줄</p>
           </section>
 
-          <section className="decision-options" aria-label="결과 선택">
-            {DECISIONS.map((item) => (
-              <button className={`${item.tone} ${decision === item.value ? 'selected' : ''}`} aria-pressed={decision === item.value} onClick={() => chooseDecision(item.value)} key={item.value}>
-                <i /> <span>{item.label}</span>{decision === item.value ? <Check size={14} /> : null}
-              </button>
-            ))}
+          <section className="decision-picker" aria-label="결과 선택">
+            <label htmlFor="decision-select">판정 결과</label>
+            <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => event.target.value && chooseDecision(event.target.value as WorkbenchDecision)}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
           </section>
 
           {evidenceLines.length ? (
@@ -1121,6 +1139,10 @@ export function WorkbenchView({
           ) : (
             <div className="evidence-hint"><CircleDot size={14} /><span>중요한 줄의 왼쪽 점을 눌러 판정 근거로 남길 수 있습니다.</span></div>
           )}
+
+          {!recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
+            <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><span><strong>분석 방법 저장</strong><small>검색과 판정을 Recipe로 만듭니다</small></span><ChevronRight size={17} /></button>
+          ) : null}
 
           {recipeVisible && draft ? (
             <section className="recipe-suggestion">
@@ -1140,7 +1162,7 @@ export function WorkbenchView({
           {batchPreview.status === 'done' ? (
             <section className="batch-summary">
               <div><Check size={15} /><span><strong>{batchPreview.matched}개</strong> 조건 일치 · 로컬 계산</span></div>
-              <button onClick={() => { setSideMode('files'); setBatchPreview({ status: 'idle', matched: 0, exceptions: 0 }) }}><AlertTriangle size={13} /><span>예외 {batchPreview.exceptions}개 확인</span><ChevronRight size={13} /></button>
+              <button onClick={() => { setSideMode('files'); setShowBatchExceptions(true) }}><AlertTriangle size={13} /><span>예외 {batchPreview.exceptions}개 확인</span><ChevronRight size={13} /></button>
             </section>
           ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
         </div>

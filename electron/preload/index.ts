@@ -6,6 +6,7 @@ import type {
   ArtifactSearchInput,
   LlmConfigInput,
   LlmModelDiscoveryInput,
+  RendererCommand,
   SequenceIntelligenceApi,
   StartAnalysisInput,
   WikiEntryInput
@@ -14,7 +15,15 @@ import { IPC_CHANNELS } from '../shared/contracts'
 
 const api: SequenceIntelligenceApi = {
   app: {
-    getStatus: () => ipcRenderer.invoke(IPC_CHANNELS.appStatus)
+    getStatus: () => ipcRenderer.invoke(IPC_CHANNELS.appStatus),
+    onCommand: (listener: (command: RendererCommand) => void) => {
+      const allowed = new Set<RendererCommand>(['open-logs', 'find', 'find-workspace', 'preferences'])
+      const handler = (_event: Electron.IpcRendererEvent, command: RendererCommand): void => {
+        if (allowed.has(command)) listener(command)
+      }
+      ipcRenderer.on(IPC_CHANNELS.appCommand, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.appCommand, handler)
+    }
   },
   artifacts: {
     importFiles: () => ipcRenderer.invoke(IPC_CHANNELS.artifactImportFiles),

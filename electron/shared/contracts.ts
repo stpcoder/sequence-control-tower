@@ -297,10 +297,13 @@ export interface AppStatus {
   llm: LlmConfigSummary
 }
 
+export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences'
+
 /** This is the only API exposed by contextBridge. */
 export interface SequenceIntelligenceApi {
   app: {
     getStatus(): Promise<AppStatus>
+    onCommand(listener: (command: RendererCommand) => void): () => void
   }
   artifacts: {
     importFiles(): Promise<ArtifactImportResult>
@@ -331,6 +334,7 @@ export interface SequenceIntelligenceApi {
 
 export const IPC_CHANNELS = {
   appStatus: 'app:status',
+  appCommand: 'app:command',
   artifactImportFiles: 'artifact:import-files',
   artifactImportFolder: 'artifact:import-folder',
   artifactList: 'artifact:list',

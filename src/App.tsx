@@ -73,6 +73,25 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const api = window.sequenceIntelligence
+    if (!api?.app.onCommand) return undefined
+    return api.app.onCommand((command) => {
+      if (command === 'preferences') {
+        setActivePage('settings')
+        return
+      }
+      setActivePage('workbench')
+      // Allow a newly selected Workbench to mount before forwarding the
+      // native menu action into its renderer-owned passive-effect listener.
+      window.requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('sequence-control-tower:command', { detail: command }))
+        }, 0)
+      })
+    })
+  }, [])
+
+  useEffect(() => {
     if (!toast) return undefined
     const timer = window.setTimeout(() => setToast(null), 3200)
     return () => window.clearTimeout(timer)
@@ -143,7 +162,7 @@ export default function App() {
 
   const queueAnalyses = useCallback(async (incoming: ArtifactRecord[], userComment: string) => {
     const api = window.sequenceIntelligence
-    if (!api) throw new Error('Windows 앱에서만 실제 분석을 실행할 수 있습니다.')
+    if (!api) throw new Error('데스크톱 앱에서만 실제 분석을 실행할 수 있습니다.')
     const comment = userComment.trim()
     if (comment) {
       setCommentsByArtifact((current) => ({
@@ -187,7 +206,7 @@ export default function App() {
   const exportKnowledgeEntry = useCallback(async (entryId: string): Promise<WikiExportResult | null> => {
     const api = window.sequenceIntelligence
     if (!api) {
-      notify('Markdown 내보내기는 Windows 앱에서 사용할 수 있습니다.', 'info')
+      notify('Markdown 내보내기는 데스크톱 앱에서 사용할 수 있습니다.', 'info')
       return null
     }
     try {

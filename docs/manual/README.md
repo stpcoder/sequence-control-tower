@@ -1,12 +1,14 @@
 # Sequence Control Tower 사용자 매뉴얼
 
 - [Log Workbench — 여러 폴더 검색, 판정, Recipe 저장](00-log-workbench.md)
+- [Windows 설치 및 제거](windows-installation.md)
+- [macOS 설치](macos-installation.md)
 
 이 매뉴얼은 “버튼을 전부 설명하는 문서”가 아니라, 엔지니어가 새 Sequence를 기록하고 검토한 뒤 프로젝트 지식으로 남기는 가장 짧은 흐름을 안내합니다.
 
 ## 5분 시작 순서
 
-1. [Windows 설치 및 제거](windows-installation.md)에 따라 설치형 또는 portable 앱을 준비합니다.
+1. 운영체제에 따라 [Windows 설치 및 제거](windows-installation.md) 또는 [macOS 설치](macos-installation.md) 가이드로 앱을 준비합니다.
 2. [Log Workbench](00-log-workbench.md)에서 여러 `.log` 폴더를 열고 `Ctrl+F`로 대표 로그를 확인합니다.
 3. 결과를 판정하고 `이 분석 방법을 저장`한 뒤 전체 로그에 미리 적용합니다.
 4. [Settings](05-settings.md)에서 필요한 경우에만 사내 AI URL·token을 연결하고 모델을 확인합니다.
@@ -35,7 +37,7 @@
 
 ## PoC 범위
 
-현재 PoC는 파일/폴더 import, SHA-256 원본 보존, 로컬 SEQ 분석, 최소 evidence redaction, 사내 LLM queue와 fallback, 실제 Inbox·Semantic Review, 승인형 Wiki 저장과 Markdown 내보내기까지 Windows UI에 연결합니다. 이 화면들은 실제 데이터가 없을 때만 sample fallback을 표시합니다. Project Tower와 Evaluation Agent 대화는 sample data 기반 UX demo이고, Equipment Console도 실제 Serial 제어가 아닌 **모니터링 UX simulation**입니다. 실제 장비 제어에는 별도의 Windows Equipment Agent와 안전 정책이 필요합니다.
+현재 PoC는 파일/폴더 import, SHA-256 원본 보존, 로컬 SEQ 분석, 최소 evidence redaction, 사내 LLM queue와 fallback, 실제 Inbox·Semantic Review, 승인형 Wiki 저장과 Markdown 내보내기까지 Windows/macOS UI에 연결합니다. 이 화면들은 실제 데이터가 없을 때만 sample fallback을 표시합니다. Project Tower와 Evaluation Agent 대화는 sample data 기반 UX demo이고, Equipment Console도 실제 Serial 제어가 아닌 **모니터링 UX simulation**입니다. 실제 장비 제어에는 별도의 Windows Equipment Agent와 안전 정책이 필요합니다.
 
 ## 문제 해결
 

@@ -2,11 +2,13 @@ import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
+import { buildMacMenuTemplate } from './app-menu'
 import { ArtifactService } from './artifact-service'
 import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
 import { IPC_CHANNELS } from '../shared/contracts'
+import type { RendererCommand } from '../shared/contracts'
 
 let mainWindow: BrowserWindow | null = null
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -72,6 +74,40 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+function openMainWindow(): BrowserWindow {
+  const window = createWindow()
+  mainWindow = window
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null
+  })
+  return window
+}
+
+function sendRendererCommand(command: RendererCommand): void {
+  const target = BrowserWindow.getFocusedWindow() ?? mainWindow
+  if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return
+  const deliver = (): void => {
+    if (!target.isDestroyed() && !target.webContents.isDestroyed()) {
+      target.webContents.send(IPC_CHANNELS.appCommand, command)
+    }
+  }
+  if (target.webContents.isLoadingMainFrame()) target.webContents.once('did-finish-load', deliver)
+  else deliver()
+}
+
+function installApplicationMenu(): void {
+  if (process.platform !== 'darwin') {
+    // Preserve the existing Windows application chrome and shortcut behavior.
+    Menu.setApplicationMenu(null)
+    return
+  }
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildMacMenuTemplate({
+    appName: app.name || 'Sequence Control Tower',
+    development: !app.isPackaged,
+    sendCommand: sendRendererCommand
+  })))
+}
+
 async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
   const artifacts = new ArtifactService(dataRoot)
@@ -107,11 +143,8 @@ async function bootstrap(): Promise<void> {
       })
     })
   }
-  Menu.setApplicationMenu(null)
-  mainWindow = createWindow()
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
+  openMainWindow()
+  installApplicationMenu()
 }
 
 const hasLock = app.requestSingleInstanceLock()
@@ -130,7 +163,7 @@ if (!hasLock) {
       app.setAppUserModelId('com.sequence-intelligence.control-tower')
       await bootstrap()
       app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
+        if (BrowserWindow.getAllWindows().length === 0) openMainWindow()
       })
     })
     .catch(() => {
