@@ -115,6 +115,27 @@ jobs:
           Copy-Item $setup.FullName "release-assets/Sequence-Control-Tower-Setup.exe"
           Copy-Item $portable.FullName "release-assets/Sequence-Control-Tower-Portable.exe"
 
+          $unpackedExecutable = Get-ChildItem -Path "release" -Recurse -File -Filter "Sequence Control Tower.exe" |
+            Where-Object { $_.FullName -match "(?i)win-unpacked" } |
+            Select-Object -First 1
+          if (-not $unpackedExecutable) {
+            throw "x64 unpacked application executable was not found."
+          }
+          $stream = [System.IO.File]::OpenRead($unpackedExecutable.FullName)
+          $reader = [System.IO.BinaryReader]::new($stream)
+          try {
+            $stream.Position = 0x3c
+            $peOffset = $reader.ReadInt32()
+            $stream.Position = $peOffset + 4
+            $machine = $reader.ReadUInt16()
+          } finally {
+            $reader.Dispose()
+            $stream.Dispose()
+          }
+          if ($machine -ne 0x8664) {
+            throw "Expected an x64 PE executable (0x8664), found 0x$($machine.ToString('x4'))."
+          }
+
           $zipPackage = Get-ChildItem -Path "release" -Recurse -File -Filter "*.zip" |
             Select-Object -First 1
           if ($zipPackage) {
@@ -129,6 +150,35 @@ jobs:
             Compress-Archive -Path "$($unpacked.FullName)\*" -DestinationPath "release-assets/Sequence-Control-Tower-Windows.zip"
           }
 
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead(
+            (Resolve-Path "release-assets/Sequence-Control-Tower-Windows.zip").Path
+          )
+          try {
+            if ($zip.Entries.Count -eq 0 -or -not ($zip.Entries | Where-Object { $_.FullName -match "(?i)Sequence Control Tower\.exe$" })) {
+              throw "Windows ZIP is empty or does not contain the application executable."
+            }
+          } finally {
+            $zip.Dispose()
+          }
+
+          $setupSignature = Get-AuthenticodeSignature "release-assets/Sequence-Control-Tower-Setup.exe"
+          $portableSignature = Get-AuthenticodeSignature "release-assets/Sequence-Control-Tower-Portable.exe"
+          $signed = $setupSignature.Status -eq "Valid" -and $portableSignature.Status -eq "Valid"
+          if ($signed) {
+            @(
+              "This Windows release has a valid Authenticode signature on both executable assets."
+              "Verify the signer in Properties > Digital Signatures and verify SHA256SUMS.txt before running it."
+            ) | Set-Content -Encoding utf8 "release-assets/WINDOWS-SIGNING-NOTICE.txt"
+          } else {
+            @(
+              "This Windows release is unsigned or does not have a valid Authenticode signature on every executable asset."
+              "Microsoft Defender SmartScreen may show an unrecognized-app warning."
+              "Install only if you trust this repository, verify SHA256SUMS.txt, and your company policy permits it."
+              "Production distribution requires an organization-trusted code-signing certificate."
+            ) | Set-Content -Encoding utf8 "release-assets/WINDOWS-SIGNING-NOTICE.txt"
+          }
+
           Get-ChildItem "release-assets" -File |
             Sort-Object Name |
             ForEach-Object {
@@ -136,6 +186,13 @@ jobs:
               "$hash  $($_.Name)"
             } |
             Set-Content -Encoding utf8 "release-assets/SHA256SUMS.txt"
+
+          @(
+            "### Windows distribution status"
+            "- NSIS Setup, portable EXE, and ZIP were built explicitly for x64."
+            "- Authenticode valid for both executable assets: **$signed**"
+            "- If unsigned, SmartScreen may block first launch; see WINDOWS-SIGNING-NOTICE.txt."
+          ) | Add-Content -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3

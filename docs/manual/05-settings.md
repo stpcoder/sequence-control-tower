@@ -2,13 +2,13 @@
 
 ![Settings 화면 — 빨간 박스 ① 사내 LLM 연결, ② rate/latency 보호](../images/manual-05-settings.jpg)
 
-Settings에서는 사내 OpenAI-compatible API 정보를 저장하고 현재 적용 중인 사용량 제한을 확인합니다. AI 연결이 없어도 SEQ 파싱과 로컬 분석은 사용할 수 있습니다.
+Settings에서는 사내 OpenAI-compatible API 정보를 저장하고 현재 적용 중인 사용량 제한을 확인합니다. AI 연결이 없어도 로그 import, 검색, 규칙 판정, 결과표와 패턴은 모두 사용할 수 있습니다.
 
 ## 처음 설정
 
 1. **① AI Gateway**에 Base URL, model과 API key를 입력하고 `설정 저장`을 선택합니다.
-2. **② Rate & latency 보호**에서 현재 적용되는 RPM, TPM, timeout과 cache 정책을 확인합니다.
-3. `설정 상태 새로고침`은 endpoint 통신 테스트가 아니라 이 PC에 적용된 설정을 다시 읽습니다. 왼쪽의 다른 설정 메뉴는 현재 비활성화된 확장 지점입니다.
+2. 적용되는 RPM, TPM, timeout과 cache 정책을 확인합니다.
+3. `연결 확인 · 모델 찾기`는 입력한 Base URL의 `/models`를 한 번만 조회합니다. 앱 시작이나 로그 import 때 자동 호출하지 않습니다.
 
 ## 권장 요청 정책
 
@@ -31,7 +31,7 @@ Settings에서는 사내 OpenAI-compatible API 정보를 저장하고 현재 적
 
 | 상태 | 의미 | 행동 |
 |---|---|---|
-| Configured | Base URL과 model 저장됨 | 실제 요청은 Sequence 분석 시 확인 |
+| Configured | Base URL과 model 저장됨 | 사용자가 AI 분석을 명시적으로 요청할 때 사용 |
 | Rate limited | RPM/TPM 초과 | queue의 다음 시각까지 대기 |
 | Timed out | 제한 시간 내 응답 없음 | 제한 횟수 재시도 후 로컬 fallback 결과 확인 |
 | Offline | endpoint 접근 불가 | URL/VPN/사내망 확인 |

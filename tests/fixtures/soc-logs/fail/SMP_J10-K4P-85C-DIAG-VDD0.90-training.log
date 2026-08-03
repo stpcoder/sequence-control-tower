@@ -1,0 +1,5 @@
+BOOT_COMPLETE
+STRESSAPP PASS cycles=1
+HIDAG START mode=DIAG
+TRAINING_FAIL lane=1 step=read-level
+@FAIL

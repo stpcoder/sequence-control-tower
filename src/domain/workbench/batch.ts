@@ -11,6 +11,7 @@ import type {
 
 const labels: readonly ResultLabel[] = [
   "PASS",
+  "DIAG_FAIL",
   "TEST_FAIL",
   "TRAINING_FAIL",
   "SYSTEM_HALT",

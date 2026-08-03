@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { AppPage } from '../data/demo'
+import type { DemoPage } from '../data/demo'
 
-const labels: Record<AppPage, { selector: string; number: number; label: string }[]> = {
+const labels: Record<DemoPage, { selector: string; number: number; label: string }[]> = {
   workbench: [
     { selector: '.workbench-sidebar', number: 1, label: '여러 폴더의 로그 탐색' },
     { selector: '.workbench-editor-shell', number: 2, label: '검색 중심 읽기 전용 로그 뷰어' },
@@ -44,7 +44,7 @@ const agentLabels = [
   { selector: '.agent-composer', number: 4, label: '필요할 때만 자유 대화' },
 ]
 
-export function GuideOverlay({ page }: { page: AppPage }) {
+export function GuideOverlay({ page }: { page: DemoPage }) {
   const [boxes, setBoxes] = useState<{ top: number; left: number; width: number; height: number; number: number; label: string }[]>([])
 
   useEffect(() => {

@@ -1,0 +1,5 @@
+BOOT_COMPLETE
+STRESSAPP PASS cycles=10
+HIDAG START mode=TEST
+TEST_FAIL code=TS_31 expected=0x10 actual=0x00
+@FAIL

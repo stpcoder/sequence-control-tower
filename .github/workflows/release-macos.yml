@@ -62,6 +62,27 @@ jobs:
       - name: Build unsigned Universal DMG and ZIP
         run: npm run dist:mac
 
+      - name: Verify Universal app and package integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find release -type d -name 'Sequence Control Tower.app' -print -quit)"
+          dmg_path="$(find release -type f -name '*.dmg' -print -quit)"
+          zip_path="$(find release -type f -name '*.zip' -print -quit)"
+          test -n "$app_path" || { echo 'Packaged app was not produced.' >&2; exit 1; }
+          test -n "$dmg_path" || { echo 'DMG was not produced.' >&2; exit 1; }
+          test -n "$zip_path" || { echo 'ZIP was not produced.' >&2; exit 1; }
+
+          executable="$app_path/Contents/MacOS/Sequence Control Tower"
+          lipo "$executable" -verify_arch x86_64 arm64
+          minimum_os="$(plutil -extract LSMinimumSystemVersion raw -o - "$app_path/Contents/Info.plist")"
+          test "$minimum_os" = '12.0' || {
+            echo "Unexpected minimum macOS version: $minimum_os" >&2
+            exit 1
+          }
+          hdiutil verify "$dmg_path"
+          unzip -tq "$zip_path"
+
       - name: Prepare stable assets and Gatekeeper notice
         shell: bash
         run: |

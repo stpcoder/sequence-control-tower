@@ -6,7 +6,7 @@
 
 현재 GitHub 저장소는 private이므로 저장소 읽기 권한이 있는 계정으로 로그인해야 합니다. 권한이 없으면 Release와 직접 다운로드 링크가 `404`로 보일 수 있습니다.
 
-Release에는 네 파일이 있습니다.
+Release에는 다음 파일이 있습니다.
 
 | 파일 | 용도 |
 |---|---|
@@ -14,6 +14,7 @@ Release에는 네 파일이 있습니다.
 | `Sequence-Control-Tower-Portable.exe` | 설치하지 않고 한 파일로 실행 |
 | `Sequence-Control-Tower-Windows.zip` | 폴더 단위 portable 배포 |
 | `SHA256SUMS.txt` | 다운로드 무결성 확인 |
+| `WINDOWS-SIGNING-NOTICE.txt` | 해당 Release의 코드 서명·SmartScreen 안내 |
 
 처음 사용하는 PC에는 설치형을 권장합니다. 설치 권한이나 PC 정책 때문에 설치할 수 없을 때 portable을 사용하세요.
 
@@ -36,6 +37,8 @@ Get-Content .\SHA256SUMS.txt
 4. 앱의 **Settings**에서 사내 OpenAI-compatible endpoint를 설정합니다. LLM을 설정하지 않아도 로컬 SEQ 분석은 사용할 수 있습니다.
 
 기본 구성은 사용자 단위 설치이므로 일반적으로 관리자 권한이 필요하지 않습니다. 회사 보안 정책이 설치를 차단하면 정책을 우회하지 말고 IT 또는 배포 담당자에게 문의하세요.
+
+현재 자동 Release는 Windows 10/11용 x64 패키지를 만듭니다. ARM64 Windows에서는 OS의 x64 호환 계층을 사용하며, native ARM64 배포판은 별도 검증 대상입니다.
 
 ## SmartScreen 경고
 
@@ -64,6 +67,17 @@ Portable은 완전한 무설치·무기록 모드가 아닙니다. 설치형과 
 ```text
 %APPDATA%\Sequence Control Tower\sequence-intelligence
 ```
+
+## 폴더와 단축키
+
+`Ctrl+O`를 누르면 폴더 선택 창이 열립니다. `Ctrl` 또는 `Shift`로 여러 폴더를 선택할 수 있고, 각 폴더의 `.log` 파일을 하위 폴더까지 읽습니다. 공백이나 한글이 있는 폴더명도 지원하며, 원본 절대 경로는 화면의 Recipe나 결과 데이터에 저장하지 않습니다.
+
+| 동작 | 단축키 |
+|---|---|
+| 여러 로그 폴더 열기 | `Ctrl+O` |
+| 현재 로그 찾기 | `Ctrl+F` |
+| 전체 로그 찾기 | `Ctrl+Shift+F` |
+| LLM·저장소 설정 | `Ctrl+,` |
 
 ## 업데이트
 

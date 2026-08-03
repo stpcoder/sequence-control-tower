@@ -1,0 +1,5 @@
+BOOT_COMPLETE
+STRESSAPP PASS cycles=30
+HIDAG START mode=DIAG
+@PASS
+@FAIL code=late_flush

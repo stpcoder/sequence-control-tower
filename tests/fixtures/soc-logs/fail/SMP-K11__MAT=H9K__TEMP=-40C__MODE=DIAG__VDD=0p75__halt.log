@@ -1,0 +1,4 @@
+BOOT_COMPLETE
+STRESSAPP PASS cycles=100
+HIDAG START mode=DIAG
+last UART byte before silence

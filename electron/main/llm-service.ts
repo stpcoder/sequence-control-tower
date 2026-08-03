@@ -75,10 +75,15 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 10_000
 const MAX_DISCOVERED_MODELS = 100
 const MAX_MODELS_RESPONSE_BYTES = 1024 * 1024
 
-async function readResponseTextCapped(response: Response, maxBytes: number): Promise<string> {
+async function readResponseTextCapped(
+  response: Response,
+  maxBytes: number,
+  tooLargeError = 'LLM_MODELS_RESPONSE_TOO_LARGE'
+): Promise<string> {
   const declaredLength = Number(response.headers.get('content-length'))
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new Error('LLM_MODELS_RESPONSE_TOO_LARGE')
+    await response.body?.cancel().catch(() => undefined)
+    throw new Error(tooLargeError)
   }
   if (!response.body) return ''
   const reader = response.body.getReader()
@@ -92,7 +97,7 @@ async function readResponseTextCapped(response: Response, maxBytes: number): Pro
       received += chunk.value.byteLength
       if (received > maxBytes) {
         await reader.cancel().catch(() => undefined)
-        throw new Error('LLM_MODELS_RESPONSE_TOO_LARGE')
+        throw new Error(tooLargeError)
       }
       text += decoder.decode(chunk.value, { stream: true })
     }
@@ -329,16 +334,29 @@ function abortError(): Error {
 async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw abortError()
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds)
+    const finish = (): void => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    const timer = setTimeout(finish, Math.max(0, milliseconds))
     const onAbort = (): void => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       reject(abortError())
     }
     signal?.addEventListener('abort', onAbort, { once: true })
-    if (!signal) return
-    // Avoid retaining listeners after ordinary completion.
-    setTimeout(() => signal.removeEventListener('abort', onAbort), milliseconds + 1)
   })
+}
+
+function retryAfterMilliseconds(raw: string | null, now = Date.now()): number | null {
+  if (!raw?.trim()) return null
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1_000, 60_000)
+  }
+  const retryAt = Date.parse(raw)
+  if (!Number.isFinite(retryAt)) return null
+  return Math.min(Math.max(0, retryAt - now), 60_000)
 }
 
 class SlidingWindowLimiter {
@@ -350,7 +368,13 @@ class SlidingWindowLimiter {
     signal: AbortSignal | undefined,
     onWait: (milliseconds: number) => void
   ): Promise<void> {
-    const tokens = Math.min(Math.max(estimatedTokens, 1), config.tokensPerMinute)
+    const tokens = Math.max(estimatedTokens, 1)
+    if (tokens > config.tokensPerMinute) {
+      // Capping the reservation would make a request that is larger than the
+      // configured TPM budget look valid. Fail locally instead of violating a
+      // centrally shared quota or waiting forever for impossible capacity.
+      throw new Error('LLM_TPM_REQUEST_TOO_LARGE')
+    }
     while (true) {
       const now = Date.now()
       this.events = this.events.filter((event) => now - event.at < 60_000)
@@ -371,8 +395,10 @@ class SlidingWindowLimiter {
 }
 
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string } }>
+  choices?: Array<{ message?: { content?: unknown } }>
 }
+
+const MAX_CHAT_RESPONSE_BYTES = 2 * 1024 * 1024
 
 export class OpenAiCompatibleClient {
   private readonly limiter = new SlidingWindowLimiter()
@@ -386,7 +412,9 @@ export class OpenAiCompatibleClient {
   ): Promise<{ content: string; model: string }> {
     const config = await this.configService.effective()
     if (!config.baseUrl || !config.model) throw new Error('LLM_UNAVAILABLE')
-    const estimatedTokens = Math.ceil(prompt.length / 4) + 1_200
+    // UTF-8 bytes / 3 is intentionally conservative for Korean while still
+    // remaining close enough for English-heavy structured JSON evidence.
+    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + 1_200
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
@@ -402,7 +430,11 @@ export class OpenAiCompatibleClient {
       else onStage('사내 LLM 응답 대기')
 
       const timeoutController = new AbortController()
-      const timeout = setTimeout(() => timeoutController.abort(), config.timeoutMs)
+      let timedOut = false
+      const timeout = setTimeout(() => {
+        timedOut = true
+        timeoutController.abort()
+      }, config.timeoutMs)
       const onAbort = (): void => timeoutController.abort()
       signal?.addEventListener('abort', onAbort, { once: true })
       try {
@@ -424,21 +456,27 @@ export class OpenAiCompatibleClient {
             temperature: 0.1,
             max_tokens: 1_200
           }),
+          redirect: 'error',
           signal: timeoutController.signal
         })
-        const bodyText = await response.text()
         if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined)
           const retryable = response.status === 429 || response.status >= 500
           const error = new Error(`LLM_HTTP_${response.status}`)
           if (!retryable || attempt >= config.maxRetries) throw error
-          const retryAfter = Number(response.headers.get('retry-after'))
-          const backoff = Number.isFinite(retryAfter)
-            ? Math.min(retryAfter * 1_000, 60_000)
+          const retryAfter = retryAfterMilliseconds(response.headers.get('retry-after'))
+          const backoff = retryAfter !== null
+            ? retryAfter
             : Math.min(1_000 * 2 ** attempt + Math.random() * 500, 15_000)
           lastError = error
           await delay(backoff, signal)
           continue
         }
+        const bodyText = await readResponseTextCapped(
+          response,
+          MAX_CHAT_RESPONSE_BYTES,
+          'LLM_RESPONSE_TOO_LARGE'
+        )
         let parsed: ChatCompletionResponse
         try {
           parsed = JSON.parse(bodyText) as ChatCompletionResponse
@@ -446,15 +484,21 @@ export class OpenAiCompatibleClient {
           throw new Error('LLM_INVALID_JSON_RESPONSE')
         }
         const content = parsed.choices?.[0]?.message?.content
-        if (!content) throw new Error('LLM_EMPTY_RESPONSE')
+        if (typeof content !== 'string' || !content.trim()) throw new Error('LLM_EMPTY_RESPONSE')
         return { content, model: config.model }
       } catch (error) {
         if (signal?.aborted) throw abortError()
-        const current = error instanceof Error ? error : new Error('LLM_REQUEST_FAILED')
+        const original = error instanceof Error ? error : undefined
+        const current = timedOut
+          ? new Error('LLM_REQUEST_TIMEOUT')
+          : original && /^LLM_(?:HTTP_\d{3}|INVALID_JSON_RESPONSE|EMPTY_RESPONSE|RESPONSE_TOO_LARGE|TPM_REQUEST_TOO_LARGE)$/.test(original.message)
+            ? original
+            : new Error('LLM_REQUEST_FAILED')
         lastError = current
         const retryable =
-          current.name === 'AbortError' ||
-          /fetch|network|timeout|LLM_HTTP_5/i.test(current.message)
+          current.message === 'LLM_REQUEST_TIMEOUT' ||
+          current.message === 'LLM_REQUEST_FAILED' ||
+          /^LLM_HTTP_(?:408|429|5\d{2})$/.test(current.message)
         if (!retryable || attempt >= config.maxRetries) throw current
         await delay(Math.min(1_000 * 2 ** attempt + Math.random() * 500, 15_000), signal)
       } finally {

@@ -8,4 +8,5 @@ coverage/
 *.log
 /data/
 !docs/**/*.log
+!tests/fixtures/soc-logs/**/*.log
 omh-store-upload/

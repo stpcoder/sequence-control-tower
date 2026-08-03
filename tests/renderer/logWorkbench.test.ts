@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createObservation, type RecipeRule } from "../../src/domain/workbench";
 import {
   LOG_WORKBENCH_SCHEMA_VERSION,
+  MAX_PERSISTED_DECISIONS,
   MAX_PERSISTED_OBSERVATIONS,
   MAX_PERSISTED_RULES,
   loadLogWorkbenchState,
@@ -44,6 +45,39 @@ function rule(index: number): RecipeRule {
 }
 
 describe("log workbench renderer persistence", () => {
+  it("round-trips DIAG_FAIL decisions and explicit marker ordering", () => {
+    const storage = new MemoryStorage();
+    const diagRule = rule(90);
+    diagRule.label = "DIAG_FAIL";
+    diagRule.clauses = [
+      { ...diagRule.clauses[0], id: "hidag", presence: "present", matcher: { ...diagRule.clauses[0].matcher, pattern: "hidag" } },
+      {
+        ...diagRule.clauses[0],
+        id: "diag-fail",
+        presence: "present",
+        matcher: { ...diagRule.clauses[0].matcher, pattern: "@FAIL" },
+        order: { afterClauseId: "hidag" },
+      },
+    ];
+
+    const saved = saveLogWorkbenchState(storage, "diag", {
+      schemaVersion: LOG_WORKBENCH_SCHEMA_VERSION,
+      observations: [],
+      decisions: [{
+        sourceId: "sample-diag",
+        result: "DIAG_FAIL",
+        decidedBy: "engineer",
+        evidenceObservationIds: [],
+      }],
+      recipes: [{ metadata: { id: "diag", name: "Diag fail", revision: 1 }, rules: [diagRule] }],
+    });
+
+    expect(saved.ok).toBe(true);
+    expect(saved.state.decisions[0].result).toBe("DIAG_FAIL");
+    expect(saved.state.recipes[0].rules[0].label).toBe("DIAG_FAIL");
+    expect(saved.state.recipes[0].rules[0].clauses[1].order).toEqual({ afterClauseId: "hidag" });
+  });
+
   it("round-trips only allowlisted, non-sensitive state per project", () => {
     const storage = new MemoryStorage();
     const observation = {
@@ -116,22 +150,29 @@ describe("log workbench renderer persistence", () => {
     });
   });
 
-  it("caps observations and rules, keeping the newest entries", () => {
+  it("retains the 10k import ceiling while capping observations and rules", () => {
     const storage = new MemoryStorage();
     const observations = Array.from({ length: MAX_PERSISTED_OBSERVATIONS + 3 }, (_, index) =>
       createObservation({ sourceId: `source-${index}`, query: `query-${index}`, matched: true }),
     );
     const rules = Array.from({ length: MAX_PERSISTED_RULES + 4 }, (_, index) => rule(index));
+    const decisions = Array.from({ length: MAX_PERSISTED_DECISIONS }, (_, index) => ({
+      sourceId: `source-${index}`,
+      result: "PASS" as const,
+      decidedBy: "engineer" as const,
+      evidenceObservationIds: [],
+    }));
 
     const saved = saveLogWorkbenchState(storage, "large", {
       schemaVersion: LOG_WORKBENCH_SCHEMA_VERSION,
       observations,
-      decisions: [],
+      decisions,
       recipes: [{ metadata: { id: "large", name: "Large", revision: 1 }, rules }],
     });
 
     expect(saved.state.observations).toHaveLength(MAX_PERSISTED_OBSERVATIONS);
     expect(saved.state.observations[0].sourceId).toBe("source-3");
+    expect(saved.state.decisions).toHaveLength(MAX_PERSISTED_DECISIONS);
     expect(saved.state.recipes[0].rules).toHaveLength(MAX_PERSISTED_RULES);
     expect(saved.state.recipes[0].rules[0].id).toBe("rule-4");
   });

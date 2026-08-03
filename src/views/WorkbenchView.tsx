@@ -22,12 +22,9 @@ import {
   LoaderCircle,
   Play,
   Regex,
-  RotateCcw,
   Search,
   SearchCode,
   SlidersHorizontal,
-  ShieldCheck,
-  Sparkles,
   WholeWord,
   X,
 } from 'lucide-react'
@@ -40,7 +37,10 @@ import type {
 } from '../../electron/shared/contracts'
 import {
   buildCandidateRule,
+  buildRecipeEvidencePlan,
   evaluatePrecomputedEvidence,
+  precomputeDocumentEvidence,
+  precomputedEvidenceFromInspection,
   recordObservation,
   selectDecisionEvidence,
   type PrecomputedDocumentEvidence,
@@ -48,9 +48,11 @@ import {
   type ResultLabel,
   type RuleClause,
   type SearchObservation,
+  type DocumentEvaluation,
 } from '../domain/workbench'
 import {
   loadLogWorkbenchState,
+  logWorkbenchStorageKey,
   saveLogWorkbenchState,
   type LogWorkbenchRecipe,
 } from '../state/logWorkbench'
@@ -73,6 +75,9 @@ export interface WorkbenchFile {
   size?: number
   truncated?: boolean
   decision?: WorkbenchDecision
+  /** Deterministic batch result. It remains a candidate until an engineer confirms it. */
+  ruleResult?: WorkbenchDecision
+  ruleNeedsReview?: boolean
 }
 
 export interface WorkbenchRecipeDraft {
@@ -86,8 +91,14 @@ export interface WorkbenchRecipeDraft {
 
 export interface WorkbenchViewProps {
   files?: WorkbenchFile[]
+  /** Main-process EvaluationStore rules. Desktop uses these as authority. */
+  durableRules?: readonly RecipeRule[]
+  selectedFileId?: string
   onFilesChange?: (files: WorkbenchFile[]) => void
-  onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision) => void
+  onSelectedFileChange?: (fileId: string | null) => void
+  onEvidenceCountChange?: (fileId: string, count: number) => void
+  onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => void | Promise<void>
+  onBatchResults?: (resolution: PrecomputedBatchResolution) => void | Promise<void>
   onSaveRecipe?: (draft: WorkbenchRecipeDraft) => void | Promise<void>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   projectId?: string
@@ -126,6 +137,8 @@ interface BatchPreview {
   outcomes?: Record<string, ResultLabel>
   conflicts?: number
   exceptionIds?: string[]
+  conflictIds?: string[]
+  evaluations?: Record<string, DocumentEvaluation>
 }
 
 interface CountEvidence {
@@ -133,7 +146,7 @@ interface CountEvidence {
   error?: string
 }
 
-const DEMO_LOGS: WorkbenchFile[] = [
+export const DEMO_LOGS: WorkbenchFile[] = [
   {
     id: 'demo-pass-01',
     origin: 'Qualcomm_A / 85C',
@@ -167,6 +180,7 @@ const DEMO_LOGS: WorkbenchFile[] = [
 
 const DECISIONS: Array<{ value: ResultLabel; label: string; tone: string }> = [
   { value: 'PASS', label: 'Pass', tone: 'pass' },
+  { value: 'DIAG_FAIL', label: 'Diag fail', tone: 'fail' },
   { value: 'TEST_FAIL', label: 'Test fail', tone: 'fail' },
   { value: 'TRAINING_FAIL', label: 'Training fail', tone: 'training' },
   { value: 'SYSTEM_HALT', label: 'System halt', tone: 'halt' },
@@ -180,13 +194,6 @@ const DEFAULT_OPTIONS: SearchOptions = {
   caseSensitive: false,
   wholeWord: false,
   regex: false,
-}
-
-const formatSize = (bytes = 0) => {
-  if (!bytes) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 const artifactName = (artifact: ArtifactRecord) => artifact.originalNames[0] ?? `${artifact.id}.log`
@@ -291,29 +298,10 @@ async function searchArtifactsBatched(
   input: Omit<ArtifactSearchInput, 'artifactIds'>,
 ): Promise<ArtifactSearchResult> {
   const ids = [...new Set(artifactIds)]
-  const matches: ArtifactSearchResult['matches'] = []
-  const fileResults: ArtifactSearchResult['files'] = []
-  let totalMatchCount = 0
-  const detailLimit = Math.max(1, input.maxMatches ?? 500)
-  for (let offset = 0; offset < ids.length; offset += 500) {
-    const result = await api.artifacts.search({
-      ...input,
-      artifactIds: ids.slice(offset, offset + 500),
-      maxMatches: Math.max(1, detailLimit - matches.length),
-    })
-    totalMatchCount += result.totalMatchCount
-    fileResults.push(...result.files)
-    if (matches.length < detailLimit) matches.push(...result.matches.slice(0, detailLimit - matches.length))
-  }
-  return {
-    query: input.query,
-    mode: input.mode ?? 'literal',
-    caseSensitive: input.caseSensitive ?? false,
-    matches,
-    totalMatchCount,
-    truncated: totalMatchCount > matches.length,
-    files: fileResults,
-  }
+  // The backend accepts the full 10k import ceiling and owns cancellation.
+  // One IPC request prevents an older multi-batch search from cancelling a
+  // newer query between renderer batches.
+  return api.artifacts.search({ ...input, artifactIds: ids })
 }
 
 /** Missing and failed file results stay absent so they cannot become negative evidence. */
@@ -373,6 +361,9 @@ export interface PrecomputedBatchResolution {
   exceptions: number
   conflicts: number
   exceptionIds: string[]
+  conflictIds: string[]
+  evaluations: Record<string, DocumentEvaluation>
+  appliedRules: RecipeRule[]
 }
 
 export function resolvePrecomputedBatch(
@@ -386,12 +377,18 @@ export function resolvePrecomputedBatch(
   let exceptions = 0
   let conflicts = 0
   const exceptionIds: string[] = []
+  const conflictIds: string[] = []
+  const evaluations: Record<string, DocumentEvaluation> = {}
   for (const file of files) {
     const evidence = evidenceBySource.get(file.id) ?? { sourceId: file.id, rules: [] }
     const evaluation = evaluatePrecomputedEvidence(evidence, rules)
+    evaluations[file.id] = evaluation
     const savedDecision = confirmedDecisions[file.id]
     const decisionConflict = Boolean(savedDecision && evaluation.result !== 'UNKNOWN' && evaluation.result !== savedDecision)
-    if (decisionConflict) conflicts += 1
+    if (decisionConflict) {
+      conflicts += 1
+      conflictIds.push(file.id)
+    }
     outcomes[file.id] = savedDecision ?? (decisionConflict ? 'UNKNOWN' : evaluation.result)
     const exceptional = decisionConflict || evaluation.result === 'UNKNOWN' || evaluation.exceptions.length > 0
     if (exceptional) {
@@ -400,7 +397,28 @@ export function resolvePrecomputedBatch(
     }
     else matched += 1
   }
-  return { outcomes, matched, exceptions, conflicts, exceptionIds }
+  return { outcomes, matched, exceptions, conflicts, exceptionIds, conflictIds, evaluations, appliedRules: [...rules] }
+}
+
+function firstEvaluationLine(evaluation: DocumentEvaluation | undefined): number | undefined {
+  return evaluation?.matchedRules
+    .flatMap((rule) => rule.clauseEvaluations)
+    .flatMap((clause) => [clause.firstOccurrence?.lineNumber, clause.lastOccurrence?.lineNumber])
+    .filter((line): line is number => typeof line === 'number' && line > 0)
+    .sort((left, right) => left - right)[0]
+}
+
+function exceptionLabel(code: string): string {
+  const labels: Record<string, string> = {
+    NO_MATCH: '일치하는 규칙 없음',
+    RULE_CONFLICT: '동순위 규칙 충돌',
+    INVALID_PATTERN: '잘못된 검색식',
+    LOW_CONFIDENCE: '검토가 필요한 규칙',
+    MISSING_EVIDENCE: '판정 근거 누락',
+    EVIDENCE_ERROR: '로그 검사 실패',
+    INVALID_RULE: '잘못된 규칙',
+  }
+  return labels[code] ?? code
 }
 
 function renderHighlightedLine(
@@ -431,8 +449,13 @@ function optionLabel(option: keyof SearchOptions): string {
 
 export function WorkbenchView({
   files: controlledFiles,
+  durableRules,
+  selectedFileId,
   onFilesChange,
+  onSelectedFileChange,
+  onEvidenceCountChange,
   onDecision,
+  onBatchResults,
   onSaveRecipe,
   onNotify,
   projectId = 'log-workbench',
@@ -449,6 +472,8 @@ export function WorkbenchView({
   const [currentHit, setCurrentHit] = useState(0)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchHistory, setSearchHistory] = useState<Record<string, SearchObservation[]>>({})
+  const [selectedObservationIdsByFile, setSelectedObservationIdsByFile] = useState<Record<string, string[]>>({})
+  const [requireMarkerOrder, setRequireMarkerOrder] = useState(false)
   const [backendHits, setBackendHits] = useState<SearchHit[]>([])
   const [backendCounts, setBackendCounts] = useState<Record<string, number>>({})
   const [backendTotal, setBackendTotal] = useState(0)
@@ -457,6 +482,7 @@ export function WorkbenchView({
   const [lineWindows, setLineWindows] = useState<Record<string, LoadedLineWindow>>({})
   const [windowLoading, setWindowLoading] = useState(false)
   const [evidenceByFile, setEvidenceByFile] = useState<Record<string, number[]>>({})
+  const [revealedLine, setRevealedLine] = useState<{ fileId: string; lineNumber: number } | null>(null)
   const [decisions, setDecisions] = useState<Record<string, WorkbenchDecision>>(() => Object.fromEntries(files.filter((file) => file.decision).map((file) => [file.id, file.decision!])))
   const [candidateDecisions, setCandidateDecisions] = useState<Record<string, ResultLabel>>({})
   const [savedDecisions, setSavedDecisions] = useState<Record<string, ResultLabel>>({})
@@ -474,7 +500,7 @@ export function WorkbenchView({
   const searchRequest = useRef(0)
   const windowRequest = useRef(0)
 
-  const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
+  const activeFile = files.find((file) => file.id === activeFileId)
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeLines = useMemo(() => {
     if (!activeFile) return []
@@ -496,8 +522,10 @@ export function WorkbenchView({
     return byLine
   }, [activeFileHits])
   const evidenceLines = evidenceByFile[activeFile?.id ?? ''] ?? []
-  const decision = candidateDecisions[activeFile?.id ?? ''] ?? decisions[activeFile?.id ?? '']
+  const decision = candidateDecisions[activeFile?.id ?? ''] ?? decisions[activeFile?.id ?? ''] ?? activeFile?.decision
   const searchTotal = memoryHits.length + backendTotal
+  const activeBatchEvaluation = batchPreview.evaluations?.[activeFile?.id ?? '']
+  const activeBatchConflict = batchPreview.conflictIds?.includes(activeFile?.id ?? '') ?? false
 
   const groupedFiles = useMemo(() => {
     const groups = new Map<string, WorkbenchFile[]>()
@@ -523,16 +551,24 @@ export function WorkbenchView({
     ]
   }, [activeFile, searchHistory])
 
+  const selectedRecipeObservations = useMemo(() => {
+    const selected = new Set(selectedObservationIdsByFile[activeFile?.id ?? ''] ?? [])
+    return recipeObservations.filter((observation) => selected.has(observation.id))
+  }, [activeFile?.id, recipeObservations, selectedObservationIdsByFile])
+
+  const canRequireMarkerOrder = selectedRecipeObservations.length > 1
+    && selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content')
+
   const draft = useMemo<WorkbenchRecipeDraft | null>(() => {
     if (!activeFile || !decision || decision === 'UNKNOWN') return null
     return {
       decision,
-      positiveTerms: recipeObservations.filter((item) => item.matched).map((item) => item.query),
-      missingTerms: recipeObservations.filter((item) => !item.matched).map((item) => item.query),
+      positiveTerms: selectedRecipeObservations.filter((item) => item.matched).map((item) => item.query),
+      missingTerms: selectedRecipeObservations.filter((item) => !item.matched).map((item) => item.query),
       evidenceLines,
       sourceFileId: activeFile.id,
     }
-  }, [activeFile, decision, evidenceLines, recipeObservations])
+  }, [activeFile, decision, evidenceLines, selectedRecipeObservations])
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
     if (controlledFiles === undefined) setLocalFiles(next)
@@ -542,8 +578,26 @@ export function WorkbenchView({
   const selectFile = useCallback((fileId: string, resetSearch = true) => {
     setActiveFileId(fileId)
     setOpenFileIds((current) => current.includes(fileId) ? current : [...current, fileId])
-    if (resetSearch) setCurrentHit(0)
-  }, [])
+    if (resetSearch) {
+      setCurrentHit(0)
+      setRevealedLine(null)
+    }
+    onSelectedFileChange?.(fileId)
+  }, [onSelectedFileChange])
+
+  useEffect(() => {
+    if (!selectedFileId || !files.some((file) => file.id === selectedFileId)) return
+    selectFile(selectedFileId, false)
+  }, [files, selectFile, selectedFileId])
+
+  useEffect(() => {
+    if (controlledFiles === undefined || !window.sequenceIntelligence?.evaluations) return
+    setDecisions(Object.fromEntries(files.flatMap((file) => file.decision ? [[file.id, file.decision] as const] : [])))
+  }, [controlledFiles, files])
+
+  useEffect(() => {
+    if (activeFile) onEvidenceCountChange?.(activeFile.id, evidenceLines.length)
+  }, [activeFile, evidenceLines.length, onEvidenceCountChange])
 
   const loadLineWindow = useCallback(async (file: WorkbenchFile, targetLine = 1) => {
     const api = electronApi()
@@ -574,6 +628,18 @@ export function WorkbenchView({
     }
   }, [onNotify])
 
+  const revealLine = useCallback(async (file: WorkbenchFile, lineNumber: number) => {
+    setRevealedLine({ fileId: file.id, lineNumber })
+    selectFile(file.id, false)
+    const loaded = lineWindows[file.id]
+    if (file.artifactId && !loaded?.lines.some((line) => line.lineNumber === lineNumber)) {
+      await loadLineWindow(file, lineNumber)
+    }
+    window.requestAnimationFrame(() => {
+      editorRef.current?.querySelector(`[data-line="${lineNumber}"]`)?.scrollIntoView({ block: 'center' })
+    })
+  }, [lineWindows, loadLineWindow, selectFile])
+
   const moveToHit = useCallback((direction: 1 | -1) => {
     if (!hits.length) return
     const next = (currentHit + direction + hits.length) % hits.length
@@ -588,13 +654,14 @@ export function WorkbenchView({
   const openSearch = useCallback((scope: SearchScope) => {
     setSearchScope(scope)
     setSearchOpen(true)
-    if (scope === 'workspace') setSideMode('search')
+    setSideMode(scope === 'workspace' ? 'search' : 'files')
+    setCurrentHit(0)
     window.requestAnimationFrame(() => searchInputRef.current?.select())
   }, [])
 
   useEffect(() => {
     if (!files.length) return
-    if (!files.some((file) => file.id === activeFileId)) {
+    if (activeFileId && !files.some((file) => file.id === activeFileId)) {
       setActiveFileId(files[0].id)
       setOpenFileIds((current) => current.includes(files[0].id) ? current : [...current, files[0].id])
     }
@@ -618,20 +685,33 @@ export function WorkbenchView({
 
   useEffect(() => {
     try {
-      const loaded = loadLogWorkbenchState(window.localStorage, projectId).state
+      const loadedResult = loadLogWorkbenchState(window.localStorage, projectId)
+      const loaded = loadedResult.state
       const observationsBySource: Record<string, SearchObservation[]> = {}
       loaded.observations.forEach((observation) => {
         observationsBySource[observation.sourceId] = [...(observationsBySource[observation.sourceId] ?? []), observation]
       })
       setSearchHistory(observationsBySource)
+      setSelectedObservationIdsByFile(Object.fromEntries(Object.entries(observationsBySource).map(([sourceId, observations]) => [
+        sourceId,
+        observations.filter((observation) => observation.role === 'decision_evidence').map((observation) => observation.id),
+      ])))
       const loadedDecisions = Object.fromEntries(loaded.decisions.map((item) => [item.sourceId, item.result]))
-      setSavedDecisions(loadedDecisions)
-      setDecisions((current) => ({ ...current, ...loadedDecisions }))
+      setSavedDecisions(window.sequenceIntelligence?.evaluations ? {} : loadedDecisions)
+      if (!window.sequenceIntelligence?.evaluations) {
+        setDecisions((current) => ({ ...current, ...loadedDecisions }))
+      }
       setSavedRecipes(loaded.recipes)
+      if (loadedResult.status === 'corrupt' || loadedResult.status === 'unsupported-version') {
+        const key = logWorkbenchStorageKey(projectId)
+        const raw = window.localStorage.getItem(key)
+        if (raw) window.localStorage.setItem(`${key}:corrupt:${Date.now()}`, raw)
+        onNotify?.('저장된 분석 상태를 읽지 못해 원본을 백업하고 새 상태로 시작합니다.', 'error')
+      }
     } catch {
       // The Workbench remains fully functional when storage is unavailable.
     }
-  }, [projectId])
+  }, [onNotify, projectId])
 
   useEffect(() => {
     if (!activeFile?.artifactId || activeWindow) return
@@ -732,12 +812,26 @@ export function WorkbenchView({
       if (event.key === 'Escape' && searchOpen) {
         event.preventDefault()
         setSearchOpen(false)
+        setSideMode('files')
         searchInputRef.current?.blur()
+        return
+      }
+      if (event.key === 'F3') {
+        event.preventDefault()
+        if (!searchOpen) {
+          setSearchOpen(true)
+          setSideMode(searchScope === 'workspace' ? 'search' : 'files')
+        }
+        moveToHit(event.shiftKey ? -1 : 1)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openSearch, searchOpen])
+  }, [moveToHit, openSearch, searchOpen, searchScope])
+
+  useEffect(() => {
+    setRequireMarkerOrder(false)
+  }, [activeFile?.id])
 
   useEffect(() => {
     if (!activeHit || !searchOpen) return
@@ -793,25 +887,62 @@ export function WorkbenchView({
     return () => window.removeEventListener('sequence-control-tower:command', handleAppCommand)
   }, [importing, openSearch, importFolder])
 
-  const chooseDecision = (nextDecision: WorkbenchDecision) => {
-    if (!activeFile) return
-    const existing = savedDecisions[activeFile.id] ?? activeFile.decision
-    if (existing && existing !== nextDecision) {
-      setCandidateDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
-      onNotify?.(`기존 ${existing} 판정은 유지하고 ${nextDecision}를 Recipe 후보로만 사용합니다.`, 'info')
-    } else {
+  const commitEngineerDecision = async (nextDecision: WorkbenchDecision): Promise<boolean> => {
+    if (!activeFile) return false
+    try {
+      if (!window.sequenceIntelligence?.evaluations) {
+        const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+        const nextDecisions = [
+          ...stored.decisions.filter((item) => item.sourceId !== activeFile.id),
+          { sourceId: activeFile.id, result: nextDecision, decidedBy: 'engineer' as const, evidenceObservationIds: [] },
+        ]
+        const saved = saveLogWorkbenchState(window.localStorage, projectId, { ...stored, decisions: nextDecisions })
+        if (!saved.ok) throw new Error(saved.error)
+        setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
+      }
+      await onDecision?.(activeFile, nextDecision, evidenceLines)
+      setDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
       setCandidateDecisions((current) => {
         const next = { ...current }
         delete next[activeFile.id]
         return next
       })
-      setDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
-      onDecision?.(activeFile, nextDecision)
+      return true
+    } catch (error) {
+      if (!window.sequenceIntelligence?.evaluations) {
+        onNotify?.(error instanceof Error ? `판정을 저장하지 못했습니다: ${error.message}` : '판정을 저장하지 못했습니다.', 'error')
+      }
+      return false
     }
+  }
+
+  const finishDecisionInteraction = (nextDecision: WorkbenchDecision) => {
     setRecipeVisible(nextDecision !== 'UNKNOWN' && recipeObservations.length > 0)
     setRecipeSaved(false)
     setBatchPreview({ status: 'idle', matched: 0, exceptions: 0 })
     setShowBatchExceptions(false)
+  }
+
+  const chooseDecision = async (nextDecision: WorkbenchDecision) => {
+    if (!activeFile) return
+    const existing = savedDecisions[activeFile.id] ?? activeFile.decision
+    if (existing && existing !== nextDecision) {
+      setCandidateDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
+      onNotify?.(`기존 ${existing} 판정은 유지했습니다. 규칙 후보로 쓰거나 아래에서 변경을 확정할 수 있습니다.`, 'info')
+      finishDecisionInteraction(nextDecision)
+      return
+    }
+    if (await commitEngineerDecision(nextDecision)) finishDecisionInteraction(nextDecision)
+  }
+
+  const confirmDecisionRevision = async () => {
+    if (!activeFile) return
+    const candidate = candidateDecisions[activeFile.id]
+    if (!candidate) return
+    if (await commitEngineerDecision(candidate)) {
+      finishDecisionInteraction(candidate)
+      onNotify?.(`${candidate} 판정을 새 revision으로 저장했습니다.`, 'success')
+    }
   }
 
   const toggleEvidence = (line: number) => {
@@ -823,9 +954,26 @@ export function WorkbenchView({
     })
   }
 
+  const toggleRecipeObservation = (observationId: string) => {
+    if (!activeFile) return
+    setSelectedObservationIdsByFile((current) => {
+      const selected = current[activeFile.id] ?? []
+      const next = selected.includes(observationId)
+        ? selected.filter((id) => id !== observationId)
+        : [...selected, observationId]
+      return { ...current, [activeFile.id]: next }
+    })
+    setRequireMarkerOrder(false)
+    setRecipeSaved(false)
+  }
+
   const saveRecipe = async () => {
     if (!draft || !activeFile || !decision || decision === 'UNKNOWN') return
-    const selectedIds = recipeObservations.map((observation) => observation.id)
+    const selectedIds = selectedRecipeObservations.map((observation) => observation.id)
+    if (!selectedIds.length) {
+      onNotify?.('판정에 사용할 검색 근거를 선택해 주세요.', 'info')
+      return
+    }
     const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], selectedIds)
     const engineerDecision = {
       sourceId: activeFile.id,
@@ -833,7 +981,15 @@ export function WorkbenchView({
       decidedBy: 'engineer' as const,
       evidenceObservationIds: selectedIds,
     }
-    const rule = buildCandidateRule(engineerDecision, promoted)
+    const builtRule = buildCandidateRule(engineerDecision, promoted)
+    const rule = builtRule && requireMarkerOrder && canRequireMarkerOrder
+      ? {
+          ...builtRule,
+          clauses: builtRule.clauses.map((clause, index, clauses) => index === 0
+            ? clause
+            : { ...clause, order: { afterClauseId: clauses[index - 1].id } }),
+        }
+      : builtRule
     if (!rule) {
       onNotify?.('저장할 검색 근거를 먼저 확인해 주세요.', 'info')
       return
@@ -844,7 +1000,7 @@ export function WorkbenchView({
       const stored = loadLogWorkbenchState(window.localStorage, projectId).state
       const existingRecipe = savedRecipes.find((item) => item.metadata.id === rule.id)
       const recipe: LogWorkbenchRecipe = {
-        metadata: { id: rule.id, name: `${decision} 판정 Recipe`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
+        metadata: { id: rule.id, name: `${decision} 판정 규칙`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
         rules: [rule],
       }
       const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
@@ -867,88 +1023,74 @@ export function WorkbenchView({
       setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
       setRecipeSaved(true)
       onNotify?.(existingDecision && existingDecision !== decision
-        ? `Recipe를 저장했습니다. 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
-        : '분석 방법을 Recipe 후보로 저장했습니다.', 'success')
+        ? `분석 규칙을 저장했습니다. 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
+        : '분석 규칙을 저장했습니다.', 'success')
     } catch (error) {
-      onNotify?.(error instanceof Error ? `Recipe를 저장하지 못했습니다: ${error.message}` : 'Recipe를 저장하지 못했습니다.', 'error')
+      onNotify?.(error instanceof Error ? `분석 규칙을 저장하지 못했습니다: ${error.message}` : '분석 규칙을 저장하지 못했습니다.', 'error')
     }
   }
 
   const applyBatch = async () => {
-    if (!decision || decision === 'UNKNOWN' || !recipeObservations.length) return
+    if (!decision || decision === 'UNKNOWN' || !selectedRecipeObservations.length) {
+      onNotify?.('일괄 적용할 검색 근거를 선택해 주세요.', 'info')
+      return
+    }
     setBatchPreview({ status: 'running', matched: 0, exceptions: 0 })
     setShowBatchExceptions(false)
     try {
       if (!activeFile) return
       const api = electronApi()
-      const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], recipeObservations.map((item) => item.id))
-      const candidate = buildCandidateRule({
+      const selectedIds = selectedRecipeObservations.map((item) => item.id)
+      const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], selectedIds)
+      const builtCandidate = buildCandidateRule({
         sourceId: activeFile.id,
         result: decision,
         decidedBy: 'engineer',
-        evidenceObservationIds: recipeObservations.map((item) => item.id),
+        evidenceObservationIds: selectedIds,
       }, promoted)
+      const candidate = builtCandidate && requireMarkerOrder && canRequireMarkerOrder
+        ? {
+            ...builtCandidate,
+            clauses: builtCandidate.clauses.map((clause, index, clauses) => index === 0
+              ? clause
+              : { ...clause, order: { afterClauseId: clauses[index - 1].id } }),
+          }
+        : builtCandidate
       if (!candidate) throw new Error('미리 적용할 검색 근거가 없습니다.')
       const ruleMap = new Map<string, RecipeRule>()
-      savedRecipes.flatMap((recipe) => recipe.rules).forEach((rule) => ruleMap.set(rule.id, rule))
+      const availableRules = durableRules ?? savedRecipes.flatMap((recipe) => recipe.rules)
+      availableRules.forEach((rule) => ruleMap.set(rule.id, rule))
       ruleMap.set(candidate.id, candidate)
       const rules = [...ruleMap.values()]
 
-      const clausesBySpec = new Map<string, RuleClause>()
-      rules.forEach((rule) => rule.clauses.forEach((clause) => {
-        const key = clauseSpecKey(clause)
-        if (!clausesBySpec.has(key)) clausesBySpec.set(key, clause)
-      }))
-      const evidenceBySpec = new Map<string, Map<string, CountEvidence>>()
-      for (const [spec, clause] of clausesBySpec) {
-        const counts = new Map<string, CountEvidence>()
-        if (clause.matcher.target === 'content') {
-          const artifactRows = files.filter((file) => file.artifactId)
-          const artifactIds = [...new Set(artifactRows.flatMap((file) => file.artifactId ? [file.artifactId] : []))]
-          if (artifactIds.length) {
-            if (!api) throw new Error('데스크톱 로컬 검색 서비스를 사용할 수 없습니다.')
-            try {
-              const result = await searchArtifactsBatched(api, artifactIds, {
-                query: clause.matcher.pattern,
-                mode: clause.matcher.kind,
-                caseSensitive: clause.matcher.caseSensitive,
-                maxMatches: 1,
-                contextLines: 0,
-              })
-              const byArtifact = new Map(result.files.map((file) => [file.artifactId, file]))
-              artifactRows.forEach((file) => {
-                const item = byArtifact.get(file.artifactId!)
-                counts.set(file.id, !item ? { error: '검색 결과가 누락되었습니다.' } : item.error ? { error: item.error } : { count: item.matchCount })
-              })
-            } catch (error) {
-              const message = error instanceof Error ? error.message : '로컬 검색 실패'
-              artifactRows.forEach((file) => counts.set(file.id, { error: message }))
-            }
-          }
-          files.filter((file) => !file.artifactId).forEach((file) => counts.set(file.id, countMatcherText(file.text ?? '', clause)))
-        } else {
-          files.forEach((file) => counts.set(file.id, countMatcherText(
-            clause.matcher.target === 'file_name' ? file.name : file.relativePath ?? '',
-            clause,
-          )))
-        }
-        evidenceBySpec.set(spec, counts)
-      }
-
       const precomputed = new Map<string, PrecomputedDocumentEvidence>()
-      files.forEach((file) => precomputed.set(file.id, {
-        sourceId: file.id,
-        rules: rules.map((rule) => ({
-          ruleId: rule.id,
-          clauses: rule.clauses.map((clause) => {
-            const item = evidenceBySpec.get(clauseSpecKey(clause))?.get(file.id)
-            return item?.error
-              ? { clauseId: clause.id, error: item.error }
-              : { clauseId: clause.id, occurrenceCount: item?.count }
-          }),
-        })),
-      }))
+      const artifactRows = files.filter((file): file is WorkbenchFile & { artifactId: string } => Boolean(file.artifactId))
+      if (artifactRows.length) {
+        if (!api?.artifacts.inspectEvidence) throw new Error('데스크톱 로컬 검사 서비스를 사용할 수 없습니다.')
+        const plan = buildRecipeEvidencePlan(rules)
+        const inspected = await api.artifacts.inspectEvidence({
+          sources: artifactRows.map((file) => ({
+            sourceId: file.id,
+            artifactId: file.artifactId,
+            ...(file.rootId ? { rootId: file.rootId } : {}),
+            ...(file.relativePath ? { relativePath: file.relativePath } : {}),
+          })),
+          specs: plan.specs,
+        })
+        inspected.sources.forEach((source) => {
+          precomputed.set(source.sourceId, precomputedEvidenceFromInspection(source, rules, plan))
+        })
+      }
+      files.filter((file) => !file.artifactId).forEach((file) => {
+        precomputed.set(file.id, precomputeDocumentEvidence({
+          id: file.id,
+          text: file.text ?? '',
+          fileName: file.name,
+          path: file.relativePath,
+        }, rules))
+      })
       const resolved = resolvePrecomputedBatch(files, rules, precomputed, { ...decisions, ...savedDecisions })
+      await onBatchResults?.(resolved)
       setBatchPreview({ status: 'done', ...resolved })
       setRecipeVisible(false)
       onNotify?.(`${resolved.matched}개 로그를 로컬 규칙으로 분류했습니다. 예외 ${resolved.exceptions}개${resolved.conflicts ? ` · 기존 판정 충돌 ${resolved.conflicts}개` : ''}`, 'info')
@@ -963,9 +1105,24 @@ export function WorkbenchView({
     event.stopPropagation()
     setOpenFileIds((current) => {
       const next = current.filter((id) => id !== fileId)
-      if (fileId === activeFileId) setActiveFileId(next.at(-1) ?? files[0]?.id ?? '')
+      if (fileId === activeFileId) {
+        const nextActive = next.at(-1) ?? ''
+        setActiveFileId(nextActive)
+        onSelectedFileChange?.(nextActive || null)
+      }
       return next
     })
+  }
+
+  const openBatchExceptions = () => {
+    setSideMode('files')
+    setShowBatchExceptions(true)
+    const firstId = batchPreview.exceptionIds?.[0]
+    const file = files.find((item) => item.id === firstId)
+    if (!file) return
+    const line = firstEvaluationLine(batchPreview.evaluations?.[file.id])
+    if (line) void revealLine(file, line)
+    else selectFile(file.id)
   }
 
   const searchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -984,7 +1141,7 @@ export function WorkbenchView({
     <div className="log-workbench">
       <aside className="workbench-sidebar">
         <header>
-          <div><strong>{sideMode === 'search' ? '전체 검색' : showBatchExceptions ? '예외 로그' : '로그'}</strong><span>{showBatchExceptions ? `${batchPreview.exceptions}개 확인 필요` : `${files.length}개 파일`}</span></div>
+          <div><strong>{sideMode === 'search' ? '전체 검색' : showBatchExceptions ? '예외 로그' : '로그'}</strong><span>{showBatchExceptions ? `${batchPreview.exceptions}` : files.length}</span></div>
           <button
             onClick={() => {
               if (sideMode === 'search') setSideMode('files')
@@ -999,7 +1156,7 @@ export function WorkbenchView({
         {sideMode === 'files' ? (
           <div className="folder-tree">
             <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
-              {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span><small>여러 폴더 추가 가능</small>
+              {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span>
             </button>
             {groupedFiles.map(([origin, group]) => {
               const expanded = expandedOrigins.has(origin)
@@ -1018,7 +1175,7 @@ export function WorkbenchView({
                   {expanded ? group.map((file) => (
                     <button className={`file-row ${file.id === activeFile?.id ? 'active' : ''}`} key={file.id} onClick={() => selectFile(file.id)} title={file.relativePath ?? file.name}>
                       <FileText size={13} /><span>{file.name}</span>
-                      {decisions[file.id] || file.decision || batchPreview.outcomes?.[file.id] ? <i className={`file-state ${(decisions[file.id] ?? file.decision ?? batchPreview.outcomes?.[file.id])?.toLowerCase()}`} title={decisions[file.id] ?? file.decision ? '엔지니어 판정' : 'Recipe 미리보기'} /> : null}
+                      {decisions[file.id] || file.decision || batchPreview.outcomes?.[file.id] ? <i className={`file-state ${(decisions[file.id] ?? file.decision ?? batchPreview.outcomes?.[file.id])?.toLowerCase()}`} title={decisions[file.id] ?? file.decision ? '엔지니어 판정' : '규칙 미리보기'} /> : null}
                     </button>
                   )) : null}
                 </section>
@@ -1031,7 +1188,7 @@ export function WorkbenchView({
               <strong>{query ? searchTotal : 0}</strong><span>{searching ? '로컬 로그 검색 중…' : query ? `'${query}' 일치` : '검색어를 입력하세요'}</span>
             </div>
             {searchError ? <div className="search-error"><AlertTriangle size={13} />{searchError}</div> : null}
-            {query && hits.length ? hits.slice(0, 80).map((hit, index) => {
+            {query && hits.length ? <>{hits.slice(0, 80).map((hit, index) => {
               const file = files.find((item) => item.id === hit.fileId)
               return (
                 <button className={index === currentHit ? 'active' : ''} key={`${hit.fileId}-${hit.line}-${hit.start}`} onClick={() => { setCurrentHit(index); selectFile(hit.fileId, false) }}>
@@ -1039,15 +1196,13 @@ export function WorkbenchView({
                   <code><b>{hit.line}</b>{hit.excerpt}</code>
                 </button>
               )
-            }) : searching ? (
+            })}{searchTotal > Math.min(hits.length, 80) ? <div className="search-result-limit">상위 {Math.min(hits.length, 80)}개 표시 · 전체 {searchTotal.toLocaleString()}개</div> : null}</> : searching ? (
               <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>전체 원본을 로컬에서 검색하고 있습니다.</span></div>
             ) : (
               <div className="empty-search"><Search size={22} /><span><kbd>Ctrl Shift F</kbd>로 모든 로그에서 찾습니다.</span></div>
             )}
           </div>
         )}
-
-        <footer className="sidebar-status"><ShieldCheck size={15} /><span>원본 보호됨</span><b>읽기 전용</b></footer>
       </aside>
 
       <main className="workbench-editor-shell">
@@ -1066,9 +1221,8 @@ export function WorkbenchView({
         </div>
 
         <div className="editor-context-bar">
-          <span>{activeFile?.origin}</span><ChevronRight size={11} /><span>{activeFile?.relativePath ?? activeFile?.name}</span>
+          <span>{activeFile?.relativePath ?? activeFile?.name}</span>
           {activeFile?.truncated ? <b><AlertTriangle size={12} />미리보기 일부</b> : null}
-          <i>{formatSize(activeFile?.size)}</i>
         </div>
 
         {searchOpen ? (
@@ -1095,8 +1249,9 @@ export function WorkbenchView({
             const lineNumber = line.lineNumber
             const isEvidence = evidenceLines.includes(lineNumber)
             const isActiveLine = activeHit?.fileId === activeFile.id && activeHit.line === lineNumber
+            const isRevealedLine = revealedLine?.fileId === activeFile.id && revealedLine.lineNumber === lineNumber
             return (
-              <div className={`log-line ${isEvidence ? 'is-evidence' : ''} ${isActiveLine ? 'is-active-hit' : ''}`} data-line={lineNumber} key={lineNumber}>
+              <div className={`log-line ${isEvidence ? 'is-evidence' : ''} ${isActiveLine ? 'is-active-hit' : ''} ${isRevealedLine ? 'is-revealed-line' : ''}`} data-line={lineNumber} key={lineNumber}>
                 <button className="evidence-gutter" aria-label={`${lineNumber}번 줄을 판정 근거로 ${isEvidence ? '해제' : '지정'}`} title="판정 근거 표시" onClick={() => toggleEvidence(lineNumber)}>{isEvidence ? <CircleDot size={11} /> : <Circle size={10} />}</button>
                 <span className="line-number">{lineNumber}</span>
                 <code>{renderHighlightedLine(line.text, lineNumber, activeHitsByLine.get(lineNumber) ?? [], activeHit)}</code>
@@ -1107,7 +1262,6 @@ export function WorkbenchView({
         </div>
 
         <footer className="editor-statusbar">
-          <span><ShieldCheck size={14} /> 원본 읽기 전용</span>
           <span className="status-spacer" />
           <button onClick={() => openSearch('file')}><Search size={14} />현재 로그 찾기 <kbd>Ctrl F</kbd></button>
           <button onClick={() => openSearch('workspace')}><SearchCode size={14} />전체 로그 찾기 <kbd>Ctrl Shift F</kbd></button>
@@ -1116,61 +1270,73 @@ export function WorkbenchView({
 
       <aside className="decision-panel" aria-label="로그 판정">
         <header>
-          <div><strong>결과 판정</strong><span>현재 로그의 결과를 선택하세요</span></div>
-          <span className="local-badge"><ShieldCheck size={13} />로컬 분석</span>
+          <strong>판정</strong>
         </header>
 
         <div className="decision-content">
-          <section className="signal-summary">
-            <div><span>현재 파일</span><strong>{activeFile?.name}</strong></div>
-            <p>검색 {searchHistory[activeFile?.id ?? '']?.length ?? 0}회 · 근거 {evidenceLines.length}줄</p>
-          </section>
+          {activeFile ? (
+            <>
+              <section className="decision-picker" aria-label="결과 선택">
+                <div className="section-label"><label htmlFor="decision-select">결과</label><span>검색 {searchHistory[activeFile.id]?.length ?? 0} · 근거 {evidenceLines.length}</span></div>
+                <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
+                {activeFile.decision && candidateDecisions[activeFile.id] && candidateDecisions[activeFile.id] !== activeFile.decision ? <button className="confirm-decision-revision" onClick={() => void confirmDecisionRevision()}>기존 {activeFile.decision} → {candidateDecisions[activeFile.id]} 변경 확정</button> : null}
+              </section>
 
-          <section className="decision-picker" aria-label="결과 선택">
-            <label htmlFor="decision-select">판정 결과</label>
-            <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => event.target.value && chooseDecision(event.target.value as WorkbenchDecision)}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
-          </section>
+              {showBatchExceptions && (activeBatchConflict || activeBatchEvaluation?.exceptions.length) ? (
+                <section className="exception-detail" aria-label="예외 이유">
+                  <div className="section-label"><span>검토 이유</span></div>
+                  {activeBatchConflict ? <p><AlertTriangle size={14} /><span>엔지니어 판정과 규칙 결과가 다릅니다.</span></p> : null}
+                  {activeBatchEvaluation?.exceptions.map((exception) => <p key={`${exception.code}-${exception.ruleIds.join('-')}`}><AlertTriangle size={14} /><span>{exceptionLabel(exception.code)}</span></p>)}
+                  {firstEvaluationLine(activeBatchEvaluation) ? <button onClick={() => void revealLine(activeFile, firstEvaluationLine(activeBatchEvaluation)!)}>Ln {firstEvaluationLine(activeBatchEvaluation)} 근거로 이동</button> : null}
+                </section>
+              ) : null}
 
-          {evidenceLines.length ? (
-            <section className="evidence-list">
-              <div className="section-label"><span>판정 근거</span><small>{evidenceLines.length}</small></div>
-              {evidenceLines.slice(0, 4).map((lineNumber) => <button onClick={() => editorRef.current?.querySelector(`[data-line="${lineNumber}"]`)?.scrollIntoView({ block: 'center' })} key={lineNumber}><b>Ln {lineNumber}</b><code>{activeLines.find((line) => line.lineNumber === lineNumber)?.text.trim()}</code></button>)}
-            </section>
-          ) : (
-            <div className="evidence-hint"><CircleDot size={14} /><span>중요한 줄의 왼쪽 점을 눌러 판정 근거로 남길 수 있습니다.</span></div>
-          )}
+              {evidenceLines.length ? (
+                <section className="evidence-list">
+                  <div className="section-label"><span>원문 북마크</span><small>{evidenceLines.length}</small></div>
+                  {evidenceLines.slice(0, 4).map((lineNumber) => <button onClick={() => void revealLine(activeFile, lineNumber)} key={lineNumber}><b>Ln {lineNumber}</b><code>{activeLines.find((line) => line.lineNumber === lineNumber)?.text.trim() ?? '원문 위치로 이동'}</code></button>)}
+                </section>
+              ) : (
+                <div className="evidence-hint"><span>줄 왼쪽을 눌러 다시 볼 원문을 표시하세요.</span></div>
+              )}
 
-          {!recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
-            <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><span><strong>분석 방법 저장</strong><small>검색과 판정을 Recipe로 만듭니다</small></span><ChevronRight size={17} /></button>
-          ) : null}
+              {!recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
+                <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><strong>분석 규칙 저장</strong></button>
+              ) : null}
 
-          {recipeVisible && draft ? (
-            <section className="recipe-suggestion">
-              <div className="recipe-title"><Sparkles size={15} /><div><strong>이 분석 방법을 저장</strong><span>검색과 판정을 Recipe 후보로 정리했습니다.</span></div><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={13} /></button></div>
-              <div className="recipe-logic">
-                {draft.positiveTerms.length ? <p><Check size={12} /><span>{draft.positiveTerms.join(' · ')}</span></p> : null}
-                {draft.missingTerms.length ? <p><X size={12} /><span>{draft.missingTerms.join(' · ')} 없음</span></p> : null}
-                <p><Play size={12} /><span>그러면 <b>{draft.decision}</b></span></p>
-              </div>
-              <div className="recipe-actions">
-                <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved}>{recipeSaved ? <Check size={13} /> : <Braces size={13} />}{recipeSaved ? '저장됨' : 'Recipe 저장'}</button>
-                <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running'}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : '전체에 미리 적용'}</button>
-              </div>
-            </section>
-          ) : null}
+              {recipeVisible && draft ? (
+                <section className="recipe-suggestion">
+                  <div className="recipe-title"><strong>분석 규칙</strong><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
+                  <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
+                    <span>판정에 사용할 검색을 선택하세요</span>
+                    {recipeObservations.map((observation) => {
+                      const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
+                      return <button className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} key={observation.id}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{observation.matched ? `${observation.matchCount}회` : '없음'}</small></button>
+                    })}
+                  </div>
+                  {canRequireMarkerOrder ? <button className={requireMarkerOrder ? 'recipe-order active' : 'recipe-order'} aria-pressed={requireMarkerOrder} onClick={() => setRequireMarkerOrder((current) => !current)}><i>{requireMarkerOrder ? <Check size={12} /> : null}</i><span>표시된 순서대로 나타나야 함</span></button> : null}
+                  <div className="recipe-logic">
+                    {draft.positiveTerms.length ? <p><Check size={12} /><span>{draft.positiveTerms.join(' · ')}</span></p> : null}
+                    {draft.missingTerms.length ? <p><X size={12} /><span>{draft.missingTerms.join(' · ')} 없음</span></p> : null}
+                    <p><Play size={12} /><span>그러면 <b>{draft.decision}</b></span></p>
+                  </div>
+                  <div className="recipe-actions">
+                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || !selectedRecipeObservations.length}>{recipeSaved ? <Check size={14} /> : <Braces size={14} />}{recipeSaved ? '저장됨' : '규칙 저장'}</button>
+                    <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : '전체에 미리 적용'}</button>
+                  </div>
+                </section>
+              ) : null}
 
-          {batchPreview.status === 'done' ? (
-            <section className="batch-summary">
-              <div><Check size={15} /><span><strong>{batchPreview.matched}개</strong> 조건 일치 · 로컬 계산</span></div>
-              <button onClick={() => { setSideMode('files'); setShowBatchExceptions(true) }}><AlertTriangle size={13} /><span>예외 {batchPreview.exceptions}개 확인</span><ChevronRight size={13} /></button>
-            </section>
-          ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
+              {batchPreview.status === 'done' ? (
+                <section className="batch-summary">
+                  <div><Check size={15} /><span><strong>{batchPreview.matched}개</strong> 조건 일치 · 로컬 계산</span></div>
+                  <button onClick={openBatchExceptions}><AlertTriangle size={13} /><span>예외 {batchPreview.exceptions}개 확인</span><ChevronRight size={13} /></button>
+                </section>
+              ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
+            </>
+          ) : <div className="decision-empty">로그를 선택하세요.</div>}
         </div>
 
-        <footer>
-          <span><RotateCcw size={12} />규칙 실행은 로컬</span>
-          <span>LLM 요청 0</span>
-        </footer>
       </aside>
     </div>
   )

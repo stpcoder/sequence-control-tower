@@ -17,6 +17,11 @@ import type {
   ArtifactImportFailure,
   ArtifactImportOptions,
   ArtifactImportResult,
+  ArtifactEvidenceInput,
+  ArtifactEvidenceItem,
+  ArtifactEvidenceOccurrence,
+  ArtifactEvidenceResult,
+  ArtifactEvidenceSpec,
   ArtifactRecord,
   ArtifactSearchFileResult,
   ArtifactSearchInput,
@@ -60,6 +65,8 @@ const MAX_LINE_WINDOW_LINES = 1_000
 const MAX_LINE_WINDOW_TEXT_CHARS = 20_000
 const MAX_SEARCH_LOGICAL_LINE_CHARS = 4 * 1024 * 1024
 const MAX_MATCHES_PER_LOGICAL_LINE = 100_000
+const MAX_EVIDENCE_SPECS = 100
+const MAX_EVIDENCE_EXCERPT_CHARS = 320
 const METADATA_BATCH_SIZE = 250
 const MAX_SOURCES_PER_ARTIFACT = MAX_FOLDER_FILES
 const LONG_LINE_ERROR = '한 줄이 4 MB를 초과해 안전하게 검색할 수 없습니다.'
@@ -191,10 +198,15 @@ function displayLine(line: string, anchor: number): { text: string; truncated: b
   }
 }
 
-function compileSearch(input: ArtifactSearchInput): {
+function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'caseSensitive'>): {
   mode: 'literal' | 'regex'
   caseSensitive: boolean
-  find(line: string, detailLimit: number): { count: number; details: Array<{ start: number; end: number }> }
+  find(line: string, detailLimit: number): {
+    count: number
+    details: Array<{ start: number; end: number }>
+    first?: { start: number; end: number }
+    last?: { start: number; end: number }
+  }
 } {
   const query = typeof input.query === 'string' ? input.query : ''
   if (!query) throw new Error('검색어를 입력해 주세요.')
@@ -212,15 +224,20 @@ function compileSearch(input: ArtifactSearchInput): {
         const details: Array<{ start: number; end: number }> = []
         let count = 0
         let offset = 0
+        let first: { start: number; end: number } | undefined
+        let last: { start: number; end: number } | undefined
         while (offset <= haystack.length - needle.length) {
           const start = haystack.indexOf(needle, offset)
           if (start < 0) break
           count += 1
           if (count > MAX_MATCHES_PER_LOGICAL_LINE) throw new Error(MATCH_LIMIT_ERROR)
-          if (details.length < detailLimit) details.push({ start, end: start + needle.length })
+          const occurrence = { start, end: start + needle.length }
+          first ??= occurrence
+          last = occurrence
+          if (details.length < detailLimit) details.push(occurrence)
           offset = start + Math.max(needle.length, 1)
         }
-        return { count, details }
+        return { count, details, first, last }
       }
     }
   }
@@ -248,15 +265,58 @@ function compileSearch(input: ArtifactSearchInput): {
       const details: Array<{ start: number; end: number }> = []
       let count = 0
       let match: RegExpExecArray | null
+      let first: { start: number; end: number } | undefined
+      let last: { start: number; end: number } | undefined
       while ((match = expression.exec(line)) !== null) {
         if (match[0].length === 0) throw new Error(ZERO_WIDTH_REGEX_ERROR)
         count += 1
         if (count > MAX_MATCHES_PER_LOGICAL_LINE) throw new Error(MATCH_LIMIT_ERROR)
-        if (details.length < detailLimit) details.push({ start: match.index, end: match.index + match[0].length })
+        const occurrence = { start: match.index, end: match.index + match[0].length }
+        first ??= occurrence
+        last = occurrence
+        if (details.length < detailLimit) details.push(occurrence)
       }
-      return { count, details }
+      return { count, details, first, last }
     }
   }
+}
+
+function boundedEvidenceOccurrence(
+  target: 'content' | 'file_name' | 'path',
+  text: string,
+  start: number,
+  end: number,
+  lineNumber?: number
+): ArtifactEvidenceOccurrence {
+  const anchor = Math.max(0, start)
+  const half = Math.floor(MAX_EVIDENCE_EXCERPT_CHARS / 2)
+  const excerptStart = Math.max(0, Math.min(anchor - half, text.length - MAX_EVIDENCE_EXCERPT_CHARS))
+  const excerptEnd = Math.min(text.length, excerptStart + MAX_EVIDENCE_EXCERPT_CHARS)
+  return {
+    target,
+    ...(lineNumber === undefined ? {} : { lineNumber }),
+    columnStart: start + 1,
+    columnEnd: end + 1,
+    excerpt: `${excerptStart > 0 ? '…' : ''}${text.slice(excerptStart, excerptEnd)}${excerptEnd < text.length ? '…' : ''}`,
+    excerptTruncated: excerptStart > 0 || excerptEnd < text.length
+  }
+}
+
+function safeEvidenceError(error: unknown): string {
+  if (error instanceof Error) {
+    const allowedPrefixes = [
+      '검색어를 입력해 주세요.',
+      '검색어는 1,000자까지 사용할 수 있습니다.',
+      '정규식을 해석할 수 없습니다:',
+      ZERO_WIDTH_REGEX_ERROR,
+      UNSAFE_REGEX_ERROR,
+      LONG_LINE_ERROR,
+      MATCH_LIMIT_ERROR,
+      '이진 파일은 텍스트로 검색할 수 없습니다.'
+    ]
+    if (allowedPrefixes.some((prefix) => error.message.startsWith(prefix))) return error.message.slice(0, 300)
+  }
+  return safeFailure(error)
 }
 
 async function* streamTextLines(filePath: string, signal?: AbortSignal): AsyncGenerator<string> {
@@ -606,6 +666,198 @@ export class ArtifactService {
       truncated: totalMatchCount > matches.length,
       files
     }
+  }
+
+  /**
+   * Scans every unique artifact once for a bounded set of recipe markers.
+   * The renderer receives counts and bounded first/last provenance only; raw
+   * logs and absolute paths remain in the main process.
+   */
+  async inspectEvidence(input: ArtifactEvidenceInput, signal?: AbortSignal): Promise<ArtifactEvidenceResult> {
+    abortSearch(signal)
+    if (!input || !Array.isArray(input.sources) || !Array.isArray(input.specs)) {
+      throw new Error('검사할 로그와 규칙을 지정해 주세요.')
+    }
+    if (!input.sources.length) throw new Error('검사할 로그를 선택해 주세요.')
+    if (input.sources.length > MAX_SEARCH_ARTIFACTS) {
+      throw new Error(`한 번에 ${MAX_SEARCH_ARTIFACTS.toLocaleString()}개까지 검사할 수 있습니다.`)
+    }
+    if (!input.specs.length) throw new Error('검사할 marker를 지정해 주세요.')
+    if (input.specs.length > MAX_EVIDENCE_SPECS) {
+      throw new Error(`한 번에 marker ${MAX_EVIDENCE_SPECS.toLocaleString()}개까지 검사할 수 있습니다.`)
+    }
+
+    const sourceIds = new Set<string>()
+    for (const source of input.sources) {
+      if (typeof source.sourceId !== 'string' || !source.sourceId.trim() || source.sourceId.length > 300) {
+        throw new Error('올바르지 않은 source id입니다.')
+      }
+      if (sourceIds.has(source.sourceId)) throw new Error('중복된 source id가 있습니다.')
+      sourceIds.add(source.sourceId)
+    }
+
+    const specIds = new Set<string>()
+    const preparedSpecs = input.specs.map((spec): {
+      spec: ArtifactEvidenceSpec & { target: 'content' | 'file_name' | 'path' }
+      compiled?: ReturnType<typeof compileSearch>
+      error?: string
+    } => {
+      if (!spec || typeof spec.id !== 'string' || !spec.id.trim() || spec.id.length > 300) {
+        throw new Error('올바르지 않은 marker id입니다.')
+      }
+      if (specIds.has(spec.id)) throw new Error('중복된 marker id가 있습니다.')
+      specIds.add(spec.id)
+      const target: 'content' | 'file_name' | 'path' =
+        spec.target === 'file_name' || spec.target === 'path' ? spec.target : 'content'
+      const normalized = { ...spec, target }
+      try {
+        return { spec: normalized, compiled: compileSearch(spec) }
+      } catch (error) {
+        return { spec: normalized, error: safeEvidenceError(error) }
+      }
+    })
+
+    const database = await this.store.read()
+    const contentSpecs = preparedSpecs.filter((item) => item.spec.target === 'content')
+    const contentCache = new Map<string, ArtifactEvidenceItem[]>()
+
+    const inspectContent = async (artifactId: string): Promise<ArtifactEvidenceItem[]> => {
+      const cached = contentCache.get(artifactId)
+      if (cached) return cached.map((item) => ({ ...item }))
+
+      const states = contentSpecs.map((item) => ({
+        ...item,
+        count: 0,
+        first: undefined as ArtifactEvidenceOccurrence | undefined,
+        last: undefined as ArtifactEvidenceOccurrence | undefined
+      }))
+      const invalidOnly = states.every((item) => !item.compiled)
+      if (!invalidOnly) {
+        let lineNumber = 0
+        try {
+          for await (const line of streamTextLines(this.objectPath(artifactId), signal)) {
+            lineNumber += 1
+            if (line.includes('\0')) throw new Error('이진 파일은 텍스트로 검색할 수 없습니다.')
+            for (const state of states) {
+              if (!state.compiled) continue
+              const found = state.compiled.find(line, 0)
+              state.count = Math.min(Number.MAX_SAFE_INTEGER, state.count + found.count)
+              if (found.first && !state.first) {
+                state.first = boundedEvidenceOccurrence(
+                  'content', line, found.first.start, found.first.end, lineNumber
+                )
+              }
+              if (found.last) {
+                state.last = boundedEvidenceOccurrence(
+                  'content', line, found.last.start, found.last.end, lineNumber
+                )
+              }
+            }
+          }
+        } catch (error) {
+          if (signal?.aborted) throw error
+          const message = safeEvidenceError(error)
+          const failed = states.map(({ spec }) => ({ specId: spec.id, error: message }))
+          contentCache.set(artifactId, failed)
+          return failed.map((item) => ({ ...item }))
+        }
+      }
+
+      const result: ArtifactEvidenceItem[] = states.map((state) => state.error
+        ? { specId: state.spec.id, error: state.error }
+        : {
+            specId: state.spec.id,
+            occurrenceCount: state.count,
+            ...(state.first ? { firstOccurrence: state.first } : {}),
+            ...(state.last ? { lastOccurrence: state.last } : {})
+          })
+      contentCache.set(artifactId, result)
+      return result.map((item) => ({ ...item }))
+    }
+
+    const results: ArtifactEvidenceResult['sources'] = []
+    for (const requested of input.sources) {
+      abortSearch(signal)
+      const record = /^[a-f0-9]{64}$/.test(requested.artifactId)
+        ? database.artifacts[requested.artifactId]
+        : undefined
+      if (!record) {
+        results.push({
+          sourceId: requested.sourceId,
+          artifactId: requested.artifactId,
+          fileName: requested.artifactId.slice(0, 12),
+          evidence: preparedSpecs.map(({ spec }) => ({ specId: spec.id, error: '아티팩트를 찾을 수 없습니다.' })),
+          error: '아티팩트를 찾을 수 없습니다.'
+        })
+        continue
+      }
+
+      const locations = record.sources ?? []
+      const requestedLocation = requested.rootId || requested.relativePath
+        ? locations.find((source) =>
+            source.rootId === requested.rootId && source.relativePath === requested.relativePath)
+        : locations.length === 1 ? locations[0] : undefined
+      if (!requestedLocation && locations.length > 1) {
+        const error = '동일 내용의 여러 원본 중 검사할 source를 식별할 수 없습니다.'
+        results.push({
+          sourceId: requested.sourceId,
+          artifactId: requested.artifactId,
+          fileName: record.originalNames[0] ?? requested.artifactId.slice(0, 12),
+          evidence: preparedSpecs.map(({ spec }) => ({ specId: spec.id, error })),
+          error
+        })
+        continue
+      }
+      if ((requested.rootId || requested.relativePath) && !requestedLocation) {
+        const error = '선택한 source가 아티팩트 기록과 일치하지 않습니다.'
+        results.push({
+          sourceId: requested.sourceId,
+          artifactId: requested.artifactId,
+          fileName: record.originalNames[0] ?? requested.artifactId.slice(0, 12),
+          evidence: preparedSpecs.map(({ spec }) => ({ specId: spec.id, error })),
+          error
+        })
+        continue
+      }
+
+      const relativePath = requestedLocation?.relativePath
+      const fileName = relativePath ? basename(relativePath) : record.originalNames[0] ?? requested.artifactId
+      const contentEvidence = await inspectContent(requested.artifactId)
+      const bySpec = new Map(contentEvidence.map((item) => [item.specId, item]))
+      const evidence = preparedSpecs.map(({ spec, compiled, error }): ArtifactEvidenceItem => {
+        if (spec.target === 'content') return bySpec.get(spec.id) ?? { specId: spec.id, error: '근거를 찾을 수 없습니다.' }
+        if (error || !compiled) return { specId: spec.id, error: error ?? 'marker를 해석할 수 없습니다.' }
+        const targetText = spec.target === 'file_name' ? fileName : relativePath ?? fileName
+        try {
+          const found = compiled.find(targetText, 0)
+          return {
+            specId: spec.id,
+            occurrenceCount: found.count,
+            ...(found.first ? {
+              firstOccurrence: boundedEvidenceOccurrence(
+                spec.target, targetText, found.first.start, found.first.end
+              )
+            } : {}),
+            ...(found.last ? {
+              lastOccurrence: boundedEvidenceOccurrence(
+                spec.target, targetText, found.last.start, found.last.end
+              )
+            } : {})
+          }
+        } catch (caught) {
+          return { specId: spec.id, error: safeEvidenceError(caught) }
+        }
+      })
+      results.push({
+        sourceId: requested.sourceId,
+        artifactId: requested.artifactId,
+        fileName,
+        ...(relativePath ? { relativePath } : {}),
+        evidence
+      })
+    }
+
+    return { sources: results }
   }
 
   async lineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow> {

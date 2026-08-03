@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Gauge, KeyRound, PlugZap, Save, ShieldCheck, WifiOff } from 'lucide-react'
+import { Check, KeyRound, PlugZap, Save } from 'lucide-react'
 import type { LlmConfigSummary } from '../../electron/shared/contracts'
 
 function urlOrigin(value: string): string {
@@ -109,39 +109,35 @@ export function SettingsView() {
     <div className="view settings-view">
       <div className="settings-layout">
         <section className="settings-content guide-llm-settings">
-          <div className="settings-title"><span className="section-kicker">OPENAI-COMPATIBLE API</span><h2>사내 AI Gateway</h2><p>비밀키는 로컬 main process에만 저장되며 Renderer와 Wiki에 노출되지 않습니다.</p></div>
+          <div className="settings-title"><h2>LLM 연결</h2><p>OpenAI-compatible 사내 API를 연결합니다. API key는 이 PC에만 저장됩니다.</p></div>
 
           <div className="settings-card">
-            <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>사내 OpenAI-compatible endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://internal-vllm.company.local/v1" /></div>
-            <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>{models.length ? `Gateway에서 확인된 ${models.length}개 모델` : '연결 확인 후 자동 선택하거나 직접 입력'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="연결 확인 시 자동 선택" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
-            <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 시 이전 host의 key는 해제됩니다' : summary?.apiKeyConfigured ? '현재 key가 설정되어 있습니다' : '입력하지 않으면 기존 key 유지'}</span></label><div className="secret-input"><KeyRound size={15} /><input id="key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.apiKeyConfigured ? '••••••••••••••••' : '선택 사항'} /><button type="button" onClick={() => setApiKey('')}>입력 지우기</button></div></div>
-            <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured ? `Gateway configured · ${summary.source}` : '미연결 시 로컬 엔진 사용'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={14} /> {discovering ? '연결 중' : '연결 확인 · 모델 찾기'}</button></div>
+            <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>/v1 endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://internal-vllm.company.local/v1" /></div>
+            <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>{models.length ? `${models.length}개 확인됨` : '모델 ID'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="예: qwen3-32b" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
+            <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · key 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.apiKeyConfigured ? '••••••••••••••••' : '선택 사항'} /><button type="button" onClick={() => setApiKey('')}>지우기</button></div></div>
+            <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured ? `연결됨 · ${summary.source}` : '로컬 분석 사용 중'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={15} /> {discovering ? '연결 중' : '모델 확인'}</button></div>
           </div>
 
           <div className="settings-two-column">
             <div className="settings-card compact-card guide-rate-limits">
-              <div className="card-icon-heading"><Gauge size={18} /><div><strong>Rate & latency 보호</strong><span>느린 시간대에도 UX를 멈추지 않습니다.</span></div></div>
-              <label className="inline-field"><span>RPM limit <small>환경 변수</small></span><input type="number" value={summary?.limits.requestsPerMinute ?? 8} readOnly /></label>
-              <label className="inline-field"><span>TPM limit <small>환경 변수</small></span><input type="number" value={summary?.limits.tokensPerMinute ?? 80000} readOnly /></label>
-              <label className="inline-field"><span>Timeout <small>환경 변수</small></span><div><input type="number" value={Math.round((summary?.limits.timeoutMs ?? 60000) / 1000)} readOnly /><small>sec</small></div></label>
-              <label className="toggle-row"><span><strong>같은 분석 결과 캐시</strong><small>Sequence hash + prompt version 기준</small></span><input type="checkbox" defaultChecked /></label>
-              <label className="toggle-row"><span><strong>대기열 백그라운드 처리</strong><small>화면 이동 후에도 안전하게 재시도</small></span><input type="checkbox" defaultChecked /></label>
+              <div className="settings-section-title"><strong>호출 제한</strong></div>
+              <label className="inline-field"><span>RPM</span><input type="number" value={summary?.limits.requestsPerMinute ?? 8} readOnly /></label>
+              <label className="inline-field"><span>TPM</span><input type="number" value={summary?.limits.tokensPerMinute ?? 80000} readOnly /></label>
+              <label className="inline-field"><span>Timeout</span><div><input type="number" value={Math.round((summary?.limits.timeoutMs ?? 60000) / 1000)} readOnly /><small>sec</small></div></label>
             </div>
 
             <div className="settings-card compact-card">
-              <div className="card-icon-heading"><WifiOff size={18} /><div><strong>LLM 없이도 계속 동작</strong><span>로컬 엔진이 담당하는 영역입니다.</span></div></div>
+              <div className="settings-section-title"><strong>로컬 분석</strong></div>
               <ul className="offline-list">
-                <li><Check size={14} /> Sequence 문법 파싱</li>
-                <li><Check size={14} /> DNA·fingerprint 추출</li>
-                <li><Check size={14} /> 유사도 및 부모 후보</li>
-                <li><Check size={14} /> 원본 SHA-256 보존</li>
-                <li><Check size={14} /> Semantic diff 후보 추출</li>
+                <li><Check size={15} /> 문법 파싱 · fingerprint</li>
+                <li><Check size={15} /> 유사도 · 부모 후보</li>
+                <li><Check size={15} /> SHA-256 · diff 후보</li>
               </ul>
-              <div className="security-callout"><ShieldCheck size={16} /><p>LLM은 설명과 불확실성 질문에만 사용하며, 원본 보존과 안전 정책에는 관여하지 않습니다.</p></div>
+              <p className="settings-note">LLM이 느리거나 제한되어도 로그 분석은 계속됩니다.</p>
             </div>
           </div>
 
-          <div className="settings-actions"><span>{message || (saved ? '설정이 로컬에 저장되었습니다.' : '변경 사항은 이 PC에만 적용됩니다.')}</span><button className="primary-button" onClick={() => void save()}>{saved ? <Check size={16} /> : <Save size={16} />}{saved ? '저장됨' : '설정 저장'}</button></div>
+          <div className="settings-actions"><span>{message || (saved ? '이 PC에 저장됨' : '이 PC에만 적용')}</span><button className="primary-button" onClick={() => void save()}>{saved ? <Check size={16} /> : <Save size={16} />}{saved ? '저장됨' : '저장'}</button></div>
         </section>
       </div>
     </div>

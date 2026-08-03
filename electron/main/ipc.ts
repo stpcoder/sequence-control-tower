@@ -12,8 +12,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
   ArtifactImportOptions,
+  ArtifactEvidenceInput,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
+  EvaluationApproveMetadataInput,
+  EvaluationProjectRequest,
+  EvaluationSaveBatchInput,
+  EvaluationSaveDecisionInput,
+  EvaluationSaveRecipeInput,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   StartAnalysisInput,
@@ -22,11 +28,13 @@ import type {
 import { IPC_CHANNELS } from '../shared/contracts'
 import { AnalysisService } from './analysis-service'
 import { ArtifactService } from './artifact-service'
+import { EvaluationStore } from './evaluation-store'
 import { LlmConfigService } from './llm-service'
 import { WikiService } from './wiki-service'
 
 interface Services {
   artifacts: ArtifactService
+  evaluations: EvaluationStore
   analysis: AnalysisService
   llmConfig: LlmConfigService
   wiki: WikiService
@@ -134,11 +142,41 @@ export function registerIpc(services: Services): void {
       if (activeArtifactSearches.get(senderId) === controller) activeArtifactSearches.delete(senderId)
     }
   })
+  handle(IPC_CHANNELS.artifactInspectEvidence, async (event, input) => {
+    const senderId = event.sender.id
+    activeArtifactSearches.get(senderId)?.abort()
+    const controller = new AbortController()
+    activeArtifactSearches.set(senderId, controller)
+    try {
+      return await services.artifacts.inspectEvidence(input as ArtifactEvidenceInput, controller.signal)
+    } finally {
+      if (activeArtifactSearches.get(senderId) === controller) activeArtifactSearches.delete(senderId)
+    }
+  })
   handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
     services.artifacts.lineWindow(input as ArtifactLineWindowInput)
   )
   handle(IPC_CHANNELS.artifactSimilar, (_event, id, limit) =>
     services.artifacts.findSimilar(String(id ?? ''), Number(limit) || undefined)
+  )
+
+  handle(IPC_CHANNELS.evaluationBootstrap, (_event, input) =>
+    services.evaluations.snapshot((input as EvaluationProjectRequest)?.projectId)
+  )
+  handle(IPC_CHANNELS.evaluationGetSnapshot, (_event, input) =>
+    services.evaluations.snapshot((input as EvaluationProjectRequest)?.projectId)
+  )
+  handle(IPC_CHANNELS.evaluationSaveDecision, (_event, input) =>
+    services.evaluations.saveDecision(input as EvaluationSaveDecisionInput)
+  )
+  handle(IPC_CHANNELS.evaluationSaveRecipe, (_event, input) =>
+    services.evaluations.saveRecipe(input as EvaluationSaveRecipeInput)
+  )
+  handle(IPC_CHANNELS.evaluationSaveBatch, (_event, input) =>
+    services.evaluations.saveBatch(input as EvaluationSaveBatchInput)
+  )
+  handle(IPC_CHANNELS.evaluationApproveMetadata, (_event, input) =>
+    services.evaluations.approveMetadata(input as EvaluationApproveMetadataInput)
   )
 
   handle(IPC_CHANNELS.analysisStart, (_event, input) =>

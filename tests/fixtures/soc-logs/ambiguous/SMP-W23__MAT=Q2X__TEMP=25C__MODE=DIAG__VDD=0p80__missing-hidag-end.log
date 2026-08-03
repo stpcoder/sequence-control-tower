@@ -1,0 +1,4 @@
+BOOT_COMPLETE
+STRESSAPP PASS cycles=10
+HIDAG START mode=DIAG
+transport disconnected
