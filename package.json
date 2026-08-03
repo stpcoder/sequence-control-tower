@@ -1,8 +1,8 @@
 {
   "name": "sequence-control-tower",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Local-first sequence knowledge and evaluation control tower for Windows labs",
+  "description": "Local-first sequence knowledge and evaluation control tower for Windows and macOS labs",
   "author": "stpcoder",
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
@@ -13,7 +13,8 @@
     "test": "vitest run",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "npm run typecheck && vite build",
-    "dist:win": "npm run build && electron-builder --win nsis portable zip --publish never"
+    "dist:win": "npm run build && electron-builder --win nsis portable zip --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.3.0",
@@ -51,6 +52,15 @@
         "portable",
         "zip"
       ]
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

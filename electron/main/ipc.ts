@@ -33,6 +33,7 @@ interface Services {
 }
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
+const activeArtifactSearches = new Map<number, AbortController>()
 
 function isExactPackagedRenderer(frameUrl: string): boolean {
   try {
@@ -122,9 +123,17 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.artifactPreview, (_event, id, maxChars) =>
     services.artifacts.preview(String(id ?? ''), Number(maxChars) || undefined)
   )
-  handle(IPC_CHANNELS.artifactSearch, (_event, input) =>
-    services.artifacts.search(input as ArtifactSearchInput)
-  )
+  handle(IPC_CHANNELS.artifactSearch, async (event, input) => {
+    const senderId = event.sender.id
+    activeArtifactSearches.get(senderId)?.abort()
+    const controller = new AbortController()
+    activeArtifactSearches.set(senderId, controller)
+    try {
+      return await services.artifacts.search(input as ArtifactSearchInput, controller.signal)
+    } finally {
+      if (activeArtifactSearches.get(senderId) === controller) activeArtifactSearches.delete(senderId)
+    }
+  })
   handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
     services.artifacts.lineWindow(input as ArtifactLineWindowInput)
   )
@@ -166,7 +175,11 @@ export function registerIpc(services: Services): void {
 }
 
 export function unregisterIpc(): void {
+  activeArtifactSearches.forEach((controller) => controller.abort())
+  activeArtifactSearches.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
-    if (channel !== IPC_CHANNELS.analysisUpdate) ipcMain.removeHandler(channel)
+    if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.appCommand) {
+      ipcMain.removeHandler(channel)
+    }
   })
 }

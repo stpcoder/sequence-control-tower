@@ -1,0 +1,105 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package-macos:
+    name: Package unsigned Universal macOS application
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      # This public PoC workflow intentionally has no Apple signing identity.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Check out immutable release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 1
+
+      - name: Resolve release source commit
+        id: release_source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          expected_tag="v$(node -p "require('./package.json').version")"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "Release tag '$RELEASE_TAG' must match package.json version '$expected_tag'." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit packaged dependencies
+        run: npm audit --omit=dev
+
+      - name: Type-check and test
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build unsigned Universal DMG and ZIP
+        run: npm run dist:mac
+
+      - name: Prepare stable assets and Gatekeeper notice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          dmg_path="$(find release -type f -name '*.dmg' -print -quit)"
+          zip_path="$(find release -type f -name '*.zip' -print -quit)"
+          test -n "$dmg_path" || { echo 'Universal DMG was not produced.' >&2; exit 1; }
+          test -n "$zip_path" || { echo 'Universal ZIP was not produced.' >&2; exit 1; }
+
+          cp "$dmg_path" release-assets/Sequence-Control-Tower-macOS-Universal.dmg
+          cp "$zip_path" release-assets/Sequence-Control-Tower-macOS-Universal.zip
+
+          cat > release-assets/GATEKEEPER-NOTICE-macOS.txt <<'NOTICE'
+          This macOS build is unsigned and has not been notarized by Apple.
+          Gatekeeper may block the first launch and report that Apple cannot verify the developer.
+          Install only if you trust this repository and verify SHA256SUMS-macOS.txt before opening it.
+          Production distribution requires an Apple Developer ID Application certificate and notarization.
+          NOTICE
+
+          (cd release-assets && shasum -a 256 \
+            Sequence-Control-Tower-macOS-Universal.dmg \
+            Sequence-Control-Tower-macOS-Universal.zip \
+            GATEKEEPER-NOTICE-macOS.txt > SHA256SUMS-macOS.txt)
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ### macOS distribution status
+          - Universal DMG and ZIP were built for Intel and Apple Silicon.
+          - This build is **unsigned and not notarized**. Gatekeeper can block first launch.
+          - Production distribution requires Developer ID signing and Apple notarization.
+          SUMMARY
+
+      - name: Publish macOS assets to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ steps.release_source.outputs.sha }}
+          name: Sequence Control Tower ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: release-assets/*

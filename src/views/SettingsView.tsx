@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, CloudCog, Database, Gauge, KeyRound, PlugZap, Save, ServerCog, ShieldCheck, SlidersHorizontal, WifiOff } from 'lucide-react'
+import { Check, Gauge, KeyRound, PlugZap, Save, ShieldCheck, WifiOff } from 'lucide-react'
 import type { LlmConfigSummary } from '../../electron/shared/contracts'
 
 function urlOrigin(value: string): string {
@@ -55,7 +55,7 @@ export function SettingsView() {
     const api = window.sequenceIntelligence
     if (!api) {
       setSaved(true)
-      setMessage('웹 미리보기 설정입니다. Windows 앱에서는 이 PC에 안전하게 저장됩니다.')
+      setMessage('웹 미리보기 설정입니다. 데스크톱 앱에서는 이 PC에 안전하게 저장됩니다.')
       return
     }
     try {
@@ -86,7 +86,7 @@ export function SettingsView() {
       const demoModels = ['qwen3-32b', 'glm-4.5-air', 'lab-reasoning-32b']
       setModels(demoModels)
       if (!model) setModel(demoModels[0])
-      setMessage('웹 미리보기 모델입니다. Windows 앱에서는 사내 Gateway의 /models를 한 번만 조회합니다.')
+      setMessage('웹 미리보기 모델입니다. 데스크톱 앱에서는 사내 Gateway의 /models를 한 번만 조회합니다.')
       return
     }
     setDiscovering(true)
@@ -108,14 +108,6 @@ export function SettingsView() {
   return (
     <div className="view settings-view">
       <div className="settings-layout">
-        <aside className="settings-index">
-          <span>환경 설정</span>
-          <button className="active"><CloudCog size={16} /> AI Gateway</button>
-          <button disabled title="PoC에서는 자동 관리됩니다"><Database size={16} /> Local Storage <small>자동</small></button>
-          <button disabled title="고객사별 adapter 확장 지점입니다"><SlidersHorizontal size={16} /> Parser Profiles <small>확장</small></button>
-          <button disabled title="실장기 제어는 시뮬레이션 범위입니다"><ServerCog size={16} /> Equipment Agents <small>다음 단계</small></button>
-        </aside>
-
         <section className="settings-content guide-llm-settings">
           <div className="settings-title"><span className="section-kicker">OPENAI-COMPATIBLE API</span><h2>사내 AI Gateway</h2><p>비밀키는 로컬 main process에만 저장되며 Renderer와 Wiki에 노출되지 않습니다.</p></div>
 

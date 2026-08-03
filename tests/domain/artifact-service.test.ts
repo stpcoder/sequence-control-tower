@@ -67,6 +67,26 @@ describe('ArtifactService log workbench', () => {
     expect(JSON.stringify(record.sources)).not.toContain(root)
   })
 
+  it('returns one artifact with every source when hundreds of logs have identical content', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    const fileCount = 550
+    await Promise.all(Array.from({ length: fileCount }, (_, index) =>
+      writeFile(join(source, `same-${String(index).padStart(4, '0')}.log`), 'stressapp\n@PASS\n', 'utf8')
+    ))
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolder(source, { extensions: ['log'], maxFiles: fileCount })
+
+    expect(result.failures).toEqual([])
+    expect(result.artifacts).toHaveLength(1)
+    expect(result.artifacts[0].importCount).toBe(fileCount)
+    expect(result.artifacts[0].sources).toHaveLength(fileCount)
+    expect(new Set(result.artifacts[0].sources?.map((item) => item.relativePath)).size).toBe(fileCount)
+  })
+
   it('searches complete local artifacts, returns capped details, and keeps complete counts', async () => {
     const root = await temporaryRoot()
     const source = join(root, 'source')
@@ -97,6 +117,30 @@ describe('ArtifactService log workbench', () => {
     expect(result.matches[0].after).toEqual(['hidag retry'])
   })
 
+  it('keeps high-volume match counts exact while bounding returned detail and context', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    const lineCount = 5_000
+    await writeFile(join(source, 'many-matches.log'), `${'needle '.repeat(10)}\n`.repeat(lineCount), 'utf8')
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+
+    const result = await service.search({
+      artifactIds: [imported.artifacts[0].id],
+      query: 'needle',
+      maxMatches: 10,
+      contextLines: 5
+    })
+
+    expect(result.totalMatchCount).toBe(50_000)
+    expect(result.files[0]).toMatchObject({ matchCount: 50_000, searchedLineCount: lineCount })
+    expect(result.matches).toHaveLength(10)
+    expect(result.matches.every((item) => item.before.length <= 5 && item.after.length <= 5)).toBe(true)
+    expect(result.truncated).toBe(true)
+  })
+
   it('rejects invalid regular expressions before reading artifacts', async () => {
     const root = await temporaryRoot()
     const service = new ArtifactService(join(root, 'data'))
@@ -107,6 +151,19 @@ describe('ArtifactService log workbench', () => {
       query: '[',
       mode: 'regex'
     })).rejects.toThrow('정규식을 해석할 수 없습니다')
+  })
+
+  it('cancels a streaming search before opening more artifacts', async () => {
+    const root = await temporaryRoot()
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(service.search({
+      artifactIds: ['0'.repeat(64)],
+      query: 'needle'
+    }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('rejects zero-width and nested-quantifier regexes conservatively', async () => {
