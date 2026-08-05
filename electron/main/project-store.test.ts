@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ProjectRevisionConflictError, ProjectStore } from './project-store'
 
@@ -13,7 +13,7 @@ describe('ProjectStore', () => {
     const dataRoot = await tempRoot(); const folder = await mkdtemp(join(tmpdir(), 'project-folder-')); roots.push(folder)
     const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'Bring-up' })
     const attached = await store.attachFolder(project.id, 0, folder)
-    expect(attached.folders[0]).toMatchObject({ displayLabel: folder.split('/').pop(), status: 'available' })
+    expect(attached.folders[0]).toMatchObject({ displayLabel: basename(folder), status: 'available' })
     expect(JSON.stringify(attached)).not.toContain(folder)
     const stored = await readFile(join(dataRoot, 'metadata', 'projects.json'), 'utf8')
     expect(stored).not.toContain(folder)

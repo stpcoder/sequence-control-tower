@@ -50,7 +50,8 @@ import {
   type WorkbenchFile,
 } from '../../src/views/WorkbenchView'
 
-const workbenchSource = readFileSync(new URL('../../src/views/WorkbenchView.tsx', import.meta.url), 'utf8')
+const normalizeNewlines = (source: string) => source.replace(/\r\n?/g, '\n')
+const workbenchSource = normalizeNewlines(readFileSync(new URL('../../src/views/WorkbenchView.tsx', import.meta.url), 'utf8'))
 const workbenchCss = readFileSync(new URL('../../src/workbench.css', import.meta.url), 'utf8')
 const legacyStyles = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8')
 
