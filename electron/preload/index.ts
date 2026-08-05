@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AnalysisJobSnapshot,
+  AgentAnswerInput,
+  AgentConfirmInput,
+  AgentMessageInput,
+  AgentRun,
+  AgentStartInput,
+  AgentConfirmResult,
   ArtifactEvidenceInput,
   ArtifactImportOptions,
   ArtifactLineWindowInput,
@@ -59,6 +65,19 @@ const api: SequenceIntelligenceApi = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.analysisUpdate, handler)
     }
   },
+  agent: {
+    start: (input: AgentStartInput) => ipcRenderer.invoke(IPC_CHANNELS.agentStart, input),
+    get: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.agentGet, runId),
+    answer: (input: AgentAnswerInput) => ipcRenderer.invoke(IPC_CHANNELS.agentAnswer, input),
+    message: (input: AgentMessageInput) => ipcRenderer.invoke(IPC_CHANNELS.agentMessage, input),
+    confirm: (input: AgentConfirmInput) => ipcRenderer.invoke(IPC_CHANNELS.agentConfirm, input),
+    cancel: (input: { runId: string }) => ipcRenderer.invoke(IPC_CHANNELS.agentCancel, input),
+    onRunUpdate: (listener: (run: AgentRun) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, run: AgentRun): void => listener(run)
+      ipcRenderer.on(IPC_CHANNELS.agentUpdate, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.agentUpdate, handler)
+    }
+  },
   settings: {
     getLlm: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGetLlm),
     saveLlm: (input: LlmConfigInput) => ipcRenderer.invoke(IPC_CHANNELS.settingsSaveLlm, input),
@@ -79,6 +98,20 @@ const api: SequenceIntelligenceApi = {
     saveBatch: (input: EvaluationSaveBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveBatch, input),
     saveRecipeAndBatch: (input: EvaluationSaveRecipeAndBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipeAndBatch, input),
     approveMetadata: (input: EvaluationApproveMetadataInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationApproveMetadata, input)
+  },
+  projects: {
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectCreate, input),
+    list: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectList, input),
+    get: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectGet, input),
+    save: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSave, input),
+    archive: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchive, input),
+    load: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectLoad, input),
+    attachFolder: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectAttachFolder, input),
+    detachFolder: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectDetachFolder, input),
+    validateFolders: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectValidateFolders, input),
+    connectArtifacts: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectConnectArtifacts, input),
+    saveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSaveExportPreset, input),
+    archiveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchiveExportPreset, input)
   }
 }
 

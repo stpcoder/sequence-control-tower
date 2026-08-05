@@ -11,6 +11,8 @@ import {
 import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
 import { SettingsView } from './views/SettingsView'
+import { ProjectControl } from './components/ProjectControl'
+import { AgentPanel } from './components/AgentPanel'
 import {
   artifactFiles,
   DEMO_LOGS,
@@ -31,10 +33,13 @@ import type {
   EvaluationProjectSnapshot,
   EvaluationRecipeRule,
   EvaluationRecipeRevision,
+  ProjectLoadResult,
+  ProjectSnapshot,
   RendererCommand,
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
+import { matchesPersistedSource } from './state/sourceIdentity'
 
 const PROJECT_ID = 'log-workbench'
 
@@ -65,6 +70,33 @@ export function reconcileListedFiles(
     .filter((artifact) => artifact.extension.replace(/^\./, '').toLowerCase() === 'log')
     .flatMap(artifactFiles))
   return mergeWorkbenchFiles(current, listedLogs)
+}
+
+export interface ProjectUpdateFileState {
+  files: WorkbenchFile[]
+  selectedFileId: string | null
+}
+
+export function reconcileProjectUpdateFileState(
+  current: readonly WorkbenchFile[],
+  selectedFileId: string | null,
+  previous: ProjectSnapshot | null,
+  next: ProjectSnapshot,
+): ProjectUpdateFileState {
+  if (!previous || previous.id !== next.id) return { files: [...current], selectedFileId }
+  const nextRoots = new Set(next.folders.map((folder) => folder.rootId))
+  const detachedRoots = new Set(previous.folders.map((folder) => folder.rootId).filter((rootId) => !nextRoots.has(rootId)))
+  if (!detachedRoots.size) return { files: [...current], selectedFileId }
+  const files = current.filter((file) => !file.rootId || !detachedRoots.has(file.rootId))
+  return {
+    files,
+    selectedFileId: selectedFileId && files.some((file) => file.id === selectedFileId) ? selectedFileId : files[0]?.id ?? null,
+  }
+}
+
+export function projectLoadFileState(artifacts: readonly ArtifactRecord[]): ProjectUpdateFileState {
+  const files = dedupeWorkbenchFiles(artifacts.flatMap(artifactFiles))
+  return { files, selectedFileId: files[0]?.id ?? null }
 }
 
 export function setupAppCommandListener(
@@ -100,22 +132,13 @@ export function setupAppCommandListener(
   }
 }
 
-export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null): WorkbenchFile[] {
+export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null, projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = []): WorkbenchFile[] {
   if (!snapshot) return [...files]
-  const decisions = new Map(snapshot.decisions.map((decision) => [
-    `${decision.source.sourceId}\u0000${decision.source.artifactId}`,
-    decision,
-  ]))
-  const outcomes = new Map<string, EvaluationProjectSnapshot['batches'][number]['outcomes'][number]>()
-  snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
-    outcomes.set(`${outcome.source.sourceId}\u0000${outcome.source.artifactId}`, outcome)
-  }))
   return files.map((file) => {
     if (!file.artifactId) return file
     const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
-    const key = `${file.id}\u0000${file.artifactId}`
-    const decision = decisions.get(key)
-    const outcome = outcomes.get(key)
+    const decision = [...snapshot.decisions].reverse().find((item) => matchesPersistedSource(file, item.source, projectSources))
+    const outcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => matchesPersistedSource(file, item.source, projectSources))
     return {
       ...base,
       ...(decision ? { decision: decision.result } : {}),
@@ -130,12 +153,12 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
 export function projectMetadataApprovals(
   files: readonly WorkbenchFile[],
   snapshot: EvaluationProjectSnapshot | null,
+  projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = [],
 ): MetadataApprovalsBySource {
   if (!snapshot) return {}
-  const exactArtifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
   const latest = new Map<string, EvaluationProjectSnapshot['metadataApprovals'][number]>()
   snapshot.metadataApprovals.forEach((approval) => {
-    if (exactArtifacts.get(approval.source.sourceId) !== approval.source.artifactId) return
+    if (!files.some((file) => matchesPersistedSource(file, approval.source, projectSources))) return
     latest.set(`${approval.source.sourceId}\u0000${approval.fieldKey}`, approval)
   })
   const bySource: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
@@ -153,17 +176,17 @@ export function projectMetadataApprovals(
 export function projectEvidenceCounts(
   files: readonly WorkbenchFile[],
   snapshot: EvaluationProjectSnapshot | null,
+  projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = [],
 ): Record<string, number> {
   if (!snapshot) return {}
-  const artifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
   const counts: Record<string, number> = {}
   snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
-    if (artifacts.get(outcome.source.sourceId) === outcome.source.artifactId) {
+    if (files.some((file) => matchesPersistedSource(file, outcome.source, projectSources))) {
       counts[outcome.source.sourceId] = outcome.evidenceRefs.length
     }
   }))
   snapshot.decisions.forEach((decision) => {
-    if (artifacts.get(decision.source.sourceId) === decision.source.artifactId) {
+    if (files.some((file) => matchesPersistedSource(file, decision.source, projectSources))) {
       counts[decision.source.sourceId] = decision.evidenceRefs.length
     }
   })
@@ -193,8 +216,12 @@ export default function App() {
   const [activePage, setActivePage] = useState<AppPage>(readInitialPage)
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
+  const [project, setProject] = useState<ProjectSnapshot | null>(null)
+  const activeProjectId = project?.id ?? PROJECT_ID
+  const projectGeneration = useRef(0)
   const [previewMetadataApprovals, setPreviewMetadataApprovals] = useState<MetadataApprovalsBySource>({})
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
   const evaluationSnapshotRef = useRef<EvaluationProjectSnapshot | null>(null)
@@ -226,12 +253,12 @@ export default function App() {
     if (!isAppLifecycleActive(lifecycle, generation)) return
     evaluationSnapshotRef.current = snapshot
     setEvaluationSnapshot(snapshot)
-    setFiles((current) => hydrateEvaluation(current, snapshot))
+    setFiles((current) => hydrateEvaluation(current, snapshot, project?.artifacts ?? []))
     if (snapshot.storageNotice && shownStorageNotice.current !== snapshot.storageNotice.backupFileName) {
       shownStorageNotice.current = snapshot.storageNotice.backupFileName
       notify(`손상된 분석 저장소를 ${snapshot.storageNotice.backupFileName}으로 보존하고 복구했습니다.`, 'info', generation)
     }
-  }, [notify])
+  }, [notify, project?.artifacts])
 
   const enqueueEvaluation = useCallback((
     operation: (snapshot: EvaluationProjectSnapshot) => Promise<{ snapshot: EvaluationProjectSnapshot }>,
@@ -241,13 +268,13 @@ export default function App() {
     if (!api?.evaluations) return Promise.resolve()
     const generation = lifecycleRef.current.generation
     const task = evaluationQueue.current.then(async () => {
-      let snapshot = evaluationSnapshotRef.current ?? await api.evaluations.bootstrap({ projectId: PROJECT_ID })
+      let snapshot = evaluationSnapshotRef.current ?? await api.evaluations.bootstrap({ projectId: activeProjectId })
       let result: { snapshot: EvaluationProjectSnapshot }
       try {
         result = await operation(snapshot)
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes('EVALUATION_REVISION_CONFLICT')) throw error
-        snapshot = await api.evaluations.getSnapshot({ projectId: PROJECT_ID })
+        snapshot = await api.evaluations.getSnapshot({ projectId: activeProjectId })
         result = await operation(snapshot)
       }
       acceptEvaluationSnapshot(result.snapshot, generation)
@@ -257,18 +284,19 @@ export default function App() {
       notify(error instanceof Error ? `${failureMessage}: ${error.message}` : failureMessage, 'error', generation)
       throw error
     })
-  }, [acceptEvaluationSnapshot, notify])
+  }, [acceptEvaluationSnapshot, activeProjectId, notify])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
     if (!api) return undefined
     let active = true
     const generation = lifecycleRef.current.generation
+    const projectLoadGeneration = projectGeneration.current
     void api.artifacts.list().then((artifacts) => {
-      if (!active || !isAppLifecycleActive(lifecycleRef.current, generation)) return
+      if (!active || projectGeneration.current !== projectLoadGeneration || !isAppLifecycleActive(lifecycleRef.current, generation)) return
       const next = reconcileListedFiles(filesRef.current, artifacts)
       filesRef.current = next
-      setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+      setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current, project?.artifacts ?? []))
       setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
     }).catch((error) => {
       if (active && isAppLifecycleActive(lifecycleRef.current, generation)) {
@@ -276,19 +304,39 @@ export default function App() {
       }
     })
     return () => { active = false }
-  }, [notify])
+  }, [notify, project?.artifacts])
+
+  const projectLoaded = useCallback((result: ProjectLoadResult) => {
+    const generation = projectGeneration.current + 1
+    projectGeneration.current = generation
+    setProject(result.project)
+    evaluationSnapshotRef.current = null
+    setEvaluationSnapshot(null)
+    const next = projectLoadFileState(result.artifacts)
+    filesRef.current = next.files
+    setFiles(next.files)
+    setSelectedFileId(next.selectedFileId)
+  }, [])
+
+  const projectUpdated = useCallback((nextProject: ProjectSnapshot) => {
+    const next = reconcileProjectUpdateFileState(filesRef.current, selectedFileId, project, nextProject)
+    setProject(nextProject)
+    filesRef.current = next.files
+    setFiles(next.files)
+    setSelectedFileId(next.selectedFileId)
+  }, [project, selectedFileId])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
     if (!api?.evaluations) return undefined
     let active = true
-    void api.evaluations.bootstrap({ projectId: PROJECT_ID }).then((snapshot) => {
+    void api.evaluations.bootstrap({ projectId: activeProjectId }).then((snapshot) => {
       if (active) acceptEvaluationSnapshot(snapshot)
     }).catch((error) => {
       if (active) notify(error instanceof Error ? `분석 결과 저장소를 열지 못했습니다: ${error.message}` : '분석 결과 저장소를 열지 못했습니다.', 'error')
     })
     return () => { active = false }
-  }, [acceptEvaluationSnapshot, notify])
+  }, [acceptEvaluationSnapshot, activeProjectId, notify])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
@@ -303,18 +351,18 @@ export default function App() {
   }, [toast])
 
   const metadataApprovals = useMemo<MetadataApprovalsBySource>(() => {
-    const persisted = projectMetadataApprovals(files, evaluationSnapshot)
+    const persisted = projectMetadataApprovals(files, evaluationSnapshot, project?.artifacts ?? [])
     const merged: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
     for (const [sourceId, fields] of Object.entries(persisted)) merged[sourceId] = { ...fields }
     for (const [sourceId, fields] of Object.entries(previewMetadataApprovals)) {
       merged[sourceId] = { ...(merged[sourceId] ?? {}), ...fields }
     }
     return merged
-  }, [evaluationSnapshot, files, previewMetadataApprovals])
+  }, [evaluationSnapshot, files, previewMetadataApprovals, project?.artifacts])
 
   const persistedEvidenceCounts = useMemo(
-    () => projectEvidenceCounts(files, evaluationSnapshot),
-    [evaluationSnapshot, files],
+    () => projectEvidenceCounts(files, evaluationSnapshot, project?.artifacts ?? []),
+    [evaluationSnapshot, files, project?.artifacts],
   )
 
   const records = useMemo(
@@ -335,11 +383,13 @@ export default function App() {
     return filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(evaluationSnapshot.recipes))
   }, [evaluationSnapshot])
 
+  const selectedFile = useMemo(() => files.find((file) => file.id === selectedFileId), [files, selectedFileId])
+
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
     filesRef.current = next
-    setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+    setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current, project?.artifacts ?? []))
     setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
-  }, [])
+  }, [project?.artifacts])
 
   const updateDecision = useCallback(async (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => {
     if (!file.artifactId || !window.sequenceIntelligence?.evaluations) {
@@ -347,13 +397,13 @@ export default function App() {
       return
     }
     await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveDecision({
-      projectId: PROJECT_ID,
+      projectId: activeProjectId,
       expectedRevision: snapshot.revision,
       source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
       result: decision,
       evidenceRefs: evidenceLines.map((lineNumber) => ({ artifactId: file.artifactId!, lineNumber })),
     }), '엔지니어 판정을 저장하지 못했습니다')
-  }, [enqueueEvaluation])
+  }, [activeProjectId, enqueueEvaluation])
 
   const updateEvidenceCount = useCallback((fileId: string, count: number) => {
     setEvidenceCounts((current) => current[fileId] === count ? current : { ...current, [fileId]: count })
@@ -362,22 +412,22 @@ export default function App() {
   const saveRecipeRevision = useCallback(async (draft: WorkbenchRecipeDraft) => {
     if (!draft.rule) return
     await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveRecipe({
-      projectId: PROJECT_ID,
+      projectId: activeProjectId,
       expectedRevision: snapshot.revision,
       recipeId: draft.recipeId ?? draft.rule!.id,
       name: `${draft.decision} 판정 규칙`,
       rules: [draft.rule!] as EvaluationRecipeRule[],
     }), '분석 규칙을 저장하지 못했습니다')
-  }, [enqueueEvaluation])
+  }, [activeProjectId, enqueueEvaluation])
 
   const archiveRecipeRevision = useCallback(async (recipeId: string) => {
     if (!window.sequenceIntelligence?.evaluations) return
     await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.archiveRecipe({
-      projectId: PROJECT_ID,
+      projectId: activeProjectId,
       expectedRevision: snapshot.revision,
       recipeId,
     }), '분석 규칙을 보관하지 못했습니다')
-  }, [enqueueEvaluation])
+  }, [activeProjectId, enqueueEvaluation])
 
   const updateBatchResults = useCallback(async (resolution: PrecomputedBatchResolution) => {
     if (!window.sequenceIntelligence?.evaluations) {
@@ -419,7 +469,7 @@ export default function App() {
         }]
       })
       return window.sequenceIntelligence!.evaluations.saveRecipeAndBatch({
-        projectId: PROJECT_ID,
+        projectId: activeProjectId,
         expectedRevision: snapshot.revision,
         recipe: {
           recipeId: 'active-batch-ruleset',
@@ -429,7 +479,7 @@ export default function App() {
         batch: { status: 'completed', outcomes },
       })
     }, '일괄 판정 결과를 저장하지 못했습니다')
-  }, [enqueueEvaluation, files])
+  }, [activeProjectId, enqueueEvaluation, files])
 
   const approveMetadata = useCallback(async (record: LogResultRecord, field: PatternAxis, value: string) => {
     const file = files.find((item) => item.id === record.id)
@@ -447,7 +497,7 @@ export default function App() {
     const generation = lifecycleRef.current.generation
     try {
       await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadata({
-        projectId: PROJECT_ID,
+        projectId: activeProjectId,
         expectedRevision: snapshot.revision,
         source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
         fieldKey: field,
@@ -460,7 +510,7 @@ export default function App() {
     } catch {
       // enqueueEvaluation already surfaced the durable-store failure.
     }
-  }, [enqueueEvaluation, files, notify])
+  }, [activeProjectId, enqueueEvaluation, files, notify])
 
   const applyMetadataSuggestion = useCallback(async (fileId: string, field: PatternAxis, value: string) => {
     const record = records.find((item) => item.id === fileId)
@@ -491,19 +541,32 @@ export default function App() {
       onBatchResults={updateBatchResults}
       onApplyMetadataSuggestion={applyMetadataSuggestion}
       onNotify={notify}
+      projectId={project?.id ?? PROJECT_ID}
     />
   ) : activePage === 'results' ? (
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onNotify={notify} />
   ) : activePage === 'patterns' ? (
-    <PatternsView records={records} onOpenFile={openFile} />
+    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : <SettingsView />
 
   return (
-    <div className="app-shell analysis-app" data-page={activePage}>
+    <div className={`app-shell analysis-app${activePage === 'workbench' ? ' workbench-is-open' : ''}`} data-page={activePage}>
       <Navigation active={activePage} onChange={navigate} />
       <main className="main-shell">
-        <div className="content-shell">{content}</div>
+        <div className="content-shell">
+          <div className="project-topbar"><ProjectControl project={project} onLoaded={projectLoaded} onProjectUpdated={projectUpdated} onError={(message) => notify(message, 'error')} /></div>
+          {content}
+        </div>
       </main>
+      <AgentPanel
+        open={agentOpen}
+        onOpen={() => setAgentOpen(true)}
+        onClose={() => setAgentOpen(false)}
+        project={project}
+        selectedFile={selectedFile}
+        evaluationSnapshot={evaluationSnapshot}
+        onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
+      />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}
         {toast.message}

@@ -3,6 +3,7 @@ import { FilterX } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
 import {
   buildPivotGrid,
+  aggregateRecordTrends,
   filterLogRecords,
   isPivotSelectionValid,
   RESULT_LABEL_KO,
@@ -10,11 +11,23 @@ import {
   type LogRecordFilters,
   type PivotAggregation,
   type PivotDimension,
+  type AggregateTrend,
 } from '../state/logRecords'
+import type { ProjectSnapshot } from '../../electron/shared/contracts'
+import {
+  DEFAULT_PATTERN_LAYOUT,
+  PATTERN_LAYOUT_PRESET_ID,
+  patternLayoutFromPreset,
+  patternLayoutPreset,
+  type PatternLayout,
+} from '../state/patternLayout'
 
 interface PatternsViewProps {
   records: readonly LogResultRecord[]
   onOpenFile: (fileId: string) => void
+  project: ProjectSnapshot | null
+  onProjectUpdated: (project: ProjectSnapshot) => void
+  onNotify: (message: string, tone?: 'success' | 'error' | 'info') => void
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string }> = [
@@ -37,6 +50,13 @@ const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
 
+const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
+  fail: 'Fail 3종',
+  reboot: 'Reboot',
+  halt: 'Halt',
+  majority: '다수 결과',
+}
+
 function SelectControl({ label, value, onChange, children, testId }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode; testId?: string }) {
   return <label className="pattern-control" data-testid={testId}><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>
 }
@@ -45,16 +65,40 @@ function dimensionOptions(selected: readonly PivotDimension[], current: PivotDim
   return DIMENSIONS.filter((item) => item.value === current || !selected.includes(item.value))
 }
 
-export function PatternsView({ records, onOpenFile }: PatternsViewProps) {
-  const [rowAxes, setRowAxes] = useState<[PivotDimension, PivotDimension | 'none']>(['sample', 'none'])
-  const [columnAxes, setColumnAxes] = useState<[PivotDimension, PivotDimension | 'none']>(['temperature', 'none'])
-  const [aggregation, setAggregation] = useState<PivotAggregation>('count')
-  const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>('all')
-  const [folderFilter, setFolderFilter] = useState('all')
-  const [failOnly, setFailOnly] = useState(false)
-  const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(false)
+export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify }: PatternsViewProps) {
+  const [rowAxes, setRowAxes] = useState<PatternLayout['rowAxes']>(DEFAULT_PATTERN_LAYOUT.rowAxes)
+  const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
+  const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
+  const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>(DEFAULT_PATTERN_LAYOUT.resultFilter)
+  const [folderFilter, setFolderFilter] = useState(DEFAULT_PATTERN_LAYOUT.folderFilter)
+  const [failOnly, setFailOnly] = useState(DEFAULT_PATTERN_LAYOUT.failOnly)
+  const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(DEFAULT_PATTERN_LAYOUT.unknownMetadataOnly)
+  const [savingLayout, setSavingLayout] = useState(false)
   const [selectedSourceIds, setSelectedSourceIds] = useState<ReadonlySet<string> | null>(null)
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
+    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation)
+    setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
+    setSelectedSourceIds(null); setSelectedCellKey(null)
+  }, [project?.id])
+
+  const saveLayout = async () => {
+    if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
+    setSavingLayout(true)
+    try {
+      const existing = project.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)
+      const next = await window.sequenceIntelligence.projects.saveExportPreset({
+        projectId: project.id, expectedRevision: project.revision,
+        preset: patternLayoutPreset({ rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, existing),
+      })
+      onProjectUpdated(next)
+      onNotify('N×M 결과 요약 레이아웃을 저장했습니다.', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? `레이아웃을 저장하지 못했습니다: ${error.message}` : '레이아웃을 저장하지 못했습니다.', 'error')
+    } finally { setSavingLayout(false) }
+  }
 
   const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((a, b) => a.localeCompare(b, 'ko-KR')), [records])
   const resultChoices = useMemo(() => [...new Set(records.map((row) => row.result))], [records])
@@ -86,6 +130,7 @@ export function PatternsView({ records, onOpenFile }: PatternsViewProps) {
   }, [scopedRecords, selectedSourceIds])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
+  const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
   const clearSelection = () => {
     setSelectedSourceIds(null)
     setSelectedCellKey(null)
@@ -121,11 +166,16 @@ export function PatternsView({ records, onOpenFile }: PatternsViewProps) {
 
   return <div className="data-view patterns-view">
     <header className="data-view-header">
-      <div><h1>패턴</h1><span>{records.length.toLocaleString()} logs · 조합별 결과를 빠르게 검토합니다</span></div>
-      {hasFilters || hasSelection ? <button className="clear-marking" onClick={clearAll}><FilterX size={16} />전체 해제</button> : null}
+      <div><h1>결과 정리</h1><span>{records.length.toLocaleString()} logs</span></div>
+      <div className="data-actions"><button className="clear-marking" onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '레이아웃 저장'}</button>{hasFilters || hasSelection ? <button className="clear-marking" onClick={clearAll}><FilterX size={16} />전체 해제</button> : null}</div>
     </header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
+      <section className="trend-summary" aria-label="현재 범위 추세 요약">
+        <span className="trend-summary-count">현재 범위 {trendSummary.total.toLocaleString()}건</span>
+        {trendSummary.trends.length ? <ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul> : <span>뚜렷한 집중 없음</span>}
+      </section>
+
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <div className="pattern-section-heading"><div><h2 id="pivot-heading">N × M 패턴 그리드</h2><span>셀을 누르면 해당 원본 로그만 아래에 표시됩니다</span></div><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
         <div className="pattern-controls" aria-label="패턴 필터">

@@ -207,6 +207,66 @@ export function clampSearchHitIndex(index: number, hitCount: number): number {
   return Math.min(Math.max(index, 0), hitCount - 1)
 }
 
+export function nextSearchHitIndex(
+  currentIndex: number,
+  hitCount: number,
+  direction: 1 | -1,
+  hasNavigated: boolean,
+): number {
+  if (hitCount <= 0) return 0
+  if (!hasNavigated) return direction < 0 ? hitCount - 1 : 0
+  return (currentIndex + direction + hitCount) % hitCount
+}
+
+export interface WorkbenchPaneWidths {
+  sidebar: number
+  inspector: number
+}
+
+export const DEFAULT_WORKBENCH_PANE_WIDTHS: WorkbenchPaneWidths = { sidebar: 260, inspector: 310 }
+const WORKBENCH_PANE_LIMITS = {
+  sidebar: { min: 180, max: 420 },
+  inspector: { min: 220, max: 440 },
+} as const
+
+function workbenchStorage(): Storage | undefined {
+  try { return window.localStorage } catch { return undefined }
+}
+
+export function clampWorkbenchPaneWidth(
+  pane: keyof WorkbenchPaneWidths,
+  value: number,
+  availableWidth = Number.POSITIVE_INFINITY,
+): number {
+  const limits = WORKBENCH_PANE_LIMITS[pane]
+  const safeValue = Number.isFinite(value) ? value : DEFAULT_WORKBENCH_PANE_WIDTHS[pane]
+  const maxForViewport = Number.isFinite(availableWidth) ? Math.max(limits.min, availableWidth - 24) : limits.max
+  return Math.round(Math.min(Math.max(safeValue, limits.min), Math.min(limits.max, maxForViewport)))
+}
+
+export function readWorkbenchPaneWidths(storage: Storage | undefined, key: string): WorkbenchPaneWidths {
+  if (!storage) return DEFAULT_WORKBENCH_PANE_WIDTHS
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(key) ?? '')
+    if (!parsed || typeof parsed !== 'object') return DEFAULT_WORKBENCH_PANE_WIDTHS
+    const value = parsed as Partial<WorkbenchPaneWidths>
+    return {
+      sidebar: clampWorkbenchPaneWidth('sidebar', Number(value.sidebar)),
+      inspector: clampWorkbenchPaneWidth('inspector', Number(value.inspector)),
+    }
+  } catch {
+    return DEFAULT_WORKBENCH_PANE_WIDTHS
+  }
+}
+
+export function saveWorkbenchPaneWidths(storage: Storage | undefined, key: string, widths: WorkbenchPaneWidths): void {
+  try { storage?.setItem(key, JSON.stringify(widths)) } catch { /* Storage can be unavailable or full. */ }
+}
+
+export function patternReviewFailureMessage(): string {
+  return 'AI 패턴 검토를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+}
+
 export function lineWindowEdgeRequestKey(fileId: string, edge: LineWindowEdge, boundary: number): string {
   return `${fileId}:${edge}:${boundary}`
 }
@@ -959,8 +1019,15 @@ export function WorkbenchView({
   const [invalidPattern, setInvalidPattern] = useState(false)
   const [patternReviewComment, setPatternReviewComment] = useState('')
   const [patternReview, setPatternReview] = useState<PatternReviewState>({ status: 'idle' })
+  const [paneWidths, setPaneWidths] = useState<WorkbenchPaneWidths>(() => readWorkbenchPaneWidths(
+    typeof window === 'undefined' ? undefined : workbenchStorage(),
+    `sequence-control-tower:workbench-widths:${projectId}`,
+  ))
   const searchInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const workbenchRef = useRef<HTMLDivElement>(null)
+  const splitterDragRef = useRef<{ pane: keyof WorkbenchPaneWidths; startX: number; startWidth: number } | null>(null)
+  const searchHasNavigatedRef = useRef(false)
   const observationTimer = useRef<number | undefined>(undefined)
   const searchRequest = useRef(0)
   const mountedRef = useRef(false)
@@ -981,6 +1048,12 @@ export function WorkbenchView({
   const importInFlightRef = useRef(false)
   const patternReviewGeneration = useRef(0)
   const patternReviewJobIdRef = useRef('')
+
+  const resetSearchNavigation = useCallback(() => {
+    setCurrentHit(0)
+    searchHasNavigatedRef.current = false
+    authorizedHitKeyRef.current = ''
+  }, [])
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
   const recipeEvidenceGeneration = useRef(0)
@@ -1092,7 +1165,7 @@ export function WorkbenchView({
       stage: job.stage,
       queuePosition: job.queuePosition,
       result: job.result,
-      error: job.error,
+      error: job.error ? patternReviewFailureMessage() : undefined,
     })
     return true
   }, [])
@@ -1140,6 +1213,66 @@ export function WorkbenchView({
     || patternReview.status === 'running'
     || patternReview.status === 'cancelling'
   const patternReviewAvailable = Boolean(activeFile?.artifactId && electronApi()?.analysis)
+
+  const paneStorageKey = `sequence-control-tower:workbench-widths:${projectId}`
+  const updatePaneWidth = useCallback((pane: keyof WorkbenchPaneWidths, value: number) => {
+    const availableWidth = workbenchRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY
+    setPaneWidths((current) => {
+      const next = { ...current, [pane]: clampWorkbenchPaneWidth(pane, value, availableWidth) }
+      saveWorkbenchPaneWidths(workbenchStorage(), paneStorageKey, next)
+      return next
+    })
+  }, [paneStorageKey])
+
+  const resetPaneWidths = useCallback(() => {
+    setPaneWidths(DEFAULT_WORKBENCH_PANE_WIDTHS)
+    saveWorkbenchPaneWidths(workbenchStorage(), paneStorageKey, DEFAULT_WORKBENCH_PANE_WIDTHS)
+  }, [paneStorageKey])
+
+  const startSplitterDrag = useCallback((pane: keyof WorkbenchPaneWidths, event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    splitterDragRef.current = { pane, startX: event.clientX, startWidth: paneWidths[pane] }
+  }, [paneWidths])
+
+  const moveSplitterDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = splitterDragRef.current
+    if (!drag) return
+    const delta = drag.pane === 'inspector' ? drag.startX - event.clientX : event.clientX - drag.startX
+    updatePaneWidth(drag.pane, drag.startWidth + delta)
+  }, [updatePaneWidth])
+
+  const endSplitterDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    splitterDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }, [])
+
+  const splitterKeyDown = useCallback((pane: keyof WorkbenchPaneWidths, event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Home') { event.preventDefault(); updatePaneWidth(pane, WORKBENCH_PANE_LIMITS[pane].min); return }
+    if (event.key === 'End') { event.preventDefault(); updatePaneWidth(pane, WORKBENCH_PANE_LIMITS[pane].max); return }
+    const step = event.shiftKey ? 24 : 8
+    if (event.key === 'ArrowRight') { event.preventDefault(); updatePaneWidth(pane, paneWidths[pane] + (pane === 'inspector' ? step : step)); }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); updatePaneWidth(pane, paneWidths[pane] - step); }
+  }, [paneWidths, updatePaneWidth])
+
+  useEffect(() => {
+    const root = workbenchRef.current
+    if (!root) return
+    const clampForResize = () => {
+      const availableWidth = root.getBoundingClientRect().width
+      setPaneWidths((current) => {
+        const next = {
+        sidebar: clampWorkbenchPaneWidth('sidebar', current.sidebar, availableWidth),
+        inspector: clampWorkbenchPaneWidth('inspector', current.inspector, availableWidth),
+        }
+        saveWorkbenchPaneWidths(workbenchStorage(), paneStorageKey, next)
+        return next
+      })
+    }
+    clampForResize()
+    window.addEventListener('resize', clampForResize)
+    return () => window.removeEventListener('resize', clampForResize)
+  }, [paneStorageKey])
 
   const groupedFiles = useMemo(() => groupWorkbenchFiles(files.filter((file) => (
     !showBatchExceptions || batchPreview.exceptionIds?.includes(file.id)
@@ -1390,16 +1523,17 @@ export function WorkbenchView({
       setPatternReview({ status: 'idle' })
     }
     if (resetSearch) {
-      setCurrentHit(0)
+      resetSearchNavigation()
       setRevealedLine(null)
     }
     onSelectedFileChange?.(fileId)
-  }, [bestEffortCancelPatternReview, onSelectedFileChange])
+  }, [bestEffortCancelPatternReview, onSelectedFileChange, resetSearchNavigation])
 
   const navigateToSearchHit = useCallback((index: number) => {
     const hit = hits[index]
     if (!hit) return
     setCurrentHit(index)
+    searchHasNavigatedRef.current = true
     selectFile(hit.fileId, false)
     authorizedHitKeyRef.current = searchHitKey(hit)
     setSearchNavigationVersion((current) => current + 1)
@@ -1635,7 +1769,7 @@ export function WorkbenchView({
 
   const moveToHit = useCallback((direction: 1 | -1) => {
     if (!hits.length) return
-    const next = (currentHit + direction + hits.length) % hits.length
+    const next = nextSearchHitIndex(currentHit, hits.length, direction, searchHasNavigatedRef.current)
     navigateToSearchHit(next)
   }, [currentHit, hits.length, navigateToSearchHit])
 
@@ -1644,10 +1778,9 @@ export function WorkbenchView({
     setSearchOpen(true)
     setReplaceMode(nextReplaceMode)
     setSideMode(scope === 'file' ? 'files' : 'search')
-    setCurrentHit(0)
-    authorizedHitKeyRef.current = ''
+    resetSearchNavigation()
     scheduleAnimationFrame(() => searchInputRef.current?.select())
-  }, [replaceMode, scheduleAnimationFrame])
+  }, [replaceMode, resetSearchNavigation, scheduleAnimationFrame])
 
   const replaceCurrent = useCallback(() => {
     setDraftError('')
@@ -1753,7 +1886,7 @@ export function WorkbenchView({
       if (!mountedRef.current || patternReviewGeneration.current !== requestGeneration || activeFileIdRef.current !== fileId) return
       setPatternReview({
         status: 'failed',
-        error: error instanceof Error ? error.message : 'AI 패턴 검토를 시작하지 못했습니다.',
+        error: patternReviewFailureMessage(),
       })
     }
   }
@@ -1782,7 +1915,7 @@ export function WorkbenchView({
       setPatternReview({
         status: 'failed',
         jobId,
-        error: error instanceof Error ? error.message : 'AI 패턴 검토를 취소하지 못했습니다.',
+        error: patternReviewFailureMessage(),
       })
     }
   }
@@ -1875,12 +2008,12 @@ export function WorkbenchView({
 
   useEffect(() => {
     setInvalidPattern(Boolean(query && !createSearchPattern(query, options)))
-    setCurrentHit(0)
-  }, [options, query])
+    resetSearchNavigation()
+  }, [options, query, resetSearchNavigation])
 
   useEffect(() => {
-    setCurrentHit(0)
-  }, [searchFileIdsKey])
+    resetSearchNavigation()
+  }, [resetSearchNavigation, searchFileIdsKey])
 
   useEffect(() => {
     setCurrentHit((index) => clampSearchHitIndex(index, hits.length))
@@ -1891,6 +2024,9 @@ export function WorkbenchView({
     const artifactIds = [...new Set(searchFiles.flatMap((file) => file.artifactId ? [file.artifactId] : []))]
     const requestId = advanceSearchRequestGeneration(searchRequest.current)
     searchRequest.current = requestId
+    // Reset synchronously with result invalidation so an Enter pressed before
+    // the next effect flush still focuses the displayed first hit.
+    resetSearchNavigation()
     setBackendHits([])
     setBackendCounts({})
     setBackendTotal(0)
@@ -1944,7 +2080,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [invalidPattern, options, query, searchFiles])
+  }, [invalidPattern, options, query, resetSearchNavigation, searchFiles])
 
   useEffect(() => {
     if (!query.trim() || invalidPattern || !activeFile || searching) return undefined
@@ -2412,7 +2548,11 @@ export function WorkbenchView({
   }
 
   return (
-    <div className="log-workbench">
+    <div
+      ref={workbenchRef}
+      className="log-workbench"
+      style={{ '--wb-sidebar-width': `${paneWidths.sidebar}px`, '--wb-inspector-width': `${paneWidths.inspector}px` } as React.CSSProperties}
+    >
       <aside className="workbench-sidebar">
         <header>
           <div><strong>{sideMode === 'search' ? '검색 결과' : showBatchExceptions ? '예외 로그' : '로그'}</strong>{sideMode === 'search' ? null : <span>{showBatchExceptions ? `${batchPreview.exceptions}` : files.length}</span>}</div>
@@ -2476,6 +2616,23 @@ export function WorkbenchView({
         )}
       </aside>
 
+      <div
+        className="workbench-splitter"
+        role="separator"
+        aria-label="로그 목록 너비 조절"
+        aria-orientation="vertical"
+        aria-valuemin={WORKBENCH_PANE_LIMITS.sidebar.min}
+        aria-valuemax={WORKBENCH_PANE_LIMITS.sidebar.max}
+        aria-valuenow={paneWidths.sidebar}
+        tabIndex={0}
+        onPointerDown={(event) => startSplitterDrag('sidebar', event)}
+        onPointerMove={moveSplitterDrag}
+        onPointerUp={endSplitterDrag}
+        onPointerCancel={endSplitterDrag}
+        onDoubleClick={resetPaneWidths}
+        onKeyDown={(event) => splitterKeyDown('sidebar', event)}
+      ><span aria-hidden="true" /></div>
+
       <main className="workbench-editor-shell">
         <div className="editor-tabs" role="tablist" aria-label="열린 로그">
           {openFileIds.map((fileId) => {
@@ -2509,7 +2666,7 @@ export function WorkbenchView({
               <option value="open">열린 탭</option>
               <option value="workspace">전체 로그</option>
             </select>
-            <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
+            <input ref={searchInputRef} value={query} onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
             <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
             <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
             <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
@@ -2525,7 +2682,7 @@ export function WorkbenchView({
             {searchOptionsOpen ? <div className="search-options-popover" aria-label="검색 옵션">
               {(Object.keys(options) as Array<keyof SearchOptions>).map((option) => {
                 const Icon = option === 'caseSensitive' ? CaseSensitive : option === 'wholeWord' ? WholeWord : Regex
-                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} onClick={() => setOptions((current) => ({ ...current, [option]: !current[option] }))} key={option}><Icon size={16} /><span>{optionLabel(option)}</span>{options[option] ? <Check size={15} /> : null}</button>
+                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }} key={option}><Icon size={16} /><span>{optionLabel(option)}</span>{options[option] ? <Check size={15} /> : null}</button>
               })}
             </div> : null}
           </div>
@@ -2554,6 +2711,23 @@ export function WorkbenchView({
           <button onClick={() => openSearch('workspace')}><SearchCode size={14} />전체 로그 찾기 <kbd>Ctrl Shift F</kbd></button>
         </footer>
       </main>
+
+      <div
+        className="workbench-splitter"
+        role="separator"
+        aria-label="판정 패널 너비 조절"
+        aria-orientation="vertical"
+        aria-valuemin={WORKBENCH_PANE_LIMITS.inspector.min}
+        aria-valuemax={WORKBENCH_PANE_LIMITS.inspector.max}
+        aria-valuenow={paneWidths.inspector}
+        tabIndex={0}
+        onPointerDown={(event) => startSplitterDrag('inspector', event)}
+        onPointerMove={moveSplitterDrag}
+        onPointerUp={endSplitterDrag}
+        onPointerCancel={endSplitterDrag}
+        onDoubleClick={resetPaneWidths}
+        onKeyDown={(event) => splitterKeyDown('inspector', event)}
+      ><span aria-hidden="true" /></div>
 
       <aside className="decision-panel" aria-label="로그 판정">
         <header>
@@ -2588,8 +2762,7 @@ export function WorkbenchView({
                 />
                 <div className="pattern-review-actions">
                   <button className="pattern-review-start" onClick={() => void startPatternReview()} disabled={!patternReviewAvailable || patternReviewBusy}>
-                    {patternReviewBusy ? <LoaderCircle className="wb-spin" size={13} /> : <SearchCode size={13} />}
-                    {patternReviewBusy ? '검토 중' : '검토 실행'}
+                    <SearchCode size={13} /> 검토 실행
                   </button>
                   {patternReviewBusy && patternReview.jobId ? <button className="pattern-review-cancel" onClick={() => void cancelPatternReview()} disabled={patternReview.status === 'cancelling'}>취소</button> : null}
                 </div>

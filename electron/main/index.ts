@@ -2,12 +2,14 @@ import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
+import { AgentService } from './agent-service'
 import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from './app-menu'
 import { ArtifactService } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
 import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
+import { ProjectStore } from './project-store'
 import { isSameRendererDocument } from './renderer-document'
 import { IPC_CHANNELS } from '../shared/contracts'
 import type { RendererCommand } from '../shared/contracts'
@@ -107,6 +109,7 @@ async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
   const artifacts = new ArtifactService(dataRoot)
   const evaluations = new EvaluationStore(dataRoot)
+  const projects = new ProjectStore(dataRoot)
   const llmConfig = new LlmConfigService(dataRoot)
   const llm = new OpenAiCompatibleClient(llmConfig)
   const wiki = new WikiService(dataRoot, artifacts)
@@ -115,14 +118,16 @@ async function bootstrap(): Promise<void> {
       if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.analysisUpdate, job)
     })
   })
+  const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
+    projects.initialize(),
     llmConfig.initialize(),
     wiki.initialize(),
     analysis.initialize()
   ])
-  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki })
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)

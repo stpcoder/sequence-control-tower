@@ -200,6 +200,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ steps.release_source.outputs.sha }}
           name: Sequence Control Tower ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
+          body_path: docs/manual/90-v0.7.0-release-notes.md
+          overwrite_files: false
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
           files: release-assets/*

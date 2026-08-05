@@ -25,6 +25,8 @@ import {
   canRevealActiveHit,
   chooseNextTabId,
   clampSearchHitIndex,
+  clampWorkbenchPaneWidth,
+  DEFAULT_WORKBENCH_PANE_WIDTHS,
   clauseSpecKey,
   filterUserRecipeRevisions,
   recipeEvidenceSpecs,
@@ -34,6 +36,7 @@ import {
   lineWindowEdgeRequestKey,
   mergeLineWindow,
   mergeWorkbenchFiles,
+  nextSearchHitIndex,
   omitFileCacheEntry,
   invalidateImportBatchGeneration,
   resolvePrecomputedBatch,
@@ -43,10 +46,12 @@ import {
   reorderRuleClausesByObservationIds,
   successfulSearchCounts,
   shouldCancelAnalysisJob,
+  patternReviewFailureMessage,
   type WorkbenchFile,
 } from '../../src/views/WorkbenchView'
 
-const workbenchSource = readFileSync(new URL('../../src/views/WorkbenchView.tsx', import.meta.url), 'utf8')
+const normalizeNewlines = (source: string) => source.replace(/\r\n?/g, '\n')
+const workbenchSource = normalizeNewlines(readFileSync(new URL('../../src/views/WorkbenchView.tsx', import.meta.url), 'utf8'))
 const workbenchCss = readFileSync(new URL('../../src/workbench.css', import.meta.url), 'utf8')
 const legacyStyles = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8')
 
@@ -346,7 +351,8 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('find-match-count')
     expect(workbenchSource).toContain('aria-live="polite"')
     expect(workbenchSource).toContain('placeholder="검토 메모 (선택)"')
-    expect(workbenchSource).toContain("patternReviewBusy ? '검토 중' : '검토 실행'")
+    expect(workbenchSource).toContain('<SearchCode size={13} /> 검토 실행')
+    expect(workbenchSource).not.toContain("patternReviewBusy ? '검토 중' : '검토 실행'")
     expect(workbenchSource).toContain('경고 {patternReview.result.warnings.length}건')
     expect(workbenchSource).not.toContain('검토용 제안 · 판정은 엔지니어가 확정')
     expect(workbenchSource).not.toContain('pattern-review-source')
@@ -503,6 +509,31 @@ describe('Log Workbench UI data hardening', () => {
     expect(clampSearchHitIndex(2, 0)).toBe(0)
   })
 
+  it('starts search navigation at the first hit, then cycles in either direction', () => {
+    expect(nextSearchHitIndex(0, 3, 1, false)).toBe(0)
+    expect(nextSearchHitIndex(0, 3, -1, false)).toBe(2)
+    expect(nextSearchHitIndex(0, 3, 1, true)).toBe(1)
+    expect(nextSearchHitIndex(0, 3, -1, true)).toBe(2)
+  })
+
+  it('resets the undisclosed-first-hit contract before input and async result transitions', () => {
+    expect(workbenchSource).toContain('const resetSearchNavigation = useCallback(() => {')
+    expect(workbenchSource).toContain('resetSearchNavigation()\n    scheduleAnimationFrame(() => searchInputRef.current?.select())')
+    expect(workbenchSource).toContain("onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }}")
+    expect(workbenchSource).toContain("onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }}")
+    expect(workbenchSource).toContain('// Reset synchronously with result invalidation so an Enter pressed before')
+    expect(workbenchSource).toContain('resetSearchNavigation()\n    setBackendHits([])')
+    expect(workbenchSource).toContain('if (event.key === \'Enter\') {\n      event.preventDefault()\n      moveToHit(event.shiftKey ? -1 : 1)')
+  })
+
+  it('bounds persisted pane widths and keeps fallback messages short', () => {
+    expect(clampWorkbenchPaneWidth('sidebar', 10)).toBe(180)
+    expect(clampWorkbenchPaneWidth('inspector', 9999)).toBe(440)
+    expect(clampWorkbenchPaneWidth('sidebar', 9999, 300)).toBe(276)
+    expect(DEFAULT_WORKBENCH_PANE_WIDTHS).toEqual({ sidebar: 260, inspector: 310 })
+    expect(patternReviewFailureMessage().length).toBeLessThan(120)
+  })
+
   it('keeps the continuous editor structure and avoids legacy per-line sizing', () => {
     const workbenchRootRule = cssRule(workbenchCss, '.log-workbench')
     const legacyLineRule = cssRule(legacyStyles, '.log-line')
@@ -528,6 +559,9 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('data-line={lineNumber}')
     expect(workbenchSource).toContain('<code>{renderHighlightedLine(')
     expect(workbenchSource).toContain('<mark className={active ? \'is-current\' : \'\'}')
+    expect(workbenchSource).toContain('setPointerCapture(event.pointerId)')
+    expect(workbenchSource).toContain('role="separator"')
+    expect(cssRule(workbenchCss, '.file-row.active')).not.toContain('box-shadow: inset 2px 0 var(--wb-blue)')
   })
 
   it('removes closed-tab line-window and evidence cache entries without touching other files', () => {

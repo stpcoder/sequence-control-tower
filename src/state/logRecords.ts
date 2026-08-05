@@ -106,6 +106,94 @@ export interface PatternMatrixRow {
   counts: Partial<Record<ResultLabel, number>>
 }
 
+export type TrendOutcome = 'fail' | 'reboot' | 'halt' | 'majority'
+
+export interface AggregateTrend {
+  dimension: PatternAxis | 'folder' | 'run'
+  value: string
+  outcome: TrendOutcome
+  count: number
+  total: number
+  percentage: number
+  result?: ResultLabel
+}
+
+export interface AggregateTrendSummary {
+  total: number
+  trends: readonly AggregateTrend[]
+}
+
+const TREND_MIN_TOTAL = 5
+const TREND_MIN_COUNT = 3
+const TREND_MIN_SHARE = 0.6
+const TREND_MIN_LIFT = 0.2
+const TREND_DIMENSIONS: readonly (PatternAxis | 'folder' | 'run')[] = [
+  'sample',
+  'temperature',
+  'mode',
+  'grid',
+  'folder',
+  'run',
+]
+const TREND_OUTCOMES: readonly TrendOutcome[] = ['fail', 'reboot', 'halt', 'majority']
+
+function trendValue(row: LogResultRecord, dimension: PatternAxis | 'folder' | 'run'): string | null {
+  if (dimension === 'folder') return row.folder || null
+  if (dimension === 'run') return row.run || null
+  return row[dimension].value
+}
+
+function hasTrendOutcome(row: LogResultRecord, outcome: TrendOutcome): boolean {
+  if (outcome === 'fail') return row.result === 'DIAG_FAIL' || row.result === 'TEST_FAIL' || row.result === 'TRAINING_FAIL'
+  if (outcome === 'reboot') return row.result === 'SYSTEM_REBOOT'
+  if (outcome === 'halt') return row.result === 'SYSTEM_HALT'
+  return true
+}
+
+/**
+ * Finds only scoped, deterministic concentrations. Missing dimensions are ignored;
+ * no stage/channel meaning is inferred from filenames or evidence.
+ */
+export function aggregateRecordTrends(rows: readonly LogResultRecord[]): AggregateTrendSummary {
+  const trends: AggregateTrend[] = []
+  const total = rows.length
+  if (total < TREND_MIN_TOTAL) return { total, trends }
+
+  for (const dimension of TREND_DIMENSIONS) {
+    const groups = new Map<string, LogResultRecord[]>()
+    for (const row of rows) {
+      const value = trendValue(row, dimension)
+      if (value === null) continue
+      const group = groups.get(value) ?? []
+      group.push(row)
+      groups.set(value, group)
+    }
+    if (groups.size < 2) continue
+
+    for (const outcome of TREND_OUTCOMES) {
+      for (const [value, group] of groups) {
+        if (group.length < TREND_MIN_TOTAL) continue
+        const resultCounts = RESULT_ORDER.map((result) => ({ result, count: group.filter((row) => row.result === result).length }))
+        const dominant = resultCounts.reduce((left, right) => right.count > left.count ? right : left)
+        const count = outcome === 'majority' ? dominant.count : group.filter((row) => hasTrendOutcome(row, outcome)).length
+        const percentage = count / group.length
+        const baseline = outcome === 'majority'
+          ? Math.max(...RESULT_ORDER.map((result) => rows.filter((row) => row.result === result).length)) / total
+          : rows.filter((row) => hasTrendOutcome(row, outcome)).length / total
+        if (count < TREND_MIN_COUNT || percentage < TREND_MIN_SHARE || percentage - baseline < TREND_MIN_LIFT) continue
+        trends.push({ dimension, value, outcome, count, total: group.length, percentage, ...(outcome === 'majority' ? { result: dominant.result } : {}) })
+      }
+    }
+  }
+
+  return {
+    total,
+    trends: trends
+      .sort((left, right) => right.percentage - left.percentage || right.count - left.count || left.dimension.localeCompare(right.dimension) || left.value.localeCompare(right.value, 'ko-KR', { numeric: true }))
+      .slice(0, 4),
+  }
+}
+
 /** These patterns are visible product defaults, never silently confirmed metadata. */
 export const DEFAULT_METADATA_FIELDS: readonly MetadataFieldDefinition[] = [
   { key: 'sample', label: 'Sample', target: 'file_name', pattern: '(?:^|[_.-])(?:SAMPLE|SMP|S)[=_-]?(?:(?:SAMPLE|SMP)[=_-])?(?<value>[A-Z0-9-]+?)(?=[_.-])', captureGroup: 'value' },

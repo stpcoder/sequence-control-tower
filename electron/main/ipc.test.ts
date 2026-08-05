@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
 import { IPC_CHANNELS } from '../shared/contracts'
 import { registerIpc, unregisterIpc } from './ipc'
 
@@ -8,6 +9,10 @@ const { handlers } = vi.hoisted(() => ({
 
 const { showOpenDialog } = vi.hoisted(() => ({
   showOpenDialog: vi.fn()
+}))
+
+const { agentUpdate } = vi.hoisted(() => ({
+  agentUpdate: { current: null as ((run: unknown) => void) | null, unsubscribe: null as ReturnType<typeof vi.fn> | null }
 }))
 
 const { owner } = vi.hoisted(() => ({
@@ -66,6 +71,15 @@ const saveRecipeAndBatch = vi.fn(async (input: unknown) => ({ input }))
 const archiveRecipe = vi.fn(async (input: unknown) => ({ input }))
 const lineWindow = vi.fn(async () => ({}))
 const saveLlm = vi.fn(async () => ({}))
+const agentStart = vi.fn(async () => ({ id: 'run-1', status: 'queued' }))
+const agentGet = vi.fn(() => ({ id: 'run-1', status: 'running' }))
+const agentCancel = vi.fn(async () => ({ id: 'run-1', status: 'cancelled' }))
+const agentCancelAll = vi.fn()
+const agentOnUpdate = vi.fn((listener: (run: unknown) => void) => {
+  agentUpdate.current = listener
+  agentUpdate.unsubscribe = vi.fn()
+  return agentUpdate.unsubscribe
+})
 const services = {
   artifacts: {
     search: search.fn,
@@ -74,18 +88,19 @@ const services = {
     lineWindow
   },
   evaluations: { saveRecipeAndBatch, archiveRecipe },
-  llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() }
+  llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() },
+  agent: { start: agentStart, get: agentGet, answer: vi.fn(), message: vi.fn(), confirm: vi.fn(), cancel: agentCancel, onUpdate: agentOnUpdate, cancelAll: agentCancelAll }
 } as unknown as Parameters<typeof registerIpc>[0]
 
 function trustedEvent(senderId = 42): unknown {
   const frame = { url: `${process.env.ELECTRON_RENDERER_URL}?screen=settings#llm` }
-  const sender = { id: senderId, mainFrame: frame, isDestroyed: () => false }
+  const sender = Object.assign(new EventEmitter(), { id: senderId, mainFrame: frame, isDestroyed: () => false, send: vi.fn() })
   return { sender, senderFrame: frame }
 }
 
 function eventWithUrl(url: string, senderFrame = true): unknown {
   const frame = { url }
-  const sender = { id: 42, mainFrame: frame, isDestroyed: () => false }
+  const sender = Object.assign(new EventEmitter(), { id: 42, mainFrame: frame, isDestroyed: () => false, send: vi.fn() })
   return { sender, senderFrame: senderFrame ? frame : { url } }
 }
 
@@ -112,6 +127,13 @@ beforeEach(() => {
   archiveRecipe.mockClear()
   lineWindow.mockClear()
   saveLlm.mockClear()
+  agentStart.mockClear()
+  agentGet.mockClear()
+  agentCancel.mockClear()
+  agentCancelAll.mockClear()
+  agentOnUpdate.mockClear()
+  agentUpdate.current = null
+  agentUpdate.unsubscribe = null
   search.requests.length = 0
   evidence.requests.length = 0
   folderImportRequests.length = 0
@@ -170,6 +192,38 @@ describe('IPC sender URL policy', () => {
       IPC_CHANNELS.settingsSaveLlm,
       eventWithUrl('http://localhost:5173/index.html?screen=settings'),
     )).rejects.toThrow('IPC 요청이 차단되었습니다.')
+  })
+})
+
+describe('agent IPC ownership', () => {
+  it('delivers updates only to the originating sender and preserves the start snapshot', async () => {
+    const first = trustedEvent(11) as { sender: EventEmitter & { send: ReturnType<typeof vi.fn> } }
+    const second = trustedEvent(22)
+    const started = await invokeEvent(IPC_CHANNELS.agentStart, first, { projectId: 'p1' })
+
+    expect(first.sender.send).toHaveBeenCalledWith(IPC_CHANNELS.agentUpdate, started)
+    agentUpdate.current?.({ id: 'run-1', status: 'running' })
+    expect(first.sender.send).toHaveBeenCalledWith(IPC_CHANNELS.agentUpdate, { id: 'run-1', status: 'running' })
+
+    await expect(invokeEvent(IPC_CHANNELS.agentGet, second, 'run-1')).rejects.toThrow('agent run을 찾을 수 없습니다.')
+    expect(agentGet).not.toHaveBeenCalled()
+  })
+
+  it('cancels active runs and drops ownership when the sender is destroyed', async () => {
+    const event = trustedEvent(11) as { sender: EventEmitter & { send: ReturnType<typeof vi.fn> } }
+    await invokeEvent(IPC_CHANNELS.agentStart, event, { projectId: 'p1' })
+
+    event.sender.emit('destroyed')
+
+    expect(agentCancel).toHaveBeenCalledWith({ runId: 'run-1' })
+    await expect(invokeEvent(IPC_CHANNELS.agentGet, trustedEvent(11), 'run-1')).rejects.toThrow('agent run을 찾을 수 없습니다.')
+  })
+
+  it('unsubscribes updates and cancels all agent runs during IPC teardown', () => {
+    unregisterIpc()
+
+    expect(agentCancelAll).toHaveBeenCalledOnce()
+    expect(agentUpdate.unsubscribe).toHaveBeenCalledOnce()
   })
 })
 

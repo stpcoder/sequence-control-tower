@@ -187,7 +187,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   return (
     <div className="data-view results-view">
       <header className="data-view-header">
-        <div><h1>결과표</h1><span>{filtered.length.toLocaleString()} / {records.length.toLocaleString()} logs</span></div>
+        <div><h1>결과</h1><span>{filtered.length.toLocaleString()} / {records.length.toLocaleString()} logs</span></div>
         <div className="data-actions">
           <details className="export-columns">
             <summary><SlidersHorizontal size={15} />열 선택<ChevronDown size={14} /></summary>

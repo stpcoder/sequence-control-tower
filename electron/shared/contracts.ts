@@ -610,6 +610,183 @@ export interface AppStatus {
   llm: LlmConfigSummary
 }
 
+/** v0.7 agent core contracts. These are deliberately reference-only: raw log
+ * payloads and unbounded arrays must not cross the agent boundary. */
+export type AgentStageName = 'plan' | 'search' | 'inspect' | 'synthesize' | 'complete' | 'failed'
+export type AgentRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type AgentState = 'INIT_QA' | 'METADATA_HYPOTHESIS' | 'PLAN' | 'TOOL_LOOP' | 'CANDIDATE_RESULT' | 'HUMAN_CONFIRM' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+export type AgentQuestionKind = 'clarification' | 'approval'
+export type AgentAnswerValue = string | number | boolean | string[]
+export type AgentToolName = 'search' | 'lineWindow' | 'inspect'
+export type AgentActionName = 'ask' | AgentToolName | 'candidate' | 'summary' | 'stop'
+
+export interface AgentRun {
+  id: string
+  status: AgentRunStatus
+  stage: AgentStageName
+  completionCount: number
+  toolCount: number
+  searchCount: number
+  lineWindowCount: number
+  promptChars: number
+  startedAt: string
+  updatedAt: string
+  failureCode?: 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action' | 'agent-timeout'
+  state?: AgentState
+  projectId?: string
+  generation?: number
+  needsReview?: boolean
+  failureReason?: string
+  candidate?: Candidate
+  question?: Question
+  queueMessage?: string
+}
+
+export interface AgentStartInput { projectId: string; artifactIds?: string[]; sourceId?: string; sourceIds?: string[] }
+export interface AgentAnswerInput { runId: string; questionId?: string; value: AgentAnswerValue }
+export interface AgentMessageInput { runId: string; content: string }
+export type AgentConfirmKind = 'decision' | 'metadata' | 'recipe'
+export interface AgentConfirmInput {
+  runId: string
+  kind: AgentConfirmKind
+  expectedRevision: number
+  decision?: EvaluationSaveDecisionInput
+  metadata?: EvaluationApproveMetadataInput
+  recipe?: EvaluationSaveRecipeInput
+}
+export interface AgentCancelInput { runId: string }
+export interface AgentConfirmResult { run: AgentRun; saved?: EvaluationDecisionSaveResult | EvaluationMetadataSaveResult | EvaluationRecipeSaveResult }
+
+export interface Stage {
+  name: AgentStageName
+  depth: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  completionOrdinal?: number
+}
+
+export interface Question {
+  id: string
+  kind: AgentQuestionKind
+  prompt: string
+  choices?: string[]
+}
+
+export interface Answer {
+  questionId: string
+  value: AgentAnswerValue
+}
+
+export interface ToolAction {
+  tool: AgentToolName
+  input: Search | LineWindow | Inspect
+  reason?: string
+}
+
+export interface Search {
+  sourceId: string
+  query: string
+  mode: 'literal' | 'regex'
+  caseSensitive: boolean
+  observationId?: string
+}
+
+export interface LineWindow {
+  sourceId: string
+  startLine: number
+  lineCount: number
+  observationId?: string
+}
+
+export interface Inspect {
+  sourceId: string
+  target: 'metadata' | 'observation'
+  observationId?: string
+}
+
+export interface Candidate {
+  kind: 'metadata' | 'result' | 'question' | 'action'
+  field?: 'sample' | 'temperature' | 'mode' | 'grid'
+  value?: string
+  result?: EvaluationResultLabel
+  question?: Question
+  action?: ToolAction
+  status: 'candidate' | 'approved' | 'unknown'
+  observationIds: string[]
+}
+
+export interface Trend {
+  dimensions: {
+    sample: Record<string, number>
+    temperature: Record<string, number>
+    mode: Record<string, number>
+    grid: Record<string, number>
+    result: Record<string, number>
+    stage: Record<string, number>
+    channel: Record<string, number>
+  }
+  majorConcentration: {
+    dimension: keyof Trend['dimensions']
+    value: string
+    count: number
+    share: number
+  } | null
+}
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  turn: number
+}
+
+export type ProjectFolderStatus = 'available' | 'missing' | 'permission-denied'
+/** Renderer-safe project folder identity. The canonical path is main-process only. */
+export interface ProjectFolderRef { rootId: string; displayLabel: string; status: ProjectFolderStatus; connectedAt: string }
+export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactId: string; relativePath: string }
+export interface ProjectEquipmentProfile { alias: string; profileId: string; updatedAt: string }
+export interface ProjectTemplatePin { templateId: string; revision: number; pinnedAt: string }
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+export interface ProjectExportPreset {
+  id: string; name: string; format: 'csv' | 'json' | 'markdown'
+  options: Record<string, JsonValue>; createdAt: string; updatedAt: string; archived?: boolean
+}
+export interface ProjectOnboardingAnswers {
+  evaluationTarget?: string
+  importantMetadata?: string
+  reuseRules?: string
+}
+export interface ProjectSnapshot {
+  schemaVersion: 2; id: string; name: string; description?: string; revision: number; archived: boolean
+  createdAt: string; updatedAt: string; folders: ProjectFolderRef[]; artifacts: ProjectArtifactSourceRef[]
+  equipmentProfiles: ProjectEquipmentProfile[]; templatePins: ProjectTemplatePin[]; exportPresets: ProjectExportPreset[]
+  onboardingAnswers?: ProjectOnboardingAnswers
+}
+export interface ProjectCreateInput { name: string; description?: string; onboardingAnswers?: ProjectOnboardingAnswers }
+export interface ProjectListInput { includeArchived?: boolean }
+export interface ProjectRequest { projectId: string }
+export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[]; onboardingAnswers?: ProjectOnboardingAnswers }
+export interface ProjectArchiveInput extends ProjectRequest { expectedRevision: number }
+export interface ProjectFolderInput extends ProjectRequest { expectedRevision: number }
+export interface ProjectDetachFolderInput extends ProjectFolderInput { rootId: string }
+export interface ProjectConnectArtifactsInput extends ProjectFolderInput { artifacts: Array<{ sourceId: string; rootId: string; artifactId: string; relativePath: string }> }
+export interface ProjectValidateFoldersInput extends ProjectRequest { rootIds?: string[] }
+export interface ProjectSaveExportPresetInput extends ProjectRequest { expectedRevision: number; preset: Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } }
+export interface ProjectArchiveExportPresetInput extends ProjectRequest { expectedRevision: number; presetId: string }
+export interface ProjectLoadResult { project: ProjectSnapshot; artifacts: ArtifactRecord[]; failures: ArtifactImportFailure[]; skippedCount: number }
+export interface SequenceIntelligenceProjectsApi {
+  create(input: ProjectCreateInput): Promise<ProjectSnapshot>
+  list(input?: ProjectListInput): Promise<ProjectSnapshot[]>
+  get(input: ProjectRequest): Promise<ProjectSnapshot | null>
+  save(input: ProjectSaveInput): Promise<ProjectSnapshot>
+  archive(input: ProjectArchiveInput): Promise<ProjectSnapshot>
+  load(input: ProjectRequest): Promise<ProjectLoadResult | null>
+  attachFolder(input: ProjectFolderInput): Promise<ProjectLoadResult | { cancelled: true }>
+  detachFolder(input: ProjectDetachFolderInput): Promise<ProjectSnapshot>
+  validateFolders(input: ProjectValidateFoldersInput): Promise<ProjectFolderRef[]>
+  connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot>
+  saveExportPreset(input: ProjectSaveExportPresetInput): Promise<ProjectSnapshot>
+  archiveExportPreset(input: ProjectArchiveExportPresetInput): Promise<ProjectSnapshot>
+}
+
 export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences'
 
 /** This is the only API exposed by contextBridge. */
@@ -634,6 +811,15 @@ export interface SequenceIntelligenceApi {
     cancel(jobId: string): Promise<boolean>
     onJobUpdate(listener: (job: AnalysisJobSnapshot) => void): () => void
   }
+  agent: {
+    start(input: AgentStartInput): Promise<AgentRun>
+    get(runId: string): Promise<AgentRun | null>
+    answer(input: AgentAnswerInput): Promise<AgentRun>
+    message(input: AgentMessageInput): Promise<AgentRun>
+    confirm(input: AgentConfirmInput): Promise<AgentConfirmResult>
+    cancel(input: AgentCancelInput): Promise<AgentRun>
+    onRunUpdate(listener: (run: AgentRun) => void): () => void
+  }
   settings: {
     getLlm(): Promise<LlmConfigSummary>
     saveLlm(input: LlmConfigInput): Promise<LlmConfigSummary>
@@ -654,6 +840,7 @@ export interface SequenceIntelligenceApi {
     saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult>
     approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
   }
+  projects: SequenceIntelligenceProjectsApi
 }
 
 export const IPC_CHANNELS = {
@@ -671,6 +858,8 @@ export const IPC_CHANNELS = {
   analysisGet: 'analysis:get',
   analysisCancel: 'analysis:cancel',
   analysisUpdate: 'analysis:update',
+  agentStart: 'agent:start', agentGet: 'agent:get', agentAnswer: 'agent:answer', agentMessage: 'agent:message',
+  agentConfirm: 'agent:confirm', agentCancel: 'agent:cancel', agentUpdate: 'agent:update',
   settingsGetLlm: 'settings:get-llm',
   settingsSaveLlm: 'settings:save-llm',
   settingsDiscoverModels: 'settings:discover-models',
@@ -684,5 +873,10 @@ export const IPC_CHANNELS = {
   evaluationArchiveRecipe: 'evaluation:archive-recipe',
   evaluationSaveBatch: 'evaluation:save-batch',
   evaluationSaveRecipeAndBatch: 'evaluation:save-recipe-and-batch',
-  evaluationApproveMetadata: 'evaluation:approve-metadata'
+  evaluationApproveMetadata: 'evaluation:approve-metadata',
+  projectCreate: 'project:create', projectList: 'project:list', projectGet: 'project:get', projectSave: 'project:save',
+  projectArchive: 'project:archive', projectLoad: 'project:load', projectAttachFolder: 'project:attach-folder',
+  projectDetachFolder: 'project:detach-folder', projectValidateFolders: 'project:validate-folders',
+  projectConnectArtifacts: 'project:connect-artifacts', projectSaveExportPreset: 'project:save-export-preset',
+  projectArchiveExportPreset: 'project:archive-export-preset'
 } as const

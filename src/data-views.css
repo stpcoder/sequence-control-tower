@@ -45,7 +45,7 @@
 .analysis-app .nav-item.active {
   color: #f4f6f9;
   background: rgba(117, 167, 255, .12);
-  box-shadow: inset 3px 0 #75a7ff;
+  box-shadow: none;
 }
 
 .data-view {
@@ -260,7 +260,9 @@
 .data-filter-bar {
   display: flex;
   min-height: 64px;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: center;
   gap: 10px;
   padding: 9px 18px;
   border-bottom: 1px solid var(--data-line);
@@ -268,6 +270,7 @@
 
 .data-filter-bar > label {
   display: flex;
+  flex: 0 1 auto;
   height: 44px;
   align-items: center;
   gap: 9px;
@@ -295,6 +298,10 @@
   min-width: 112px;
 }
 
+.data-filter-bar > label:not(.data-search) {
+  min-width: 140px;
+}
+
 .data-filter-bar > label:not(.data-search),
 .pattern-control {
   border-radius: 10px;
@@ -308,7 +315,7 @@
 }
 
 .data-search {
-  flex: 1;
+  flex: 1 1 240px;
   min-width: 240px;
   max-width: 520px;
 }
@@ -579,6 +586,45 @@
   z-index: 5;
   top: 0;
   flex: 0 0 auto;
+}
+
+.trend-summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 24px;
+  border-bottom: 1px solid var(--data-line-soft);
+  color: var(--data-muted);
+  background: #111419;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-summary-count {
+  flex: 0 0 auto;
+  color: var(--data-dim);
+}
+
+.trend-summary ul {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trend-summary li::before {
+  margin-right: 6px;
+  color: #75a7ff;
+  content: '·';
+}
+
+.trend-summary b {
+  color: #dce5f4;
+  font-weight: 650;
 }
 
 .pattern-section {

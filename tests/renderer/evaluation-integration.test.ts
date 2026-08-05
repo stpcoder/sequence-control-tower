@@ -172,6 +172,35 @@ describe('renderer and EvaluationStore integration', () => {
     expect(projectMetadataApprovals([changedSha, changedSource], approved.snapshot)).toEqual({})
   })
 
+  it('rehydrates an Agent decision when project sourceId differs from renderer file id', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    const saved = await store.saveDecision({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      source: { sourceId: 'project-source-1', artifactId: SHA_A, sourceKey: SOURCE_KEY },
+      result: 'PASS'
+    })
+    const rendererFile = file(SHA_A, 'renderer-row-1')
+    const otherSource = { ...rendererFile, id: 'renderer-row-2', rootId: 'other-root', relativePath: 'other/LOT12_S01_85C_DIAG.log', sourceKey: 'root:other-root\\u001fother/LOT12_S01_85C_DIAG.log' }
+    const hydrated = hydrateEvaluation([rendererFile, otherSource], saved.snapshot, [{ sourceId: 'project-source-1', rootId: 'opaque-root', artifactId: SHA_A, relativePath: 'lot-01/LOT12_S01_85C_DIAG.log' }])
+    expect(hydrated[0]).toMatchObject({ decision: 'PASS' })
+    expect(hydrated[1]).not.toHaveProperty('decision')
+    expect(projectLogRecords(hydrated).map((row) => row.result)).toEqual(['PASS', 'UNKNOWN'])
+  })
+
+  it('does not let a renderer row id override a mapped project source location', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    const saved = await store.saveDecision({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      source: { sourceId: 'renderer-row-1', artifactId: SHA_A, sourceKey: SOURCE_KEY },
+      result: 'PASS'
+    })
+    const mismatched = file(SHA_A, 'renderer-row-1')
+    mismatched.rootId = 'wrong-root'
+    expect(hydrateEvaluation([mismatched], saved.snapshot, [{ sourceId: 'renderer-row-1', rootId: 'opaque-root', artifactId: SHA_A, relativePath: file().relativePath! }])[0]).not.toHaveProperty('decision')
+  })
+
   it('removes optimistic or legacy result fields when a fresh durable snapshot does not contain them', async () => {
     const snapshot = await new EvaluationStore(await tempRoot()).snapshot(PROJECT)
     const optimistic = {
