@@ -45,7 +45,7 @@
 .analysis-app .nav-item.active {
   color: #f4f6f9;
   background: rgba(117, 167, 255, .12);
-  box-shadow: inset 3px 0 #75a7ff;
+  box-shadow: none;
 }
 
 .data-view {
@@ -260,7 +260,9 @@
 .data-filter-bar {
   display: flex;
   min-height: 64px;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: center;
   gap: 10px;
   padding: 9px 18px;
   border-bottom: 1px solid var(--data-line);
@@ -268,6 +270,7 @@
 
 .data-filter-bar > label {
   display: flex;
+  flex: 0 1 auto;
   height: 44px;
   align-items: center;
   gap: 9px;
@@ -295,6 +298,10 @@
   min-width: 112px;
 }
 
+.data-filter-bar > label:not(.data-search) {
+  min-width: 140px;
+}
+
 .data-filter-bar > label:not(.data-search),
 .pattern-control {
   border-radius: 10px;
@@ -308,7 +315,7 @@
 }
 
 .data-search {
-  flex: 1;
+  flex: 1 1 240px;
   min-width: 240px;
   max-width: 520px;
 }

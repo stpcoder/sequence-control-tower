@@ -154,7 +154,7 @@
   font-size: var(--wb-type-body);
 }
 .file-row:hover { color: var(--wb-text) !important; background: var(--wb-hover); }
-.file-row.active { color: var(--wb-text) !important; background: #2a2f38; }
+.file-row.active { color: var(--wb-text) !important; background: #2a2f38; box-shadow: none; }
 .file-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-state { width: 8px; height: 8px; border-radius: 50%; background: var(--wb-dim); }
 .file-state.pass { background: var(--wb-green); }
