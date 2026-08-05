@@ -52,7 +52,9 @@ import {
   type RuleClause,
   type SearchObservation,
   type DocumentEvaluation,
+  recalculateClauseOrder,
 } from '../domain/workbench'
+import type { MetadataSuggestionField } from '../../electron/shared/contracts'
 import {
   loadLogWorkbenchState,
   logWorkbenchStorageKey,
@@ -115,6 +117,7 @@ export interface WorkbenchViewProps {
   onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => void | Promise<void>
   onBatchResults?: (resolution: PrecomputedBatchResolution) => void | Promise<void>
   onSaveRecipe?: (draft: WorkbenchRecipeDraft) => void | Promise<void>
+  onApplyMetadataSuggestion?: (fileId: string, field: MetadataSuggestionField, value: string) => void | Promise<void>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   projectId?: string
 }
@@ -232,6 +235,31 @@ interface CountEvidence {
 type CurrentReplacementText =
   | { ok: true; text: string }
   | { ok: false; message: string }
+
+export type OccurrenceChoice =
+  | { kind: 'zero' }
+  | { kind: 'atLeast' }
+  | { kind: 'exact'; count: number }
+
+export function occurrenceConditionForChoice(choice: OccurrenceChoice | undefined, observation: SearchObservation): RuleClause['occurrence'] {
+  if (choice?.kind === 'zero') return { kind: 'exact', count: 0 }
+  if (choice?.kind === 'exact') return { kind: 'exact', count: Math.max(0, Math.floor(choice.count)) }
+  if (choice?.kind === 'atLeast') return { kind: 'atLeast', count: 1 }
+  return observation.matched ? { kind: 'atLeast', count: 1 } : { kind: 'exact', count: 0 }
+}
+
+export function reorderRuleClausesByObservationIds(
+  rule: RecipeRule,
+  observationIds: readonly string[],
+): RecipeRule {
+  const byObservationId = new Map(rule.clauses.map((clause) => [clause.sourceObservationId, clause]))
+  const ordered = observationIds.flatMap((id) => {
+    const clause = byObservationId.get(id)
+    return clause ? [clause] : []
+  })
+  const remaining = rule.clauses.filter((clause) => !observationIds.includes(clause.sourceObservationId))
+  return { ...rule, clauses: recalculateClauseOrder([...ordered, ...remaining]) }
+}
 
 export function resolveCurrentReplacementText(
   activeFileId: string | undefined,
@@ -828,6 +856,7 @@ export function WorkbenchView({
   onDecision,
   onBatchResults,
   onSaveRecipe,
+  onApplyMetadataSuggestion,
   onNotify,
   projectId = 'log-workbench',
 }: WorkbenchViewProps) {
@@ -849,6 +878,10 @@ export function WorkbenchView({
   const [draftError, setDraftError] = useState('')
   const [searchHistory, setSearchHistory] = useState<Record<string, SearchObservation[]>>({})
   const [selectedObservationIdsByFile, setSelectedObservationIdsByFile] = useState<Record<string, string[]>>({})
+  const [occurrenceByObservationId, setOccurrenceByObservationId] = useState<Record<string, OccurrenceChoice>>({})
+  const [exactCountDraftByObservationId, setExactCountDraftByObservationId] = useState<Record<string, string>>({})
+  const [recipeClauseOrderByFile, setRecipeClauseOrderByFile] = useState<Record<string, string[]>>({})
+  const [clauseOrderOpen, setClauseOrderOpen] = useState(false)
   const [requireMarkerOrder, setRequireMarkerOrder] = useState(false)
   const [backendHits, setBackendHits] = useState<SearchHit[]>([])
   const [backendCounts, setBackendCounts] = useState<Record<string, number>>({})
@@ -897,7 +930,40 @@ export function WorkbenchView({
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
   const replacementInputRef = useRef<HTMLInputElement>(null)
+  const clauseOrderModalRef = useRef<HTMLDivElement>(null)
   const lineWindowsRef = useRef<Record<string, LoadedLineWindow>>({})
+
+  useEffect(() => {
+    if (!clauseOrderOpen) return
+    const modal = clauseOrderModalRef.current
+    const focusable = () => modal?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    focusable()?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setClauseOrderOpen(false)
+        return
+      }
+      if (event.key !== 'Tab' || !modal) return
+      const items = [...modal.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      if (!items.length) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [clauseOrderOpen])
+
+  useEffect(() => {
+    setClauseOrderOpen(false)
+  }, [activeFileId])
 
   activeFileIdRef.current = activeFileId
   filesRef.current = files
@@ -997,8 +1063,15 @@ export function WorkbenchView({
 
   const selectedRecipeObservations = useMemo(() => {
     const selected = new Set(selectedObservationIdsByFile[activeFile?.id ?? ''] ?? [])
-    return recipeObservations.filter((observation) => selected.has(observation.id))
-  }, [activeFile?.id, recipeObservations, selectedObservationIdsByFile])
+    const pinned = recipeObservations.filter((observation) => selected.has(observation.id))
+    const orderedIds = recipeClauseOrderByFile[activeFile?.id ?? '']
+    if (!orderedIds?.length) return pinned
+    const byId = new Map(pinned.map((observation) => [observation.id, observation]))
+    return orderedIds.flatMap((id) => {
+      const observation = byId.get(id)
+      return observation ? [observation] : []
+    }).concat(pinned.filter((observation) => !orderedIds.includes(observation.id)))
+  }, [activeFile?.id, recipeClauseOrderByFile, recipeObservations, selectedObservationIdsByFile])
 
   const canRequireMarkerOrder = selectedRecipeObservations.length > 1
     && selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content')
@@ -1014,6 +1087,32 @@ export function WorkbenchView({
     }
   }, [activeFile, decision, evidenceLines, selectedRecipeObservations])
 
+  const buildWorkbenchRule = useCallback((sourceFileId: string, result: Exclude<WorkbenchDecision, 'UNKNOWN'>): RecipeRule | null => {
+    const selectedIds = selectedObservationIdsByFile[sourceFileId] ?? []
+    const observations = searchHistory[sourceFileId] ?? []
+    const promoted = selectDecisionEvidence(observations, selectedIds)
+    const builtRule = buildCandidateRule({
+      sourceId: sourceFileId,
+      result,
+      decidedBy: 'engineer',
+      evidenceObservationIds: selectedIds,
+    }, promoted)
+    if (!builtRule) return null
+    const withOccurrences: RecipeRule = {
+      ...builtRule,
+      clauses: builtRule.clauses.map((clause) => {
+        const observation = promoted.find((item) => item.id === clause.sourceObservationId)
+        return observation
+          ? { ...clause, occurrence: occurrenceConditionForChoice(occurrenceByObservationId[observation.id], observation) }
+          : clause
+      }),
+    }
+    const orderedIds = recipeClauseOrderByFile[sourceFileId]
+    return requireMarkerOrder && orderedIds?.length
+      ? reorderRuleClausesByObservationIds(withOccurrences, orderedIds)
+      : withOccurrences
+  }, [occurrenceByObservationId, recipeClauseOrderByFile, requireMarkerOrder, searchHistory, selectedObservationIdsByFile])
+
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
     filesRef.current = next
     if (controlledFiles === undefined) setLocalFiles(next)
@@ -1027,6 +1126,7 @@ export function WorkbenchView({
     authorizedHitKeyRef.current = ''
     const changingFile = fileId !== activeFileIdRef.current
     if (changingFile) {
+      setClauseOrderOpen(false)
       bestEffortCancelPatternReview()
       batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
       lineScrollAnchor.current = null
@@ -1452,6 +1552,16 @@ export function WorkbenchView({
     openSearch('file')
   }
 
+  const applyMetadataSuggestion = async (suggestion: { field: MetadataSuggestionField; value: string }) => {
+    if (!activeFile || !onApplyMetadataSuggestion) return
+    try {
+      await onApplyMetadataSuggestion(activeFile.id, suggestion.field, suggestion.value)
+      onNotify?.(`${suggestion.field} 메타데이터를 적용했습니다.`, 'success')
+    } catch (error) {
+      onNotify?.(error instanceof Error ? error.message : '메타데이터 제안을 적용하지 못했습니다.', 'error')
+    }
+  }
+
   useEffect(() => {
     if (!files.length) return
     if (activeFileId && !files.some((file) => file.id === activeFileId)) {
@@ -1813,8 +1923,47 @@ export function WorkbenchView({
         : [...selected, observationId]
       return { ...current, [activeFile.id]: next }
     })
+    setRecipeClauseOrderByFile((current) => {
+      const selected = current[activeFile.id] ?? []
+      return {
+        ...current,
+        [activeFile.id]: selected.includes(observationId) ? selected.filter((id) => id !== observationId) : [...selected, observationId],
+      }
+    })
     setRequireMarkerOrder(false)
     setRecipeSaved(false)
+  }
+
+  const changeOccurrenceChoice = (observationId: string, choice: OccurrenceChoice) => {
+    setOccurrenceByObservationId((current) => ({ ...current, [observationId]: choice }))
+    setExactCountDraftByObservationId((current) => {
+      if (!(observationId in current)) return current
+      const next = { ...current }
+      delete next[observationId]
+      return next
+    })
+    setRecipeSaved(false)
+  }
+
+  const changeExactCount = (observationId: string, rawValue: string) => {
+    setExactCountDraftByObservationId((current) => ({ ...current, [observationId]: rawValue }))
+    if (!/^\d+$/.test(rawValue)) return
+    const count = Number(rawValue)
+    if (!Number.isSafeInteger(count) || count < 0) return
+    setOccurrenceByObservationId((current) => ({ ...current, [observationId]: { kind: 'exact', count } }))
+    setRecipeSaved(false)
+  }
+
+  const movePinnedClause = (index: number, delta: -1 | 1) => {
+    if (!activeFile) return
+    setRecipeClauseOrderByFile((current) => {
+      const ids = [...(current[activeFile.id] ?? selectedRecipeObservations.map((item) => item.id))]
+      const target = index + delta
+      if (target < 0 || target >= ids.length) return current
+      const [moved] = ids.splice(index, 1)
+      ids.splice(target, 0, moved)
+      return { ...current, [activeFile.id]: ids }
+    })
   }
 
   const saveRecipe = async () => {
@@ -1825,21 +1974,8 @@ export function WorkbenchView({
       return
     }
     const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], selectedIds)
-    const engineerDecision = {
-      sourceId: activeFile.id,
-      result: decision,
-      decidedBy: 'engineer' as const,
-      evidenceObservationIds: selectedIds,
-    }
-    const builtRule = buildCandidateRule(engineerDecision, promoted)
-    const rule = builtRule && requireMarkerOrder && canRequireMarkerOrder
-      ? {
-          ...builtRule,
-          clauses: builtRule.clauses.map((clause, index, clauses) => index === 0
-            ? clause
-            : { ...clause, order: { afterClauseId: clauses[index - 1].id } }),
-        }
-      : builtRule
+    const engineerDecision = { sourceId: activeFile.id, result: decision, decidedBy: 'engineer' as const, evidenceObservationIds: selectedIds }
+    const rule = buildWorkbenchRule(activeFile.id, decision)
     if (!rule) {
       onNotify?.('저장할 검색 근거를 먼저 확인해 주세요.', 'info')
       return
@@ -1868,7 +2004,11 @@ export function WorkbenchView({
         recipes: nextRecipes,
       })
       if (!saved.ok) throw new Error(saved.error)
-      setSearchHistory((current) => ({ ...current, [activeFile.id]: promoted }))
+      setSearchHistory((current) => ({
+        ...current,
+        [activeFile.id]: (current[activeFile.id] ?? []).map((observation) =>
+          promoted.find((item) => item.id === observation.id) ?? observation),
+      }))
       setSavedRecipes(saved.state.recipes)
       setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
       setRecipeSaved(true)
@@ -1893,21 +2033,7 @@ export function WorkbenchView({
     try {
       const api = electronApi()
       const selectedIds = selectedRecipeObservations.map((item) => item.id)
-      const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], selectedIds)
-      const builtCandidate = buildCandidateRule({
-        sourceId: activeFile.id,
-        result: decision,
-        decidedBy: 'engineer',
-        evidenceObservationIds: selectedIds,
-      }, promoted)
-      const candidate = builtCandidate && requireMarkerOrder && canRequireMarkerOrder
-        ? {
-            ...builtCandidate,
-            clauses: builtCandidate.clauses.map((clause, index, clauses) => index === 0
-              ? clause
-              : { ...clause, order: { afterClauseId: clauses[index - 1].id } }),
-          }
-        : builtCandidate
+      const candidate = buildWorkbenchRule(activeFile.id, decision)
       if (!candidate) throw new Error('미리 적용할 검색 근거가 없습니다.')
       const ruleMap = new Map<string, RecipeRule>()
       const availableRules = durableRules ?? savedRecipes.flatMap((recipe) => recipe.rules)
@@ -2230,6 +2356,19 @@ export function WorkbenchView({
                         <div>{patternReview.result.suggestedTags.slice(0, 6).map((suggestion) => <button key={suggestion} onClick={() => applySuggestedSearch(suggestion)} title="눌러서 현재 로그 검색에 사용">{suggestion}</button>)}</div>
                       </div>
                     ) : null}
+                    {patternReview.result.metadataSuggestions?.length ? (
+                      <div className="pattern-review-suggestions" aria-label="메타데이터 제안">
+                        <span>메타데이터 제안</span>
+                        <div>
+                          {patternReview.result.metadataSuggestions.slice(0, 6).map((suggestion) => (
+                            <div key={`${suggestion.field}-${suggestion.value}`}>
+                              <span><b>{suggestion.field}</b> {suggestion.value} · 신뢰도 {Math.round(suggestion.confidence * 100)}% · {suggestion.reason}</span>
+                              <button type="button" onClick={() => void applyMetadataSuggestion(suggestion)} disabled={!onApplyMetadataSuggestion}>적용</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {patternReview.result.warnings.length ? <ul>{patternReview.result.warnings.slice(0, 4).map((warning) => <li key={warning}><AlertTriangle size={12} />{warning}</li>)}</ul> : null}
                   </div>
                 ) : null}
@@ -2264,10 +2403,17 @@ export function WorkbenchView({
                     <span>판정에 사용할 검색을 선택하세요</span>
                     {recipeObservations.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
-                      return <button className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} key={observation.id}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{observation.matched ? `${observation.matchCount}회` : '없음'}</small></button>
+                      const occurrence = occurrenceByObservationId[observation.id]
+                      return <div className={selected ? 'selected' : ''} key={observation.id}>
+                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 pin 해제' : '판정 조건으로 pin'}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '📌' : '＋'}</span></button>
+                        {selected ? <label>발생 <select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
+                          const value = event.target.value
+                          changeOccurrenceChoice(observation.id, value === 'zero' ? { kind: 'zero' } : value === 'exact' ? { kind: 'exact', count: occurrence?.kind === 'exact' ? occurrence.count : Math.max(1, observation.matchCount) } : { kind: 'atLeast' })
+                        }}><option value="zero">0개</option><option value="atLeast">1개 이상</option><option value="exact">정확히 N개</option></select>{occurrence?.kind === 'exact' ? <input aria-label={`${observation.query} 정확한 발생 횟수`} type="number" min={0} step={1} value={exactCountDraftByObservationId[observation.id] ?? String(occurrence.count)} onChange={(event) => changeExactCount(observation.id, event.target.value)} /> : null}</label> : null}
+                      </div>
                     })}
                   </div>
-                  {canRequireMarkerOrder ? <button className={requireMarkerOrder ? 'recipe-order active' : 'recipe-order'} aria-pressed={requireMarkerOrder} onClick={() => setRequireMarkerOrder((current) => !current)}><i>{requireMarkerOrder ? <Check size={12} /> : null}</i><span>표시된 순서대로 나타나야 함</span></button> : null}
+                  {canRequireMarkerOrder ? <button className={requireMarkerOrder ? 'recipe-order active' : 'recipe-order'} aria-pressed={requireMarkerOrder} onClick={() => { setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: current[activeFile.id]?.length ? current[activeFile.id] : selectedRecipeObservations.map((item) => item.id) })); setClauseOrderOpen(true) }}><i>{requireMarkerOrder ? <Check size={12} /> : null}</i><span>위쪽 순서 설정</span></button> : null}
                   <div className="recipe-logic">
                     {draft.positiveTerms.length ? <p><Check size={12} /><span>{draft.positiveTerms.join(' · ')}</span></p> : null}
                     {draft.missingTerms.length ? <p><X size={12} /><span>{draft.missingTerms.join(' · ')} 없음</span></p> : null}
@@ -2278,6 +2424,17 @@ export function WorkbenchView({
                     <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : '전체에 미리 적용'}</button>
                   </div>
                 </section>
+              ) : null}
+
+              {clauseOrderOpen && activeFile && canRequireMarkerOrder ? (
+                <div ref={clauseOrderModalRef} className="recipe-order-modal" role="dialog" aria-modal="true" aria-labelledby="recipe-order-title">
+                  <div className="recipe-title"><strong id="recipe-order-title">판정 조건 순서</strong><button type="button" onClick={() => setClauseOrderOpen(false)} aria-label="순서 설정 닫기"><X size={15} /></button></div>
+                  <p>검색 기록 순서와 무관하게 A → B → C 판정 순서를 정하세요.</p>
+                  <ol>
+                    {selectedRecipeObservations.map((observation, index) => <li key={observation.id}><code>{observation.query}</code><span><button type="button" onClick={() => movePinnedClause(index, -1)} disabled={index === 0} aria-label={`${observation.query} 위로 이동`}>↑</button><button type="button" onClick={() => movePinnedClause(index, 1)} disabled={index === selectedRecipeObservations.length - 1} aria-label={`${observation.query} 아래로 이동`}>↓</button></span></li>)}
+                  </ol>
+                  <button type="button" className="save" onClick={() => { setRequireMarkerOrder(true); setClauseOrderOpen(false); setRecipeSaved(false) }}><Check size={14} />이 순서 확정</button>
+                </div>
               ) : null}
 
               {batchPreview.status === 'done' ? (
