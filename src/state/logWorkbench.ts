@@ -347,6 +347,13 @@ export function saveLogWorkbenchState(
   }
 }
 
+export function removeSavedRecipe(
+  state: LogWorkbenchPersistedState,
+  recipeId: string,
+): LogWorkbenchPersistedState {
+  return { ...state, recipes: state.recipes.filter((recipe) => recipe.metadata.id !== recipeId) };
+}
+
 export function loadLogWorkbenchState(storage: StorageLike, projectId: string): LoadLogWorkbenchResult {
   const raw = storage.getItem(logWorkbenchStorageKey(projectId));
   if (raw === null) return { status: "empty", state: emptyLogWorkbenchState() };

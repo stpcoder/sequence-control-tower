@@ -26,6 +26,9 @@ import {
   chooseNextTabId,
   clampSearchHitIndex,
   clauseSpecKey,
+  filterUserRecipeRevisions,
+  recipeEvidenceSpecs,
+  resolveRecipeEvidenceCounts,
   dedupeWorkbenchFiles,
   groupWorkbenchFiles,
   lineWindowEdgeRequestKey,
@@ -107,6 +110,29 @@ function evidence(sourceId: string, rules: RecipeRule[], count = 1): Precomputed
 }
 
 describe('Log Workbench UI data hardening', () => {
+  it('projects only user recipes and turns artifact evidence into clause counts', () => {
+    const candidate = rule('candidate', 'PASS', 'candidate')
+    const internal = { id: 'internal-revision', recipeId: 'active-batch-ruleset', revision: 1, name: 'batch', rules: [candidate], createdAt: 'now' }
+    const user = { ...internal, id: 'user-revision', recipeId: 'user-recipe' }
+    expect(filterUserRecipeRevisions([internal, user])).toEqual([user])
+
+    const specs = recipeEvidenceSpecs(candidate)
+    expect(specs[0]).toMatchObject({ id: candidate.clauses[0].id, query: 'DONE', mode: 'literal', target: 'content' })
+    expect(resolveRecipeEvidenceCounts(candidate, {
+      sourceId: 'file-1', artifactId: 'a'.repeat(64), fileName: 'sample.log',
+      evidence: [{ specId: specs[0].id, occurrenceCount: 3, firstOccurrence: { target: 'content', columnStart: 1, columnEnd: 5, excerpt: 'DONE', excerptTruncated: false } }],
+    })).toEqual({ counts: { [candidate.clauses[0].id]: 3 }, unresolvedClauseIds: [] })
+  })
+
+  it('fails closed for missing or failed artifact clause evidence', () => {
+    const candidate = rule('candidate', 'PASS', 'candidate')
+    const failed = resolveRecipeEvidenceCounts(candidate, {
+      sourceId: 'file-1', artifactId: 'a'.repeat(64), fileName: 'sample.log', error: 'read failed', evidence: [],
+    })
+    expect(failed.unresolvedClauseIds).toEqual([candidate.clauses[0].id])
+    expect(failed.counts).toEqual({})
+  })
+
   it('keeps automatic observations separate from pinned occurrence rules', () => {
     const observation = {
       id: 'obs-a', sourceId: 'file-a', query: 'PASS', matcherKind: 'literal' as const,

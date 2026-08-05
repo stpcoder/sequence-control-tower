@@ -17,6 +17,7 @@ import {
   dedupeWorkbenchFiles,
   mergeWorkbenchFiles,
   WorkbenchView,
+  filterUserRecipeRevisions,
   type WorkbenchDecision,
   type WorkbenchFile,
   type WorkbenchRecipeDraft,
@@ -29,8 +30,10 @@ import type {
   EvaluationBatchOutcomeInput,
   EvaluationProjectSnapshot,
   EvaluationRecipeRule,
+  EvaluationRecipeRevision,
   RendererCommand,
 } from '../electron/shared/contracts'
+import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
 
 const PROJECT_ID = 'log-workbench'
@@ -321,10 +324,15 @@ export default function App() {
 
   const durableRules = useMemo<readonly RecipeRule[] | undefined>(() => {
     if (!window.sequenceIntelligence?.evaluations || !evaluationSnapshot) return undefined
-    const latestRecipes = new Map(evaluationSnapshot.recipes.map((recipe) => [recipe.recipeId, recipe]))
+    const latestRecipes = filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(evaluationSnapshot.recipes))
     const rules = new Map<string, RecipeRule>()
     latestRecipes.forEach((recipe) => recipe.rules.forEach((rule) => rules.set(rule.id, rule as RecipeRule)))
     return [...rules.values()]
+  }, [evaluationSnapshot])
+
+  const durableRecipes = useMemo<readonly EvaluationRecipeRevision[] | undefined>(() => {
+    if (!window.sequenceIntelligence?.evaluations || !evaluationSnapshot) return undefined
+    return filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(evaluationSnapshot.recipes))
   }, [evaluationSnapshot])
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
@@ -356,10 +364,19 @@ export default function App() {
     await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveRecipe({
       projectId: PROJECT_ID,
       expectedRevision: snapshot.revision,
-      recipeId: draft.rule!.id,
+      recipeId: draft.recipeId ?? draft.rule!.id,
       name: `${draft.decision} 판정 규칙`,
       rules: [draft.rule!] as EvaluationRecipeRule[],
     }), '분석 규칙을 저장하지 못했습니다')
+  }, [enqueueEvaluation])
+
+  const archiveRecipeRevision = useCallback(async (recipeId: string) => {
+    if (!window.sequenceIntelligence?.evaluations) return
+    await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.archiveRecipe({
+      projectId: PROJECT_ID,
+      expectedRevision: snapshot.revision,
+      recipeId,
+    }), '분석 규칙을 보관하지 못했습니다')
   }, [enqueueEvaluation])
 
   const updateBatchResults = useCallback(async (resolution: PrecomputedBatchResolution) => {
@@ -463,12 +480,14 @@ export default function App() {
     <WorkbenchView
       files={files}
       durableRules={durableRules}
+      durableRecipes={durableRecipes}
       selectedFileId={selectedFileId ?? undefined}
       onFilesChange={updateFiles}
       onSelectedFileChange={setSelectedFileId}
       onEvidenceCountChange={updateEvidenceCount}
       onDecision={updateDecision}
       onSaveRecipe={saveRecipeRevision}
+      onArchiveRecipe={archiveRecipeRevision}
       onBatchResults={updateBatchResults}
       onApplyMetadataSuggestion={applyMetadataSuggestion}
       onNotify={notify}

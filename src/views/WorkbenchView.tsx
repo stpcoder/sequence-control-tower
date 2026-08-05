@@ -33,11 +33,14 @@ import type {
   AnalysisJobSnapshot,
   AnalysisJobStatus,
   ArtifactRecord,
+  ArtifactEvidenceSpec,
+  ArtifactEvidenceSourceResult,
   ArtifactSearchInput,
   ArtifactSearchResult,
   RendererCommand,
   SequenceIntelligenceApi,
 } from '../../electron/shared/contracts'
+import type { EvaluationRecipeRevision } from '../../electron/shared/contracts'
 import {
   buildCandidateRule,
   buildRecipeEvidencePlan,
@@ -59,6 +62,7 @@ import {
   loadLogWorkbenchState,
   logWorkbenchStorageKey,
   saveLogWorkbenchState,
+  removeSavedRecipe,
   type LogWorkbenchRecipe,
 } from '../state/logWorkbench'
 import {
@@ -104,12 +108,14 @@ export interface WorkbenchRecipeDraft {
   evidenceLines: number[]
   sourceFileId: string
   rule?: RecipeRule
+  recipeId?: string
 }
 
 export interface WorkbenchViewProps {
   files?: WorkbenchFile[]
   /** Main-process EvaluationStore rules. Desktop uses these as authority. */
   durableRules?: readonly RecipeRule[]
+  durableRecipes?: readonly EvaluationRecipeRevision[]
   selectedFileId?: string
   onFilesChange?: (files: WorkbenchFile[]) => void
   onSelectedFileChange?: (fileId: string | null) => void
@@ -117,6 +123,7 @@ export interface WorkbenchViewProps {
   onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => void | Promise<void>
   onBatchResults?: (resolution: PrecomputedBatchResolution) => void | Promise<void>
   onSaveRecipe?: (draft: WorkbenchRecipeDraft) => void | Promise<void>
+  onArchiveRecipe?: (recipeId: string) => void | Promise<void>
   onApplyMetadataSuggestion?: (fileId: string, field: MetadataSuggestionField, value: string) => void | Promise<void>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   projectId?: string
@@ -704,6 +711,46 @@ export function clauseSpecKey(clause: RuleClause): string {
   return [matcher.target, matcher.kind, matcher.caseSensitive ? '1' : '0', matcher.pattern].join('\u001f')
 }
 
+export const INTERNAL_RECIPE_IDS = new Set(['active-batch-ruleset'])
+
+export function isInternalRecipeId(recipeId: string): boolean {
+  return INTERNAL_RECIPE_IDS.has(recipeId)
+}
+
+export function filterUserRecipeRevisions(
+  recipes: readonly EvaluationRecipeRevision[],
+): EvaluationRecipeRevision[] {
+  return recipes.filter((recipe) => !isInternalRecipeId(recipe.recipeId))
+}
+
+export function recipeEvidenceSpecs(rule: RecipeRule): ArtifactEvidenceSpec[] {
+  return rule.clauses.map((clause) => ({
+    id: clause.id,
+    query: clause.matcher.pattern,
+    mode: clause.matcher.kind,
+    caseSensitive: clause.matcher.caseSensitive,
+    target: clause.matcher.target,
+  }))
+}
+
+export function resolveRecipeEvidenceCounts(
+  rule: RecipeRule,
+  result: ArtifactEvidenceSourceResult | undefined,
+): { counts: Record<string, number>; unresolvedClauseIds: string[]; error?: string } {
+  const counts: Record<string, number> = {}
+  const unresolvedClauseIds: string[] = []
+  if (!result) return { counts, unresolvedClauseIds: rule.clauses.map((clause) => clause.id), error: '파일 검사를 반환받지 못했습니다.' }
+  rule.clauses.forEach((clause) => {
+    const evidence = result.evidence.find((item) => item.specId === clause.id)
+    if (result.error || evidence?.error || evidence?.occurrenceCount === undefined) {
+      unresolvedClauseIds.push(clause.id)
+      return
+    }
+    counts[clause.id] = evidence.occurrenceCount
+  })
+  return { counts, unresolvedClauseIds, ...(result.error ? { error: result.error } : {}) }
+}
+
 export function countMatcherText(value: string, clause: RuleClause): CountEvidence {
   const matcher = clause.matcher
   try {
@@ -849,6 +896,7 @@ function optionLabel(option: keyof SearchOptions): string {
 export function WorkbenchView({
   files: controlledFiles,
   durableRules,
+  durableRecipes,
   selectedFileId,
   onFilesChange,
   onSelectedFileChange,
@@ -856,6 +904,7 @@ export function WorkbenchView({
   onDecision,
   onBatchResults,
   onSaveRecipe,
+  onArchiveRecipe,
   onApplyMetadataSuggestion,
   onNotify,
   projectId = 'log-workbench',
@@ -898,6 +947,11 @@ export function WorkbenchView({
   const [savedRecipes, setSavedRecipes] = useState<LogWorkbenchRecipe[]>([])
   const [recipeVisible, setRecipeVisible] = useState(false)
   const [recipeSaved, setRecipeSaved] = useState(false)
+  const [editingRecipeId, setEditingRecipeId] = useState<string | undefined>(undefined)
+  const [recipeManagerOpen, setRecipeManagerOpen] = useState(false)
+  const [archivedRecipeIds, setArchivedRecipeIds] = useState<Set<string>>(() => new Set())
+  const [unresolvedRecipeClauseIds, setUnresolvedRecipeClauseIds] = useState<Set<string>>(() => new Set())
+  const [recipeEvidenceBusy, setRecipeEvidenceBusy] = useState(false)
   const [batchPreview, setBatchPreview] = useState<BatchPreview>({ status: 'idle', matched: 0, exceptions: 0 })
   const [showBatchExceptions, setShowBatchExceptions] = useState(false)
   const [searchOptionsOpen, setSearchOptionsOpen] = useState(false)
@@ -929,9 +983,51 @@ export function WorkbenchView({
   const patternReviewJobIdRef = useRef('')
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
+  const recipeEvidenceGeneration = useRef(0)
   const replacementInputRef = useRef<HTMLInputElement>(null)
   const clauseOrderModalRef = useRef<HTMLDivElement>(null)
+  const recipeManagerRef = useRef<HTMLDivElement>(null)
   const lineWindowsRef = useRef<Record<string, LoadedLineWindow>>({})
+
+  const localRecipeRevisions = useMemo<EvaluationRecipeRevision[]>(() => savedRecipes.map((recipe) => ({
+    id: recipe.metadata.id,
+    recipeId: recipe.metadata.id,
+    revision: recipe.metadata.revision,
+    name: recipe.metadata.name,
+    rules: recipe.rules as EvaluationRecipeRevision['rules'],
+    createdAt: recipe.metadata.updatedAt ?? new Date(0).toISOString(),
+  })), [savedRecipes])
+  const activeRecipeRevisions = useMemo(
+    () => filterUserRecipeRevisions(durableRecipes ?? localRecipeRevisions).filter((recipe) => !archivedRecipeIds.has(recipe.recipeId)),
+    [archivedRecipeIds, durableRecipes, localRecipeRevisions],
+  )
+  const activeDurableRules = useMemo(
+    () => activeRecipeRevisions.flatMap((recipe) => recipe.rules as RecipeRule[]),
+    [activeRecipeRevisions],
+  )
+
+  useEffect(() => {
+    if (!recipeManagerOpen) return undefined
+    const modal = recipeManagerRef.current
+    const focusable = () => modal?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    focusable()?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setRecipeManagerOpen(false)
+        return
+      }
+      if (event.key !== 'Tab' || !modal) return
+      const items = [...modal.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      if (!items.length) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [recipeManagerOpen])
 
   useEffect(() => {
     if (!clauseOrderOpen) return
@@ -1056,8 +1152,8 @@ export function WorkbenchView({
     observations.forEach((item) => latest.set(`${item.matcherKind}:${item.caseSensitive}:${item.query}`, item))
     const unique = [...latest.values()]
     return [
-      ...unique.filter((item) => item.matched).slice(-4),
-      ...unique.filter((item) => !item.matched).slice(-4),
+      ...unique.filter((item) => item.matched),
+      ...unique.filter((item) => !item.matched),
     ]
   }, [activeFile, searchHistory])
 
@@ -1073,8 +1169,154 @@ export function WorkbenchView({
     }).concat(pinned.filter((observation) => !orderedIds.includes(observation.id)))
   }, [activeFile?.id, recipeClauseOrderByFile, recipeObservations, selectedObservationIdsByFile])
 
+  const recipeEvidenceSignature = useMemo(() => selectedRecipeObservations.map((observation) => [
+    observation.id, observation.query, observation.matcherKind, observation.target, observation.caseSensitive,
+    JSON.stringify(occurrenceByObservationId[observation.id] ?? null),
+  ].join('\u001f')).join('\u001e'), [occurrenceByObservationId, selectedRecipeObservations])
+
+  useEffect(() => {
+    const file = activeFile
+    const selected = selectedRecipeObservations
+    if (!file?.artifactId || !recipeVisible || !selected.length) {
+      setRecipeEvidenceBusy(false)
+      if (!file?.artifactId) setUnresolvedRecipeClauseIds(new Set())
+      return
+    }
+    const api = electronApi()
+    const requestGeneration = ++recipeEvidenceGeneration.current
+    const clauseIds = selected.map((item) => item.id)
+    setRecipeEvidenceBusy(true)
+    setUnresolvedRecipeClauseIds(new Set(clauseIds))
+    const requestRule = decision && decision !== 'UNKNOWN' ? buildWorkbenchRule(file.id, decision) : null
+    if (!api?.artifacts.inspectEvidence || !requestRule) {
+      setRecipeEvidenceBusy(false)
+      return
+    }
+    void api.artifacts.inspectEvidence({
+      sources: [{ sourceId: file.id, artifactId: file.artifactId, ...(file.rootId ? { rootId: file.rootId } : {}), ...(file.relativePath ? { relativePath: file.relativePath } : {}) }],
+      specs: recipeEvidenceSpecs(requestRule),
+    }).then((inspected) => {
+      if (!mountedRef.current || recipeEvidenceGeneration.current !== requestGeneration || activeFileIdRef.current !== file.id) return
+      const resolved = resolveRecipeEvidenceCounts(requestRule, inspected.sources.find((source) => source.sourceId === file.id))
+      const unresolved = new Set(resolved.unresolvedClauseIds.map((id) => requestRule.clauses.find((clause) => clause.id === id)?.sourceObservationId ?? id))
+      setSearchHistory((current) => ({
+        ...current,
+        [file.id]: (current[file.id] ?? []).map((observation) => resolved.counts[requestRule.clauses.find((clause) => clause.sourceObservationId === observation.id)?.id ?? ''] === undefined
+          ? observation
+          : { ...observation, matchCount: resolved.counts[requestRule.clauses.find((clause) => clause.sourceObservationId === observation.id)?.id ?? ''], matched: resolved.counts[requestRule.clauses.find((clause) => clause.sourceObservationId === observation.id)?.id ?? ''] > 0 }),
+      }))
+      setUnresolvedRecipeClauseIds(unresolved)
+      setRecipeEvidenceBusy(false)
+      if (resolved.error) onNotify?.(`현재 파일의 규칙 조건을 검사하지 못했습니다: ${resolved.error}`, 'error')
+    }).catch((error) => {
+      if (!mountedRef.current || recipeEvidenceGeneration.current !== requestGeneration || activeFileIdRef.current !== file.id) return
+      setUnresolvedRecipeClauseIds(new Set(clauseIds))
+      setRecipeEvidenceBusy(false)
+      onNotify?.(error instanceof Error ? `현재 파일의 규칙 조건을 검사하지 못했습니다: ${error.message}` : '현재 파일의 규칙 조건을 검사하지 못했습니다.', 'error')
+    })
+  }, [activeFile?.artifactId, activeFile?.id, decision, recipeEvidenceSignature, recipeVisible])
+
   const canRequireMarkerOrder = selectedRecipeObservations.length > 1
-    && selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content')
+    && (requireMarkerOrder || selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content'))
+
+  const updateRecipeObservation = (observationId: string, patch: Partial<Pick<SearchObservation, 'query' | 'matcherKind' | 'target' | 'caseSensitive'>>) => {
+    if (!activeFile) return
+    setSearchHistory((current) => ({
+      ...current,
+      [activeFile.id]: (current[activeFile.id] ?? []).map((observation) => {
+        if (observation.id !== observationId) return observation
+        const next = { ...observation, ...patch }
+        const source = next.target === 'content' ? activeFile.text : next.target === 'file_name' ? activeFile.name : activeFile.relativePath ?? ''
+        const count = source === undefined ? undefined : countMatcherText(source, {
+          id: observationId,
+          presence: 'present',
+          matcher: { kind: next.matcherKind, pattern: next.query, caseSensitive: next.caseSensitive, target: next.target },
+          sourceObservationId: observationId,
+        }).count
+        return count === undefined ? next : { ...next, matched: count > 0, matchCount: count }
+      }),
+    }))
+    if (activeFile.artifactId) setUnresolvedRecipeClauseIds((current) => new Set([...current, observationId]))
+    setRecipeSaved(false)
+  }
+
+  const loadRecipeIntoDraft = (recipe: EvaluationRecipeRevision, rule: RecipeRule) => {
+    if (!activeFile) return
+    const history = searchHistory[activeFile.id] ?? []
+    const unresolved = new Set<string>()
+    const restored = rule.clauses.map((clause) => {
+      const observationId = clause.sourceObservationId ?? clause.id
+      const existing = history.find((observation) => (observation.id === observationId
+        && observation.query === clause.matcher.pattern && observation.matcherKind === clause.matcher.kind
+        && observation.target === clause.matcher.target && observation.caseSensitive === clause.matcher.caseSensitive)
+        || (observation.query === clause.matcher.pattern && observation.matcherKind === clause.matcher.kind
+          && observation.target === clause.matcher.target && observation.caseSensitive === clause.matcher.caseSensitive))
+      if (existing) return existing
+      const source = clause.matcher.target === 'content'
+        ? activeFile.text
+        : clause.matcher.target === 'file_name' ? activeFile.name : activeFile.relativePath
+      const countClause: RuleClause = { ...clause, sourceObservationId: observationId }
+      const count = source === undefined ? undefined : countMatcherText(source, countClause).count
+      if (count === undefined) unresolved.add(observationId)
+      return {
+        id: observationId,
+        sourceId: activeFile.id,
+        query: clause.matcher.pattern,
+        matcherKind: clause.matcher.kind,
+        target: clause.matcher.target,
+        caseSensitive: clause.matcher.caseSensitive,
+        matched: count === undefined ? clause.presence === 'present' ? false : true : count > 0,
+        matchCount: count ?? 0,
+        role: 'decision_evidence' as const,
+        excerpts: [],
+      }
+    })
+    const restoredIds = new Set(restored.map((item) => item.id))
+    setSearchHistory((current) => ({
+      ...current,
+      [activeFile.id]: [...history.filter((item) => !restoredIds.has(item.id)), ...restored],
+    }))
+    setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: restored.map((item) => item.id) }))
+    setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: rule.clauses.map((clause) => clause.sourceObservationId ?? clause.id) }))
+    setOccurrenceByObservationId((current) => ({
+      ...current,
+      ...Object.fromEntries(rule.clauses.map((clause) => [clause.sourceObservationId ?? clause.id,
+        clause.occurrence?.kind === 'exact' ? { kind: 'exact', count: clause.occurrence.count } : clause.occurrence?.kind === 'atLeast' ? { kind: 'atLeast' } : clause.presence === 'absent' ? { kind: 'zero' } : { kind: 'atLeast' },
+      ])),
+    }))
+    setExactCountDraftByObservationId((current) => ({
+      ...current,
+      ...Object.fromEntries(rule.clauses.filter((clause) => clause.occurrence?.kind === 'exact').map((clause) => [clause.sourceObservationId ?? clause.id, String(clause.occurrence!.count)])),
+    }))
+    setUnresolvedRecipeClauseIds(activeFile.artifactId ? new Set(restored.map((item) => item.id)) : unresolved)
+    setCandidateDecisions((current) => ({ ...current, [activeFile.id]: rule.label }))
+    setEditingRecipeId(recipe.recipeId)
+    setRequireMarkerOrder(rule.clauses.some((clause) => clause.order))
+    setRecipeSaved(false)
+    setRecipeVisible(true)
+    setRecipeManagerOpen(false)
+    onNotify?.(`${recipe.name} r${recipe.revision}을 현재 파일의 편집 초안으로 불러왔습니다.`, 'info')
+  }
+
+  const archiveRecipe = async (recipeId: string) => {
+    const recipe = activeRecipeRevisions.find((item) => item.recipeId === recipeId)
+    if (!recipe || !window.confirm(`“${recipe.name} r${recipe.revision}”을 보관할까요? 활성 일괄 규칙에서 제외됩니다.`)) return
+    setArchivedRecipeIds((current) => new Set(current).add(recipeId))
+    try {
+      if (onArchiveRecipe) {
+        await onArchiveRecipe(recipeId)
+      } else {
+        const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+        const saved = saveLogWorkbenchState(window.localStorage, projectId, removeSavedRecipe(stored, recipeId))
+        if (!saved.ok) throw new Error(saved.error)
+        setSavedRecipes(saved.state.recipes)
+      }
+      onNotify?.(`${recipe.name}을 보관했습니다.`, 'success')
+    } catch (error) {
+      setArchivedRecipeIds((current) => { const next = new Set(current); next.delete(recipeId); return next })
+      onNotify?.(error instanceof Error ? `규칙을 보관하지 못했습니다: ${error.message}` : '규칙을 보관하지 못했습니다.', 'error')
+    }
+  }
 
   const draft = useMemo<WorkbenchRecipeDraft | null>(() => {
     if (!activeFile || !decision || decision === 'UNKNOWN') return null
@@ -1936,6 +2178,7 @@ export function WorkbenchView({
 
   const changeOccurrenceChoice = (observationId: string, choice: OccurrenceChoice) => {
     setOccurrenceByObservationId((current) => ({ ...current, [observationId]: choice }))
+    if (activeFile?.artifactId) setUnresolvedRecipeClauseIds((current) => new Set([...current, observationId]))
     setExactCountDraftByObservationId((current) => {
       if (!(observationId in current)) return current
       const next = { ...current }
@@ -1951,6 +2194,7 @@ export function WorkbenchView({
     const count = Number(rawValue)
     if (!Number.isSafeInteger(count) || count < 0) return
     setOccurrenceByObservationId((current) => ({ ...current, [observationId]: { kind: 'exact', count } }))
+    if (activeFile?.artifactId) setUnresolvedRecipeClauseIds((current) => new Set([...current, observationId]))
     setRecipeSaved(false)
   }
 
@@ -1973,6 +2217,10 @@ export function WorkbenchView({
       onNotify?.('판정에 사용할 검색 근거를 선택해 주세요.', 'info')
       return
     }
+    if (recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0) {
+      onNotify?.('현재 파일의 규칙 조건 검사가 끝날 때까지 저장할 수 없습니다.', 'info')
+      return
+    }
     const promoted = selectDecisionEvidence(searchHistory[activeFile.id] ?? [], selectedIds)
     const engineerDecision = { sourceId: activeFile.id, result: decision, decidedBy: 'engineer' as const, evidenceObservationIds: selectedIds }
     const rule = buildWorkbenchRule(activeFile.id, decision)
@@ -1980,13 +2228,14 @@ export function WorkbenchView({
       onNotify?.('저장할 검색 근거를 먼저 확인해 주세요.', 'info')
       return
     }
-    const confirmedDraft = { ...draft, rule }
+    const confirmedDraft = { ...draft, rule, ...(editingRecipeId ? { recipeId: editingRecipeId } : {}) }
     try {
       await onSaveRecipe?.(confirmedDraft)
       const stored = loadLogWorkbenchState(window.localStorage, projectId).state
-      const existingRecipe = savedRecipes.find((item) => item.metadata.id === rule.id)
+      const localRecipeId = editingRecipeId ?? rule.id
+      const existingRecipe = savedRecipes.find((item) => item.metadata.id === localRecipeId)
       const recipe: LogWorkbenchRecipe = {
-        metadata: { id: rule.id, name: `${decision} 판정 규칙`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
+        metadata: { id: localRecipeId, name: `${decision} 판정 규칙`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
         rules: [rule],
       }
       const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
@@ -2026,6 +2275,10 @@ export function WorkbenchView({
       return
     }
     if (!activeFile || !mountedRef.current) return
+    if (recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0) {
+      onNotify?.('현재 파일의 규칙 조건 검사가 끝날 때까지 전체 미리 적용을 실행할 수 없습니다.', 'info')
+      return
+    }
     const runGeneration = advanceBatchGeneration(batchGeneration.current)
     batchGeneration.current = runGeneration
     setBatchPreview({ status: 'running', matched: 0, exceptions: 0 })
@@ -2036,7 +2289,7 @@ export function WorkbenchView({
       const candidate = buildWorkbenchRule(activeFile.id, decision)
       if (!candidate) throw new Error('미리 적용할 검색 근거가 없습니다.')
       const ruleMap = new Map<string, RecipeRule>()
-      const availableRules = durableRules ?? savedRecipes.flatMap((recipe) => recipe.rules)
+      const availableRules = durableRecipes ? activeDurableRules : (durableRules ?? savedRecipes.flatMap((recipe) => recipe.rules))
       availableRules.forEach((rule) => ruleMap.set(rule.id, rule))
       ruleMap.set(candidate.id, candidate)
       const rules = [...ruleMap.values()]
@@ -2305,6 +2558,9 @@ export function WorkbenchView({
       <aside className="decision-panel" aria-label="로그 판정">
         <header>
           <strong>판정</strong>
+          <button className="recipe-manager-trigger" type="button" onClick={() => setRecipeManagerOpen(true)} aria-haspopup="dialog" aria-expanded={recipeManagerOpen}>
+            <Braces size={14} /> 규칙 <span>{activeRecipeRevisions.length}</span>
+          </button>
         </header>
 
         <div className="decision-content">
@@ -2405,11 +2661,17 @@ export function WorkbenchView({
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]
                       return <div className={selected ? 'selected' : ''} key={observation.id}>
-                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 pin 해제' : '판정 조건으로 pin'}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '📌' : '＋'}</span></button>
+                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 pin 해제' : '판정 조건으로 pin'}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '📌' : '＋'}</span></button>
                         {selected ? <label>발생 <select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
                           const value = event.target.value
                           changeOccurrenceChoice(observation.id, value === 'zero' ? { kind: 'zero' } : value === 'exact' ? { kind: 'exact', count: occurrence?.kind === 'exact' ? occurrence.count : Math.max(1, observation.matchCount) } : { kind: 'atLeast' })
                         }}><option value="zero">0개</option><option value="atLeast">1개 이상</option><option value="exact">정확히 N개</option></select>{occurrence?.kind === 'exact' ? <input aria-label={`${observation.query} 정확한 발생 횟수`} type="number" min={0} step={1} value={exactCountDraftByObservationId[observation.id] ?? String(occurrence.count)} onChange={(event) => changeExactCount(observation.id, event.target.value)} /> : null}</label> : null}
+                        {selected ? <div className="recipe-condition-editor">
+                          <input aria-label={`${observation.query} 검색 조건`} value={observation.query} onChange={(event) => updateRecipeObservation(observation.id, { query: event.target.value })} />
+                          <select aria-label={`${observation.query} 검색 방식`} value={observation.matcherKind} onChange={(event) => updateRecipeObservation(observation.id, { matcherKind: event.target.value as SearchObservation['matcherKind'] })}><option value="literal">문자</option><option value="regex">정규식</option></select>
+                          <select aria-label={`${observation.query} 검색 대상`} value={observation.target} onChange={(event) => updateRecipeObservation(observation.id, { target: event.target.value as SearchObservation['target'] })}><option value="content">본문</option><option value="file_name">파일명</option><option value="path">경로</option></select>
+                          <label><input type="checkbox" checked={observation.caseSensitive} onChange={(event) => updateRecipeObservation(observation.id, { caseSensitive: event.target.checked })} /> 대소문자</label>
+                        </div> : null}
                       </div>
                     })}
                   </div>
@@ -2420,8 +2682,8 @@ export function WorkbenchView({
                     <p><Play size={12} /><span>그러면 <b>{draft.decision}</b></span></p>
                   </div>
                   <div className="recipe-actions">
-                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || !selectedRecipeObservations.length}>{recipeSaved ? <Check size={14} /> : <Braces size={14} />}{recipeSaved ? '저장됨' : '규칙 저장'}</button>
-                    <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : '전체에 미리 적용'}</button>
+                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Braces size={14} />}{recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장됨' : '규칙 저장'}</button>
+                    <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : recipeEvidenceBusy ? '파일 검사 중' : '전체에 미리 적용'}</button>
                   </div>
                 </section>
               ) : null}
@@ -2446,6 +2708,25 @@ export function WorkbenchView({
             </>
           ) : <div className="decision-empty">로그를 선택하세요.</div>}
         </div>
+
+        {recipeManagerOpen ? (
+          <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecipeManagerOpen(false) }}>
+            <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
+              <div className="recipe-manager-heading"><div><strong id="recipe-manager-title">저장 규칙</strong><span>활성 {activeRecipeRevisions.length}개 · 최신 revision만 표시</span></div><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
+              <div className="recipe-manager-list">
+                {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
+                  <section className="recipe-manager-item" key={recipe.recipeId}>
+                    <div className="recipe-manager-item-top"><div><strong>{recipe.name}</strong><span>r{recipe.revision} · {recipe.rules.length}개 결과 규칙</span></div><button type="button" className="recipe-archive" onClick={() => void archiveRecipe(recipe.recipeId)}>보관</button></div>
+                    {recipe.rules.map((rule) => <div className="recipe-manager-rule" key={rule.id}>
+                      <div><b>{rule.label}</b><span>{rule.clauses.map((clause) => clause.matcher.pattern).join(' · ') || '조건 없음'}</span></div>
+                      <button type="button" onClick={() => loadRecipeIntoDraft(recipe, rule as RecipeRule)}>현재 파일에 불러오기</button>
+                    </div>)}
+                  </section>
+                )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
       </aside>
     </div>
