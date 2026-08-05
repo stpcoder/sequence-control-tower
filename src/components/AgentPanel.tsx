@@ -26,12 +26,28 @@ export function buildAgentDecisionInput(
   result: EvaluationResultLabel | undefined,
 ): EvaluationSaveDecisionInput | null {
   if (!project || !file?.artifactId || !snapshot || !isEvaluationResultLabel(result) || result === 'UNKNOWN') return null
+  const artifactMatches = project.artifacts.filter((source) => source.artifactId === file.artifactId)
+  const exactMatches = file.rootId && file.relativePath
+    ? artifactMatches.filter((source) => source.rootId === file.rootId && normalizeRelativePath(source.relativePath) === normalizeRelativePath(file.relativePath!))
+    : []
+  const source = exactMatches.length === 1 ? exactMatches[0] : artifactMatches.length === 1 ? artifactMatches[0] : null
+  if (!source) return null
   return {
     projectId: project.id,
     expectedRevision: snapshot.revision,
-    source: { sourceId: file.id, artifactId: file.artifactId, sourceKey: file.sourceKey ?? file.id },
+    source: { sourceId: source.sourceId, artifactId: source.artifactId, sourceKey: file.sourceKey ?? file.id },
     result,
   }
+}
+
+function normalizeRelativePath(value: string): string {
+  const segments: string[] = []
+  for (const segment of value.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') continue
+    if (segment === '..') segments.pop()
+    else segments.push(segment)
+  }
+  return segments.join('/')
 }
 
 export function shouldAcceptAgentRun(run: AgentRun, activeRunId: string | null, projectId: string | undefined): boolean {
@@ -198,7 +214,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
 
   const dismiss = () => { activeRunId.current = null; setRun(null); setBusy(false); setError('') }
   const canStart = Boolean(project && window.sequenceIntelligence?.agent && selectedFile?.artifactId)
-  const confirmable = Boolean(run?.candidate?.kind === 'result' && isEvaluationResultLabel(run.candidate.result) && run.candidate.result !== 'UNKNOWN' && selectedFile?.artifactId && evaluationSnapshot)
+  const confirmable = Boolean(run?.candidate?.kind === 'result' && buildAgentDecisionInput(project, selectedFile, evaluationSnapshot, run.candidate.result))
   const pending = Boolean(run && isAgentRunPending(run))
 
   if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={16} /><span>Agent 열기</span><kbd>⌘/Ctrl J</kbd></button>
