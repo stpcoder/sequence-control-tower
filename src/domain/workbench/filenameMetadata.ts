@@ -104,7 +104,7 @@ export function parseFilenameMetadata(fileName: string): FilenameMetadata {
   const stem = basename.trim();
   const sample = matchesFor(
     stem,
-    /(?:^|[_.+@-])(?:(?:SAMPLE|SMP)(?:[=_:-]?)|S[=_:-])(?<value>[A-Z0-9][A-Z0-9-]*?)(?=$|[_.+@])/giu,
+    /(?:^|[_.+@-])(?:(?:SAMPLE|SMP)(?:[=_:-]?)|S[=_:-])(?<value>[A-Z0-9][A-Z0-9-]*?)(?=$|[_.+@]|-(?:SAMPLE|SMP|S)(?:[=_:-]?))/giu,
     normalizeSample,
     "sample-label",
   );

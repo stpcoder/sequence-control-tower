@@ -89,9 +89,9 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 4. 필요한 필터를 적용합니다.
 5. Excel에 붙여넣을 때 `TSV 복사`, 파일로 전달할 때 `CSV`를 누릅니다.
 
-`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `결과`, `결과 출처`, `검토`입니다.
+`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `grid_value`, `grid_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `Grid 값`, `Grid 상태`, `결과`, `결과 출처`, `검토`입니다.
 
-`열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
+`열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`, `Grid 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
 
 ![메타데이터와 판정을 확인하고 결과를 내보내는 화면](../images/manual-lw-05-results.png)
 

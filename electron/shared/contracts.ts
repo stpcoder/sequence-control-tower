@@ -239,6 +239,15 @@ export interface ClarifyingQuestion {
   choices?: string[]
 }
 
+export type MetadataSuggestionField = 'sample' | 'temperature' | 'mode' | 'grid'
+
+export interface MetadataSuggestion {
+  field: MetadataSuggestionField
+  value: string
+  confidence: number
+  reason: string
+}
+
 export interface AnalysisResult {
   artifactId: string
   parentArtifactId?: string
@@ -253,6 +262,8 @@ export interface AnalysisResult {
   inferences: AnalysisInference[]
   questions: ClarifyingQuestion[]
   suggestedTags: string[]
+  /** Suggestions are emitted only for filename fields that are unknown or conflicting. */
+  metadataSuggestions: MetadataSuggestion[]
   warnings: string[]
 }
 

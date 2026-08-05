@@ -1,11 +1,12 @@
 import type { ResultLabel } from '../domain/workbench'
 import type { MetadataFieldDefinition } from '../domain/workbench/records'
+import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
 export type ResultSource = 'engineer' | 'candidate' | 'unreviewed'
-export type PatternAxis = 'sample' | 'temperature' | 'mode'
+export type PatternAxis = 'sample' | 'temperature' | 'mode' | 'grid'
 
 export interface CandidateValue {
   value: string | null
@@ -31,6 +32,7 @@ export interface LogResultRecord {
   sample: CandidateValue
   temperature: CandidateValue
   mode: CandidateValue
+  grid: CandidateValue
   result: ResultLabel
   resultSource: ResultSource
   review: ReviewState
@@ -45,7 +47,7 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'result' | 'review' | 'folder' | 'run'
+export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run'
 export type PivotAggregation = 'count' | 'fail_count' | 'evidence_count'
 
 /** Configuration for the results pivot. Axis lists are intentionally bounded to two dimensions. */
@@ -89,6 +91,7 @@ export const DEFAULT_METADATA_FIELDS: readonly MetadataFieldDefinition[] = [
   { key: 'sample', label: 'Sample', target: 'file_name', pattern: '(?:^|[_.-])(?:SAMPLE|SMP|S)[=_-]?(?:(?:SAMPLE|SMP)[=_-])?(?<value>[A-Z0-9-]+?)(?=[_.-])', captureGroup: 'value' },
   { key: 'temperature', label: 'Temperature', target: 'file_name', pattern: '(?:TEMP[=_-]?)?(?<value>-?\\d+(?:[p.]\\d+)?)C(?=[_.-]|$)', captureGroup: 'value' },
   { key: 'mode', label: 'Mode', target: 'file_name', pattern: '(?:MODE[=_-]?)?(?<value>DIAG|TEST|TRAINING|STRESS|NORMAL|UEFI)(?=[_.-]|$)', captureGroup: 'value' },
+  { key: 'grid', label: 'Grid', target: 'file_name', pattern: '(?:^|[_.+@-])(?:(?:GRID|MATRIX)[=_-]?|G[=_-])(?<value>[A-Z0-9][A-Z0-9xX*-]*?)(?=[_.-]|$)', captureGroup: 'value' },
 ] as const
 
 const RESULT_ORDER: readonly ResultLabel[] = [
@@ -155,12 +158,17 @@ function fallbackFromContent(file: WorkbenchFile, key: PatternAxis): CandidateVa
     ? /temperature\s*=\s*(?<value>-?\d+(?:\.\d+)?)\s*C/giu
     : key === 'mode'
       ? /mode\s*:\s*(?<value>[A-Z][A-Z0-9_-]*)/giu
-      : /sample\s*[:=]\s*(?<value>[A-Z0-9_-]+)/giu
+      : key === 'grid'
+        ? /(?:grid|matrix|test\s+grid)\s*[:=]\s*(?<value>[A-Z0-9][A-Z0-9xX*-]*)/giu
+        : /sample\s*[:=]\s*(?<value>[A-Z0-9_-]+)/giu
   const values = uniqueMatches(text, pattern)
   return values.length === 1 ? { value: values[0], state: 'candidate' } : { value: null, state: values.length > 1 ? 'malformed' : 'missing' }
 }
 
 function metadataCandidate(file: WorkbenchFile, key: PatternAxis): CandidateValue {
+  const parsed = parseFilenameMetadata(file.name)[key]
+  if (parsed.state === 'extracted') return { value: parsed.value, state: 'candidate' }
+  if (parsed.state === 'conflict') return { value: null, state: 'malformed' }
   const definition = DEFAULT_METADATA_FIELDS.find((field) => field.key === key)
   if (!definition) return { value: null, state: 'missing' }
   const fromName = candidateFromName(file.name, definition)
@@ -268,6 +276,7 @@ export function projectLogRecords(
     const sample = applyMetadataApproval(metadataCandidate(file, 'sample'), approvals.sample)
     const temperature = applyMetadataApproval(metadataCandidate(file, 'temperature'), approvals.temperature)
     const mode = applyMetadataApproval(metadataCandidate(file, 'mode'), approvals.mode)
+    const grid = applyMetadataApproval(metadataCandidate(file, 'grid'), approvals.grid)
     const inferred = inferResultCandidate(file)
     const result = file.decision ?? file.ruleResult ?? inferred.result
     const resultSource: ResultSource = file.decision
@@ -289,6 +298,7 @@ export function projectLogRecords(
       sample,
       temperature,
       mode,
+      grid,
       result,
       resultSource,
       review: file.decision && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
@@ -317,7 +327,7 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
 const PIVOT_UNKNOWN = '미확인'
 
 function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension): string {
-  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode') {
+  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') {
     return row[dimension].value ?? PIVOT_UNKNOWN
   }
   if (dimension === 'run') return row.run ?? PIVOT_UNKNOWN
@@ -486,6 +496,8 @@ const BASE_EXPORT_HEADER = [
   'temperature_state',
   'mode_value',
   'mode_state',
+  'grid_value',
+  'grid_state',
   'result',
   'result_source',
   'review',
@@ -515,6 +527,8 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'temperature_state', label: '온도 상태' },
   { key: 'mode_value', label: 'Mode 값' },
   { key: 'mode_state', label: 'Mode 상태' },
+  { key: 'grid_value', label: 'Grid 값' },
+  { key: 'grid_state', label: 'Grid 상태' },
   { key: 'result', label: '결과' },
   { key: 'result_source', label: '결과 출처' },
   { key: 'review', label: '검토' },
@@ -542,6 +556,8 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     temperature_state: row.temperature.state,
     mode_value: row.mode.value ?? '',
     mode_state: row.mode.state,
+    grid_value: row.grid.value ?? '',
+    grid_state: row.grid.state,
     result: row.result,
     result_source: row.resultSource,
     review: row.review,
@@ -613,6 +629,7 @@ export function initLogRecordExportPreview(
     sample: Object.freeze({ ...row.sample }),
     temperature: Object.freeze({ ...row.temperature }),
     mode: Object.freeze({ ...row.mode }),
+    grid: Object.freeze({ ...row.grid }),
   }))
   return Object.freeze({
     phase: 'init' as const,

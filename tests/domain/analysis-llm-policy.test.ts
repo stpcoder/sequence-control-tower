@@ -1,6 +1,6 @@
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -116,14 +116,18 @@ function summary(configured: boolean): LlmConfigSummary {
   }
 }
 
-async function fixture(configured: boolean, complete = vi.fn()): Promise<{
+async function fixture(configured: boolean, complete = vi.fn(), fileName = artifact.originalNames[0]): Promise<{
   analysis: AnalysisService
   complete: ReturnType<typeof vi.fn>
+  root: string
+  artifacts: ArtifactService
+  llmConfig: LlmConfigService
+  llm: OpenAiCompatibleClient
 }> {
   const root = await mkdtemp(join(tmpdir(), 'analysis-llm-policy-'))
   roots.push(root)
   const artifacts = {
-    require: vi.fn(async () => artifact),
+    require: vi.fn(async () => ({ ...artifact, originalNames: [fileName] })),
     readText: vi.fn(async () => ({
       artifactId,
       text: `temperature=105\n${rawSequenceSecret}\n@PASS`,
@@ -139,7 +143,7 @@ async function fixture(configured: boolean, complete = vi.fn()): Promise<{
   const llm = { complete } as unknown as OpenAiCompatibleClient
   const analysis = new AnalysisService(root, artifacts, llmConfig, llm, vi.fn())
   await analysis.initialize()
-  return { analysis, complete }
+  return { analysis, complete, root, artifacts, llmConfig, llm }
 }
 
 async function finish(analysis: AnalysisService, jobId: string): Promise<AnalysisJobSnapshot> {
@@ -163,7 +167,11 @@ afterEach(async () => {
 
 describe('analysis LLM call policy', () => {
   it('uses zero LLM calls for default analysis and caches the deterministic result', async () => {
-    const test = await fixture(true)
+    const complete = vi.fn(async () => ({
+      content: '{"summary":"metadata review","inferences":[],"questions":[],"suggestedTags":[],"metadataSuggestions":[]}',
+      model: 'qwen-internal'
+    }))
+    const test = await fixture(true, complete, 'SAMPLE=QBR-001.TEMP=25C.MODE=DIAG.GRID=2x4.seq')
 
     const first = await finish(test.analysis, test.analysis.start({ artifactId }).id)
     const second = await finish(test.analysis, test.analysis.start({ artifactId }).id)
@@ -179,6 +187,23 @@ describe('analysis LLM call policy', () => {
     }))
   })
 
+  it('hydrates metadataSuggestions for cache entries written by the previous contract', async () => {
+    const test = await fixture(true, vi.fn(), 'SAMPLE=QBR-001.TEMP=25C.MODE=DIAG.GRID=2x4.seq')
+    const input = { artifactId }
+    const first = await finish(test.analysis, test.analysis.start(input).id)
+    const cachePath = `${test.root}/cache/analysis.json`
+    const cache = JSON.parse(await readFile(cachePath, 'utf8')) as { entries: Record<string, Record<string, unknown>> }
+    const entry = Object.values(cache.entries)[0]
+    delete entry.metadataSuggestions
+    await writeFile(cachePath, JSON.stringify(cache), 'utf8')
+
+    const compatibleAnalysis = new AnalysisService(test.root, test.artifacts, test.llmConfig, test.llm, vi.fn())
+    await compatibleAnalysis.initialize()
+    const second = await finish(compatibleAnalysis, compatibleAnalysis.start(input).id)
+    expect(first.result?.metadataSuggestions).toEqual([])
+    expect(second.result).toEqual(expect.objectContaining({ cached: true, metadataSuggestions: [] }))
+  })
+
   it('uses zero LLM calls when unconfigured and returns a deterministic fallback', async () => {
     const test = await fixture(false)
     const finished = await finish(test.analysis, test.analysis.start({
@@ -188,7 +213,28 @@ describe('analysis LLM call policy', () => {
 
     expect(test.complete).not.toHaveBeenCalled()
     expect(finished.result?.source).toBe('deterministic-fallback')
+    expect(finished.result?.metadataSuggestions).toEqual([])
     expect(finished.result?.warnings).toContain('LLM이 설정되지 않아 결정적 파서로 분석했습니다.')
+  })
+
+  it('uses LLM for unresolved filename metadata and discards extracted-field suggestions', async () => {
+    const complete = vi.fn(async () => ({
+      content: JSON.stringify({
+        summary: 'metadata candidates', inferences: [], questions: [], suggestedTags: [],
+        metadataSuggestions: [
+          { field: 'temperature', value: '99', confidence: 0.99, reason: 'conflicts with deterministic filename extraction' },
+          { field: 'grid', value: '2X4', confidence: 0.8, reason: 'grid is absent from the filename' },
+        ]
+      }),
+      model: 'qwen-internal'
+    }))
+    const test = await fixture(true, complete, 'SAMPLE=QBR-001.TEMP=25C.MODE=DIAG.seq')
+    const finished = await finish(test.analysis, test.analysis.start({ artifactId }).id)
+
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(finished.result?.metadataSuggestions).toEqual([
+      { field: 'grid', value: '2X4', confidence: 0.8, reason: 'grid is absent from the filename' },
+    ])
   })
 
   it('does not cache a fallback caused by a transient LLM outage', async () => {

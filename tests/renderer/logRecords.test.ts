@@ -82,6 +82,18 @@ describe('renderer log result projection', () => {
     expect(rows[3].sample).toEqual({ value: null, state: 'malformed' })
   })
 
+  it('projects parser grid metadata and keeps durable approval precedence', () => {
+    const [row] = projectLogRecords([
+      { id: 'grid', name: 'SAMPLE=A17.TEMP=25C.MODE=DIAG.GRID=2x4.log', text: '' },
+    ], {}, {
+      grid: { grid: { approval: 'approved', approvedValue: '4X8' } },
+    })
+
+    expect(row.grid).toEqual({ value: '4X8', state: 'approved' })
+    expect(patternMatrix([row], 'grid')).toEqual([{ value: '4X8', total: 1, counts: { UNKNOWN: 1 } }])
+    expect(serializeLogRecordsTsv([row], ['grid_value', 'grid_state'])).toContain('grid_value\tgrid_state\r\n4X8\tapproved')
+  })
+
   it('canonicalizes lowercase metadata and one redundant nested sample prefix', () => {
     const rows = projectLogRecords([
       { id: 'hyphen', name: 'smp-a17_85c_normal.log', text: '' },
@@ -315,9 +327,9 @@ describe('renderer log result projection', () => {
     const tsv = serializeLogRecordsTsv(projectLogRecords(duplicateNameFiles))
 
     expect(tsv).toBe([
-      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tresult\tresult_source\treview',
-      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review',
-      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review',
+      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tgrid_value\tgrid_state\tresult\tresult_source\treview',
+      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review',
+      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review',
     ].join('\r\n'))
   })
 
@@ -354,9 +366,9 @@ describe('renderer log result projection', () => {
     ])
 
     const lines = serializeLogRecordsTsv(rows).split('\r\n')
-    expect(lines[1].split('\t').slice(0, 16)).toEqual([
+    expect(lines[1].split('\t').slice(0, 18)).toEqual([
       'approved', '', '', 'LOT_S01_85C_DIAG_run007.log', '007', 'LOT_S01_85C_DIAG_run007.log', 'Imported logs',
-      'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', 'PASS', 'candidate', 'needs_review',
+      'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', '', 'missing', 'PASS', 'candidate', 'needs_review',
     ])
     expect(lines[2].split('\t').slice(7, 13)).toEqual(['02', 'candidate', '85', 'rejected', 'DIAG', 'candidate'])
     expect(lines[3].split('\t').slice(7, 13)).toEqual(['', 'missing', '', 'missing', '', 'missing'])
@@ -417,7 +429,7 @@ describe('renderer log result projection', () => {
     const lines = tsv.split('\r\n')
     const sourceKeyColumn = 2
 
-    expect(lines[0].split('\t')).toHaveLength(16)
+    expect(lines[0].split('\t')).toHaveLength(18)
     expect(lines.slice(1).map((line) => line.split('\t')[sourceKeyColumn])).toEqual([
       'root:opaque-posix\u001fposix.log',
       'root:opaque-windows\u001fwindows.log',
