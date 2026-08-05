@@ -6,6 +6,7 @@ import type {
   ArtifactLineWindowInput,
   ArtifactSearchInput,
   EvaluationApproveMetadataInput,
+  EvaluationArchiveRecipeInput,
   EvaluationProjectRequest,
   EvaluationSaveBatchInput,
   EvaluationSaveDecisionInput,
@@ -74,6 +75,7 @@ const api: SequenceIntelligenceApi = {
     getSnapshot: (input: EvaluationProjectRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationGetSnapshot, input),
     saveDecision: (input: EvaluationSaveDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveDecision, input),
     saveRecipe: (input: EvaluationSaveRecipeInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipe, input),
+    archiveRecipe: (input: EvaluationArchiveRecipeInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationArchiveRecipe, input),
     saveBatch: (input: EvaluationSaveBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveBatch, input),
     saveRecipeAndBatch: (input: EvaluationSaveRecipeAndBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipeAndBatch, input),
     approveMetadata: (input: EvaluationApproveMetadataInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationApproveMetadata, input)

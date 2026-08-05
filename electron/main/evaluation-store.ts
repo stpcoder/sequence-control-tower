@@ -3,6 +3,7 @@ import { readFile, rename } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
   EvaluationApproveMetadataInput,
+  EvaluationArchiveRecipeInput,
   EvaluationBatchOutcome,
   EvaluationBatchOutcomeInput,
   EvaluationBatchRun,
@@ -430,6 +431,28 @@ export class EvaluationStore {
         rules,
         createdAt: this.now().toISOString(),
         ...(previous ? { supersedesId: previous.id } : {})
+      }
+      project.recipes.push(saved)
+    })
+    return { snapshot, recipe: saved }
+  }
+
+  async archiveRecipe(input: EvaluationArchiveRecipeInput): Promise<EvaluationRecipeSaveResult> {
+    rejectSensitivePayload(input)
+    const recipeId = safeIdentifier(input.recipeId, 'recipeId')
+    let saved!: EvaluationRecipeRevision
+    const snapshot = await this.mutate(input.projectId, input.expectedRevision, (project) => {
+      const previous = [...project.recipes].reverse().find((item) => item.recipeId === recipeId)
+      if (!previous) throw new Error('존재하지 않는 recipeId입니다.')
+      saved = {
+        id: this.makeId(),
+        recipeId: previous.recipeId,
+        revision: previous.revision + 1,
+        name: previous.name,
+        rules: [],
+        createdAt: this.now().toISOString(),
+        supersedesId: previous.id,
+        archived: true
       }
       project.recipes.push(saved)
     })

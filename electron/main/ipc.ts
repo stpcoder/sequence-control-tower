@@ -15,6 +15,7 @@ import type {
   ArtifactEvidenceInput,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
+  EvaluationArchiveRecipeInput,
   EvaluationApproveMetadataInput,
   EvaluationProjectRequest,
   EvaluationSaveBatchInput,
@@ -181,6 +182,9 @@ export function registerIpc(services: Services): void {
   )
   handle(IPC_CHANNELS.evaluationSaveRecipe, (_event, input) =>
     services.evaluations.saveRecipe(input as EvaluationSaveRecipeInput)
+  )
+  handle(IPC_CHANNELS.evaluationArchiveRecipe, (_event, input) =>
+    services.evaluations.archiveRecipe(input as EvaluationArchiveRecipeInput)
   )
   handle(IPC_CHANNELS.evaluationSaveBatch, (_event, input) =>
     services.evaluations.saveBatch(input as EvaluationSaveBatchInput)

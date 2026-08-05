@@ -63,6 +63,7 @@ const importFolders = vi.fn((folderPaths: string[], options: unknown) => new Pro
   folderImportRequests.push({ folderPaths, options, resolve, reject })
 }))
 const saveRecipeAndBatch = vi.fn(async (input: unknown) => ({ input }))
+const archiveRecipe = vi.fn(async (input: unknown) => ({ input }))
 const lineWindow = vi.fn(async () => ({}))
 const saveLlm = vi.fn(async () => ({}))
 const services = {
@@ -72,7 +73,7 @@ const services = {
     importFolders,
     lineWindow
   },
-  evaluations: { saveRecipeAndBatch },
+  evaluations: { saveRecipeAndBatch, archiveRecipe },
   llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() }
 } as unknown as Parameters<typeof registerIpc>[0]
 
@@ -108,6 +109,7 @@ beforeEach(() => {
   evidence.fn.mockClear()
   importFolders.mockClear()
   saveRecipeAndBatch.mockClear()
+  archiveRecipe.mockClear()
   lineWindow.mockClear()
   saveLlm.mockClear()
   search.requests.length = 0
@@ -335,5 +337,13 @@ describe('evaluation IPC persistence', () => {
     await expect(invoke(IPC_CHANNELS.evaluationSaveRecipeAndBatch, input)).resolves.toEqual({ input })
     expect(saveRecipeAndBatch).toHaveBeenCalledOnce()
     expect(saveRecipeAndBatch).toHaveBeenCalledWith(input)
+  })
+
+  it('routes archiveRecipe through its dedicated allow-listed channel', async () => {
+    const input = { projectId: 'project', expectedRevision: 4, recipeId: 'recipe' }
+    await expect(invoke(IPC_CHANNELS.evaluationArchiveRecipe, input)).resolves.toEqual({ input })
+    expect(archiveRecipe).toHaveBeenCalledOnce()
+    expect(archiveRecipe).toHaveBeenCalledWith(input)
+    expect(handlers.has('evaluation:archive-recipe-unknown')).toBe(false)
   })
 })

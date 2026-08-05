@@ -8,6 +8,7 @@ import type {
   EvaluationSaveDecisionInput,
   EvaluationSourceInput
 } from '../shared/contracts'
+import { getActiveEvaluationRecipeRevisions } from '../shared/contracts'
 import { EvaluationRevisionConflictError, EvaluationStore } from './evaluation-store'
 
 const roots: string[] = []
@@ -240,6 +241,70 @@ describe('EvaluationStore', () => {
     expect(restarted.recipes).toHaveLength(2)
     expect(restarted.batches[0].outcomes).toHaveLength(2)
     expect(restarted.metadataApprovals).toHaveLength(2)
+  })
+
+  it('archives the latest recipe as an immutable empty-rule revision and excludes it from active recipes', async () => {
+    const root = await tempRoot()
+    const store = new EvaluationStore(root)
+    const saved = await store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'archive-me',
+      name: 'Archive me',
+      rules: [rule()]
+    })
+
+    const archived = await store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 1,
+      recipeId: 'archive-me'
+    })
+
+    expect(archived.recipe).toMatchObject({
+      recipeId: saved.recipe.recipeId,
+      revision: 2,
+      name: saved.recipe.name,
+      rules: [],
+      supersedesId: saved.recipe.id,
+      archived: true
+    })
+    expect(saved.recipe.rules).toHaveLength(1)
+    expect(getActiveEvaluationRecipeRevisions(archived.snapshot.recipes)).toEqual([])
+    expect((await new EvaluationStore(root).snapshot(PROJECT)).recipes).toHaveLength(2)
+  })
+
+  it('rejects unknown recipe ids and sensitive archive payloads without changing the project', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await expect(store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'missing'
+    })).rejects.toThrow('존재하지 않는 recipeId')
+    await expect(store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'Bearer abcdefghijklmnopqrstuvwxyz'
+    })).rejects.toThrow('비밀정보')
+    expect((await store.snapshot(PROJECT)).revision).toBe(0)
+  })
+
+  it('allows only one concurrent archive for the same expected project revision', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'concurrent',
+      name: 'Concurrent',
+      rules: [rule()]
+    })
+
+    const results = await Promise.allSettled([
+      store.archiveRecipe({ projectId: PROJECT, expectedRevision: 1, recipeId: 'concurrent' }),
+      store.archiveRecipe({ projectId: PROJECT, expectedRevision: 1, recipeId: 'concurrent' })
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect((await store.snapshot(PROJECT)).recipes).toHaveLength(2)
   })
 
   it('rejects a batch whose matched rule is not in its immutable recipe revisions', async () => {
