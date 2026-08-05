@@ -304,8 +304,6 @@
 }
 .log-workbench .log-line mark { border-radius: 3px; color: inherit; background: rgba(225, 176, 68, .38); box-shadow: 0 0 0 1px rgba(225,176,68,.15); }
 .log-workbench .log-line mark.is-current { color: #151719; background: #efbd59; }
-.log-workbench .window-boundary { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: var(--wb-log-row-height); margin: 4px 0 8px; border-radius: 0; color: var(--wb-dim) !important; font-size: var(--wb-type-secondary) !important; }
-.log-workbench .window-boundary:hover { color: var(--wb-text) !important; background: rgba(255,255,255,.035); }
 .editor-empty { display: grid; place-items: center; align-content: center; gap: 12px; height: 100%; color: var(--wb-dim); font-size: var(--wb-type-body); }
 .editor-statusbar { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 10px; border-top: 1px solid var(--wb-line); color: var(--wb-dim); font-size: var(--wb-type-secondary); background: #191c21; }
 .editor-statusbar > span,

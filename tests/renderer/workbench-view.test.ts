@@ -24,9 +24,12 @@ import {
   canStartImport,
   canRevealActiveHit,
   chooseNextTabId,
+  clampSearchHitIndex,
   clauseSpecKey,
   dedupeWorkbenchFiles,
   groupWorkbenchFiles,
+  lineWindowEdgeRequestKey,
+  mergeLineWindow,
   mergeWorkbenchFiles,
   omitFileCacheEntry,
   invalidateImportBatchGeneration,
@@ -354,13 +357,67 @@ describe('Log Workbench UI data hardening', () => {
 
   it('keeps artifact windows bounded and reveal scrolling tied to rendered line data', () => {
     const lineWindow = sourceBetween(workbenchSource, 'const loadLineWindow = useCallback(', 'const scheduleAnimationFrame = useCallback(')
-    expect(lineWindow).toContain('startLine: Math.max(1, targetLine - 80)')
+    expect(lineWindow).toContain('Math.max(1, targetLine - 80)')
     expect(lineWindow).toContain('lineCount: 240')
+    expect(lineWindow).toContain('while (lineWindowTasks.current.has(file.id))')
+    expect(lineWindow).toContain("cached?.lines.some((line) => line.lineNumber === targetLine)")
 
-    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 160)')
-    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 240)')
-    expect(workbenchSource).toContain('(activeWindow.lines.at(-1)?.lineNumber ?? 1) + 81')
+    expect(workbenchSource).toContain('onScroll={handleEditorScroll}')
+    expect(workbenchSource).toContain("lineWindowEdgeRequestKey(file.id, 'before', boundary)")
+    expect(workbenchSource).toContain("some((key) => key.startsWith(`${file.id}:`))")
+    expect(workbenchSource).not.toContain('이전 구간')
+    expect(workbenchSource).not.toContain('다음 구간')
     expect(workbenchSource).toContain('querySelector(`[data-line="${lineNumber}"]`)?.scrollIntoView({ block: \'center\' })')
+  })
+
+  it('merges ordered unique edge windows and trims the opposite edge at 1000 lines', () => {
+    const current = {
+      startLine: 901,
+      lines: Array.from({ length: 100 }, (_, index) => ({ lineNumber: 901 + index, text: `${901 + index}`, truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: true,
+    }
+    const incoming = {
+      startLine: 661,
+      lines: Array.from({ length: 300 }, (_, index) => ({ lineNumber: 661 + index, text: `${661 + index}`, truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: true,
+    }
+    const prepended = mergeLineWindow(current, incoming, 'before', 1000)
+    expect(prepended.lines.map((line) => line.lineNumber)).toEqual(Array.from({ length: 340 }, (_, index) => 661 + index))
+    expect(new Set(prepended.lines.map((line) => line.lineNumber)).size).toBe(prepended.lines.length)
+
+    const fullWindow = {
+      startLine: 1,
+      lines: Array.from({ length: 1000 }, (_, index) => ({ lineNumber: index + 1, text: '', truncated: false })),
+      hasMoreBefore: false,
+      hasMoreAfter: true,
+    }
+    const appended = {
+      startLine: 1001,
+      lines: Array.from({ length: 240 }, (_, index) => ({ lineNumber: 1001 + index, text: '', truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: false,
+    }
+    const boundedAfter = mergeLineWindow(fullWindow, appended, 'after', 1000)
+    expect(boundedAfter.lines).toHaveLength(1000)
+    expect(boundedAfter.lines[0].lineNumber).toBe(241)
+    expect(boundedAfter.lines.at(-1)?.lineNumber).toBe(1240)
+    expect(boundedAfter.hasMoreBefore).toBe(true)
+    expect(boundedAfter.hasMoreAfter).toBe(false)
+
+    const boundedBefore = mergeLineWindow(boundedAfter, fullWindow, 'before', 1000)
+    expect(boundedBefore.lines[0].lineNumber).toBe(1)
+    expect(boundedBefore.lines.at(-1)?.lineNumber).toBe(1000)
+    expect(boundedBefore.hasMoreBefore).toBe(false)
+    expect(boundedBefore.hasMoreAfter).toBe(true)
+    expect(lineWindowEdgeRequestKey('file-a', 'after', 1000)).toBe('file-a:after:1000')
+  })
+
+  it('clamps the selected search hit when opened-tab results shrink', () => {
+    expect(clampSearchHitIndex(8, 3)).toBe(2)
+    expect(clampSearchHitIndex(-2, 3)).toBe(0)
+    expect(clampSearchHitIndex(2, 0)).toBe(0)
   })
 
   it('keeps the continuous editor structure and avoids legacy per-line sizing', () => {

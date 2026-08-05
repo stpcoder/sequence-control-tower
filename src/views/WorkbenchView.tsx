@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -163,6 +164,47 @@ interface LoadedLineWindow {
   hasMoreBefore: boolean
   hasMoreAfter: boolean
   totalLines?: number
+}
+
+type LineWindowEdge = 'before' | 'after'
+
+interface LineScrollAnchor {
+  fileId: string
+  lineNumber: number
+  viewportOffset: number
+}
+
+export function mergeLineWindow(
+  current: LoadedLineWindow | undefined,
+  incoming: LoadedLineWindow,
+  edge: LineWindowEdge,
+  maxLines = 1000,
+): LoadedLineWindow {
+  const byLine = new Map<number, LoadedLineWindow['lines'][number]>()
+  current?.lines.forEach((line) => byLine.set(line.lineNumber, line))
+  incoming.lines.forEach((line) => byLine.set(line.lineNumber, line))
+  const allLines = [...byLine.values()].sort((a, b) => a.lineNumber - b.lineNumber)
+  const lines = allLines.length <= maxLines
+    ? allLines
+    : edge === 'before' ? allLines.slice(0, maxLines) : allLines.slice(-maxLines)
+  const trimmedBefore = lines[0]?.lineNumber !== allLines[0]?.lineNumber
+  const trimmedAfter = lines.at(-1)?.lineNumber !== allLines.at(-1)?.lineNumber
+  return {
+    startLine: lines[0]?.lineNumber ?? incoming.startLine,
+    lines,
+    hasMoreBefore: Boolean((edge === 'before' ? incoming.hasMoreBefore : current?.hasMoreBefore) || trimmedBefore),
+    hasMoreAfter: Boolean((edge === 'after' ? incoming.hasMoreAfter : current?.hasMoreAfter) || trimmedAfter),
+    totalLines: incoming.totalLines ?? current?.totalLines,
+  }
+}
+
+export function clampSearchHitIndex(index: number, hitCount: number): number {
+  if (hitCount <= 0) return 0
+  return Math.min(Math.max(index, 0), hitCount - 1)
+}
+
+export function lineWindowEdgeRequestKey(fileId: string, edge: LineWindowEdge, boundary: number): string {
+  return `${fileId}:${edge}:${boundary}`
 }
 
 interface BatchPreview {
@@ -843,6 +885,10 @@ export function WorkbenchView({
   const mountedRef = useRef(false)
   const lineWindowGenerations = useRef(new Map<string, number>())
   const pendingLineWindowRequests = useRef(new Set<string>())
+  const lineWindowTasks = useRef(new Map<string, Promise<void>>())
+  const lineWindowEpochs = useRef(new Map<string, number>())
+  const lineScrollAnchor = useRef<LineScrollAnchor | null>(null)
+  const scrollFrameId = useRef<number | undefined>(undefined)
   const animationFrameIds = useRef(new Set<number>())
   const revealGeneration = useRef(0)
   const batchGeneration = useRef(0)
@@ -857,9 +903,11 @@ export function WorkbenchView({
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
   const replacementInputRef = useRef<HTMLInputElement>(null)
+  const lineWindowsRef = useRef<Record<string, LoadedLineWindow>>({})
 
   activeFileIdRef.current = activeFileId
   filesRef.current = files
+  lineWindowsRef.current = lineWindows
   patternReviewStatusRef.current = patternReview.status
 
   const bestEffortCancelPatternReview = useCallback(() => {
@@ -905,6 +953,7 @@ export function WorkbenchView({
     text: activeFile ? applyLogDraftLine(logDraft, activeFile.id, line.lineNumber, line.text).text : line.text,
   })), [activeFile, activeSourceLines, logDraft])
   const searchFiles = useMemo(() => resolveSearchScopeFiles(searchScope, files, activeFileId, openFileIds), [activeFileId, files, openFileIds, searchScope])
+  const searchFileIdsKey = useMemo(() => searchFiles.map((file) => file.id).join('\u0000'), [searchFiles])
   const memoryHits = useMemo(() => collectHits(searchFiles, query, options), [options, query, searchFiles])
   const hits = useMemo(() => [...memoryHits, ...backendHits], [backendHits, memoryHits])
   const activeHit = hits[currentHit]
@@ -986,7 +1035,15 @@ export function WorkbenchView({
     if (changingFile) {
       bestEffortCancelPatternReview()
       batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
+      lineScrollAnchor.current = null
       activeFileIdRef.current = fileId
+      lineWindowEpochs.current.set(fileId, (lineWindowEpochs.current.get(fileId) ?? 0) + 1)
+      lineWindowGenerations.current = advanceFileRequestGeneration(lineWindowGenerations.current, fileId).generations
+      for (const requestKey of pendingLineWindowRequests.current) {
+        if (requestKey.startsWith(`${fileId}:`)) pendingLineWindowRequests.current.delete(requestKey)
+      }
+      lineWindowsRef.current = omitFileCacheEntry(lineWindowsRef.current, fileId)
+      setLineWindows((current) => omitFileCacheEntry(current, fileId))
     }
     setActiveFileId(fileId)
     setOpenFileIds((current) => current.includes(fileId) ? current : [...current, fileId])
@@ -1024,6 +1081,8 @@ export function WorkbenchView({
       patternReviewJobIdRef.current = ''
       animationFrameIds.current.forEach((frameId) => window.cancelAnimationFrame(frameId))
       animationFrameIds.current.clear()
+      if (scrollFrameId.current !== undefined) window.cancelAnimationFrame(scrollFrameId.current)
+      scrollFrameId.current = undefined
     }
   }, [bestEffortCancelPatternReview])
 
@@ -1050,22 +1109,63 @@ export function WorkbenchView({
     if (activeFile) onEvidenceCountChange?.(activeFile.id, evidenceLines.length)
   }, [activeFile, evidenceLines.length, onEvidenceCountChange])
 
-  const loadLineWindow = useCallback(async (file: WorkbenchFile, targetLine = 1): Promise<LoadedLineWindow | undefined> => {
+  const loadLineWindow = useCallback(async (
+    file: WorkbenchFile,
+    targetLine = 1,
+    edge: LineWindowEdge | 'replace' = 'replace',
+  ): Promise<LoadedLineWindow | undefined> => {
     const api = electronApi()
     if (!api || !file.artifactId || !mountedRef.current) return undefined
-    const nextRequest = advanceFileRequestGeneration(lineWindowGenerations.current, file.id)
-    lineWindowGenerations.current = nextRequest.generations
-    const requestId = nextRequest.generation
-    const requestToken = `${file.id}:${requestId}`
-    pendingLineWindowRequests.current.add(requestToken)
+    while (lineWindowTasks.current.has(file.id)) {
+      await lineWindowTasks.current.get(file.id)
+      if (!mountedRef.current || !filesRef.current.some((item) => item.id === file.id && item.artifactId === file.artifactId)) {
+        return undefined
+      }
+    }
+    const cached = lineWindowsRef.current[file.id]
+    if (edge === 'replace' && cached?.lines.some((line) => line.lineNumber === targetLine)) return cached
+    let releaseTask!: () => void
+    const task = new Promise<void>((resolve) => { releaseTask = resolve })
+    lineWindowTasks.current.set(file.id, task)
+    const current = lineWindowsRef.current[file.id]
+    const boundary = edge === 'before'
+      ? Math.max(1, current?.startLine ?? targetLine)
+      : edge === 'after'
+        ? (current?.lines.at(-1)?.lineNumber ?? targetLine)
+        : targetLine
+    const epoch = lineWindowEpochs.current.get(file.id) ?? 0
+    const edgeRequestKey = edge === 'replace' ? undefined : `${lineWindowEdgeRequestKey(file.id, edge, boundary)}:${epoch}`
+    if (edgeRequestKey && pendingLineWindowRequests.current.has(edgeRequestKey)) {
+      releaseTask()
+      if (lineWindowTasks.current.get(file.id) === task) lineWindowTasks.current.delete(file.id)
+      return undefined
+    }
+    if (edge === 'replace') {
+      lineWindowEpochs.current.set(file.id, epoch + 1)
+      const nextRequest = advanceFileRequestGeneration(lineWindowGenerations.current, file.id)
+      lineWindowGenerations.current = nextRequest.generations
+    }
+    const requestId = lineWindowGenerations.current.get(file.id) ?? 0
+    const requestKey = edgeRequestKey ?? `${file.id}:replace:${targetLine}:${requestId}`
+    pendingLineWindowRequests.current.add(requestKey)
     setWindowLoading(true)
     try {
       const result = await api.artifacts.getLineWindow({
         artifactId: file.artifactId,
-        startLine: Math.max(1, targetLine - 80),
+        startLine: edge === 'before'
+          ? Math.max(1, boundary - 240)
+          : edge === 'after'
+            ? boundary + 1
+            : Math.max(1, targetLine - 80),
         lineCount: 240,
       })
-      if (!canApplyLineWindowResult(mountedRef.current, lineWindowGenerations.current, file.id, requestId)) return undefined
+      const stillCurrent = canApplyLineWindowResult(mountedRef.current, lineWindowGenerations.current, file.id, requestId)
+        && (lineWindowEpochs.current.get(file.id) ?? 0) === (edge === 'replace' ? epoch + 1 : epoch)
+        && filesRef.current.some((item) => item.id === file.id && item.artifactId === file.artifactId)
+      if (!stillCurrent) {
+        if (lineScrollAnchor.current?.fileId === file.id) lineScrollAnchor.current = null
+        return undefined
+      }
       const loaded: LoadedLineWindow = {
         startLine: result.startLine,
         lines: result.lines,
@@ -1073,19 +1173,22 @@ export function WorkbenchView({
         hasMoreAfter: result.hasMoreAfter,
         totalLines: result.totalLines,
       }
-      setLineWindows((current) => ({
-        ...current,
-        [file.id]: {
-          ...loaded,
-        },
-      }))
-      return loaded
+      const nextWindow = edge === 'replace'
+        ? loaded
+        : mergeLineWindow(lineWindowsRef.current[file.id], loaded, edge)
+      lineWindowsRef.current = { ...lineWindowsRef.current, [file.id]: nextWindow }
+      setLineWindows((current) => ({ ...current, [file.id]: nextWindow }))
+      return nextWindow
     } catch (error) {
-      if (canApplyLineWindowResult(mountedRef.current, lineWindowGenerations.current, file.id, requestId)) {
+      if (lineScrollAnchor.current?.fileId === file.id) lineScrollAnchor.current = null
+      if (canApplyLineWindowResult(mountedRef.current, lineWindowGenerations.current, file.id, requestId)
+        && (lineWindowEpochs.current.get(file.id) ?? 0) === (edge === 'replace' ? epoch + 1 : epoch)) {
         onNotify?.(error instanceof Error ? error.message : '로그 구간을 열지 못했습니다.', 'error')
       }
     } finally {
-      pendingLineWindowRequests.current.delete(requestToken)
+      pendingLineWindowRequests.current.delete(requestKey)
+      releaseTask()
+      if (lineWindowTasks.current.get(file.id) === task) lineWindowTasks.current.delete(file.id)
       if (mountedRef.current) setWindowLoading(pendingLineWindowRequests.current.size > 0)
     }
   }, [onNotify])
@@ -1100,6 +1203,67 @@ export function WorkbenchView({
     })
     animationFrameIds.current.add(frameId)
   }, [])
+
+  useLayoutEffect(() => {
+    const anchor = lineScrollAnchor.current
+    if (!anchor || anchor.fileId !== activeFileId) return
+    const editor = editorRef.current
+    if (!editor) return
+    const line = editor.querySelector<HTMLElement>(`[data-line="${anchor.lineNumber}"]`)
+    if (line) {
+      const editorTop = editor.getBoundingClientRect().top
+      editor.scrollTop += line.getBoundingClientRect().top - editorTop - anchor.viewportOffset
+    }
+    lineScrollAnchor.current = null
+  }, [activeFileId, activeWindow?.startLine, activeWindow?.lines.length])
+
+  const captureLineScrollAnchor = useCallback((editor: HTMLDivElement, fileId: string) => {
+    const editorTop = editor.getBoundingClientRect().top
+    const visibleLine = [...editor.querySelectorAll<HTMLElement>('.log-line[data-line]')]
+      .find((line) => line.getBoundingClientRect().bottom > editorTop)
+    const lineNumber = Number(visibleLine?.dataset.line)
+    if (!visibleLine || !Number.isFinite(lineNumber)) return
+    lineScrollAnchor.current = {
+      fileId,
+      lineNumber,
+      viewportOffset: visibleLine.getBoundingClientRect().top - editorTop,
+    }
+  }, [])
+
+  const handleEditorScroll = useCallback(() => {
+    if (scrollFrameId.current !== undefined) return
+    scrollFrameId.current = window.requestAnimationFrame(() => {
+      scrollFrameId.current = undefined
+      const editor = editorRef.current
+      const file = filesRef.current.find((item) => item.id === activeFileIdRef.current)
+      const windowState = lineWindowsRef.current[activeFileIdRef.current]
+      if (!editor || !file?.artifactId || !windowState?.lines.length || !mountedRef.current) return
+      if ([...pendingLineWindowRequests.current].some((key) => key.startsWith(`${file.id}:`))) return
+      const threshold = Math.max(480, editor.clientHeight * 1.5)
+      const nearTop = editor.scrollTop <= threshold
+      const nearBottom = editor.scrollHeight - editor.scrollTop - editor.clientHeight <= threshold
+      if (nearTop && windowState.hasMoreBefore) {
+        const boundary = windowState.startLine
+        const key = `${lineWindowEdgeRequestKey(file.id, 'before', boundary)}:${lineWindowEpochs.current.get(file.id) ?? 0}`
+        if (!pendingLineWindowRequests.current.has(key)) {
+          captureLineScrollAnchor(editor, file.id)
+          void loadLineWindow(file, boundary, 'before')
+        }
+      } else if (nearBottom && windowState.hasMoreAfter) {
+        const boundary = windowState.lines.at(-1)!.lineNumber
+        const key = `${lineWindowEdgeRequestKey(file.id, 'after', boundary)}:${lineWindowEpochs.current.get(file.id) ?? 0}`
+        if (!pendingLineWindowRequests.current.has(key)) {
+          captureLineScrollAnchor(editor, file.id)
+          void loadLineWindow(file, boundary, 'after')
+        }
+      }
+    })
+  }, [captureLineScrollAnchor, loadLineWindow])
+
+  useEffect(() => {
+    if (!activeWindow?.lines.length) return
+    handleEditorScroll()
+  }, [activeFileId, activeWindow?.hasMoreAfter, activeWindow?.hasMoreBefore, activeWindow?.lines.length, activeWindow?.startLine, handleEditorScroll])
 
   const scheduleScroll = useCallback((
     fileId: string,
@@ -1367,6 +1531,14 @@ export function WorkbenchView({
     setInvalidPattern(Boolean(query && !createSearchPattern(query, options)))
     setCurrentHit(0)
   }, [options, query])
+
+  useEffect(() => {
+    setCurrentHit(0)
+  }, [searchFileIdsKey])
+
+  useEffect(() => {
+    setCurrentHit((index) => clampSearchHitIndex(index, hits.length))
+  }, [hits.length])
 
   useEffect(() => {
     const api = electronApi()
@@ -1796,6 +1968,7 @@ export function WorkbenchView({
     batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
     const invalidated = advanceFileRequestGeneration(lineWindowGenerations.current, fileId)
     lineWindowGenerations.current = invalidated.generations
+    lineWindowEpochs.current.set(fileId, (lineWindowEpochs.current.get(fileId) ?? 0) + 1)
     for (const requestToken of pendingLineWindowRequests.current) {
       if (requestToken.startsWith(`${fileId}:`)) pendingLineWindowRequests.current.delete(requestToken)
     }
@@ -1988,8 +2161,7 @@ export function WorkbenchView({
           </div>
         ) : null}
 
-        <div className="log-editor" ref={editorRef} tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
-          {activeFile?.artifactId && activeWindow?.hasMoreBefore ? <button className="window-boundary" onClick={() => void loadLineWindow(activeFile, Math.max(1, activeWindow.startLine - 160))}><ChevronsUp size={13} />이전 구간 · Ln {Math.max(1, activeWindow.startLine - 240)}</button> : null}
+        <div className="log-editor" ref={editorRef} onScroll={handleEditorScroll} tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
           {activeFile && activeLines.length ? activeLines.map((line) => {
             const lineNumber = line.lineNumber
             const isEvidence = evidenceLines.includes(lineNumber)
@@ -2003,7 +2175,6 @@ export function WorkbenchView({
               </div>
             )
           }) : <div className="editor-empty">{windowLoading ? <LoaderCircle className="wb-spin" size={22} /> : <FolderOpen size={22} />}<span>{windowLoading ? '필요한 로그 구간을 읽고 있습니다.' : '분석할 로그 폴더를 추가하세요.'}</span></div>}
-          {activeFile?.artifactId && activeWindow?.hasMoreAfter ? <button className="window-boundary" onClick={() => void loadLineWindow(activeFile, (activeWindow.lines.at(-1)?.lineNumber ?? 1) + 81)}>다음 구간 · Ln {(activeWindow.lines.at(-1)?.lineNumber ?? 1) + 1}<ChevronsDown size={13} /></button> : null}
         </div>
 
         <footer className="editor-statusbar">
