@@ -39,4 +39,17 @@ describe('ProjectStore', () => {
     const attached = await store.attachFolder(created.id, 0, folder); await rm(folder, { recursive: true, force: true })
     expect(await store.validateFolders(created.id)).toMatchObject([{ rootId: attached.folders[0].rootId, status: 'missing' }])
   })
+
+  it('persists recursive JSON-safe export preset options and rejects non-JSON values', async () => {
+    const dataRoot = await tempRoot(); const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'Layouts' })
+    const saved = await store.saveExportPreset({
+      projectId: project.id, expectedRevision: project.revision,
+      preset: { id: 'layout', name: 'Layout', format: 'json', options: { axes: ['sample', null], filters: { failOnly: true } } },
+    })
+    expect(saved.exportPresets[0].options).toEqual({ axes: ['sample', null], filters: { failOnly: true } })
+    await expect(store.saveExportPreset({
+      projectId: saved.id, expectedRevision: saved.revision,
+      preset: { id: 'layout', name: 'Layout', format: 'json', options: { invalid: new Date() } as unknown as Record<string, never> },
+    })).rejects.toThrow('JSON')
+  })
 })

@@ -37,7 +37,7 @@ export function buildProjectClonePlan(source: ProjectSnapshot): Pick<ProjectSave
     onboardingAnswers: source.onboardingAnswers ? { ...source.onboardingAnswers } : {},
     equipmentProfiles: source.equipmentProfiles.map((profile) => ({ ...profile })),
     templatePins: source.templatePins.map((pin) => ({ ...pin })),
-    exportPresets: source.exportPresets.map((preset) => ({ ...preset, options: { ...preset.options } }))
+    exportPresets: source.exportPresets.map((preset) => ({ ...preset, options: structuredClone(preset.options) }))
   }
 }
 

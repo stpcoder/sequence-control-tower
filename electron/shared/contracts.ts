@@ -744,9 +744,10 @@ export interface ProjectFolderRef { rootId: string; displayLabel: string; status
 export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactId: string; relativePath: string }
 export interface ProjectEquipmentProfile { alias: string; profileId: string; updatedAt: string }
 export interface ProjectTemplatePin { templateId: string; revision: number; pinnedAt: string }
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 export interface ProjectExportPreset {
   id: string; name: string; format: 'csv' | 'json' | 'markdown'
-  options: Record<string, string | number | boolean>; createdAt: string; updatedAt: string; archived?: boolean
+  options: Record<string, JsonValue>; createdAt: string; updatedAt: string; archived?: boolean
 }
 export interface ProjectOnboardingAnswers {
   evaluationTarget?: string

@@ -546,7 +546,7 @@ export default function App() {
   ) : activePage === 'results' ? (
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onNotify={notify} />
   ) : activePage === 'patterns' ? (
-    <PatternsView records={records} onOpenFile={openFile} />
+    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : <SettingsView />
 
   return (

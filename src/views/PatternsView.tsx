@@ -13,10 +13,21 @@ import {
   type PivotDimension,
   type AggregateTrend,
 } from '../state/logRecords'
+import type { ProjectSnapshot } from '../../electron/shared/contracts'
+import {
+  DEFAULT_PATTERN_LAYOUT,
+  PATTERN_LAYOUT_PRESET_ID,
+  patternLayoutFromPreset,
+  patternLayoutPreset,
+  type PatternLayout,
+} from '../state/patternLayout'
 
 interface PatternsViewProps {
   records: readonly LogResultRecord[]
   onOpenFile: (fileId: string) => void
+  project: ProjectSnapshot | null
+  onProjectUpdated: (project: ProjectSnapshot) => void
+  onNotify: (message: string, tone?: 'success' | 'error' | 'info') => void
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string }> = [
@@ -54,16 +65,40 @@ function dimensionOptions(selected: readonly PivotDimension[], current: PivotDim
   return DIMENSIONS.filter((item) => item.value === current || !selected.includes(item.value))
 }
 
-export function PatternsView({ records, onOpenFile }: PatternsViewProps) {
-  const [rowAxes, setRowAxes] = useState<[PivotDimension, PivotDimension | 'none']>(['sample', 'none'])
-  const [columnAxes, setColumnAxes] = useState<[PivotDimension, PivotDimension | 'none']>(['temperature', 'none'])
-  const [aggregation, setAggregation] = useState<PivotAggregation>('count')
-  const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>('all')
-  const [folderFilter, setFolderFilter] = useState('all')
-  const [failOnly, setFailOnly] = useState(false)
-  const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(false)
+export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify }: PatternsViewProps) {
+  const [rowAxes, setRowAxes] = useState<PatternLayout['rowAxes']>(DEFAULT_PATTERN_LAYOUT.rowAxes)
+  const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
+  const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
+  const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>(DEFAULT_PATTERN_LAYOUT.resultFilter)
+  const [folderFilter, setFolderFilter] = useState(DEFAULT_PATTERN_LAYOUT.folderFilter)
+  const [failOnly, setFailOnly] = useState(DEFAULT_PATTERN_LAYOUT.failOnly)
+  const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(DEFAULT_PATTERN_LAYOUT.unknownMetadataOnly)
+  const [savingLayout, setSavingLayout] = useState(false)
   const [selectedSourceIds, setSelectedSourceIds] = useState<ReadonlySet<string> | null>(null)
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
+    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation)
+    setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
+    setSelectedSourceIds(null); setSelectedCellKey(null)
+  }, [project?.id])
+
+  const saveLayout = async () => {
+    if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
+    setSavingLayout(true)
+    try {
+      const existing = project.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)
+      const next = await window.sequenceIntelligence.projects.saveExportPreset({
+        projectId: project.id, expectedRevision: project.revision,
+        preset: patternLayoutPreset({ rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, existing),
+      })
+      onProjectUpdated(next)
+      onNotify('N×M 결과 요약 레이아웃을 저장했습니다.', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? `레이아웃을 저장하지 못했습니다: ${error.message}` : '레이아웃을 저장하지 못했습니다.', 'error')
+    } finally { setSavingLayout(false) }
+  }
 
   const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((a, b) => a.localeCompare(b, 'ko-KR')), [records])
   const resultChoices = useMemo(() => [...new Set(records.map((row) => row.result))], [records])
@@ -132,7 +167,7 @@ export function PatternsView({ records, onOpenFile }: PatternsViewProps) {
   return <div className="data-view patterns-view">
     <header className="data-view-header">
       <div><h1>결과 정리</h1><span>{records.length.toLocaleString()} logs</span></div>
-      {hasFilters || hasSelection ? <button className="clear-marking" onClick={clearAll}><FilterX size={16} />전체 해제</button> : null}
+      <div className="data-actions"><button className="clear-marking" onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '레이아웃 저장'}</button>{hasFilters || hasSelection ? <button className="clear-marking" onClick={clearAll}><FilterX size={16} />전체 해제</button> : null}</div>
     </header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>

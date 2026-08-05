@@ -6,6 +6,7 @@ import type {
   ProjectCreateInput, ProjectEquipmentProfile, ProjectExportPreset, ProjectFolderRef, ProjectFolderStatus,
   ProjectSaveExportPresetInput, ProjectSaveInput, ProjectSnapshot, ProjectTemplatePin
 } from '../shared/contracts'
+import type { JsonValue } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
 
 interface StoredRoot { rootId: string; canonicalPath: string; displayLabel: string }
@@ -33,6 +34,19 @@ const revision = (value: unknown): number => {
 }
 const now = (): string => new Date().toISOString()
 const rootIdFor = (path: string): string => createHash('sha256').update('sequence-control-tower-project-root\0').update(process.platform === 'win32' ? path.toLowerCase() : path).digest('hex').slice(0, 24)
+const jsonValue = (value: unknown, name = 'options'): JsonValue => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (Array.isArray(value)) return Array.from(value, (item) => jsonValue(item, name))
+  if (value && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, jsonValue(item, name)]))
+  }
+  throw new Error(`${name}이(가) JSON 형식이 아닙니다.`)
+}
+const presetOptions = (value: unknown): Record<string, JsonValue> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('export preset options가 올바르지 않습니다.')
+  return jsonValue(value) as Record<string, JsonValue>
+}
 
 export class ProjectStore {
   private readonly projects: AtomicJsonStore<ProjectDatabase>
@@ -122,7 +136,7 @@ export class ProjectStore {
     })
   }
 
-  async saveExportPreset(input: ProjectSaveExportPresetInput): Promise<ProjectSnapshot> { return this.mutate(input.projectId, input.expectedRevision, (p) => { const value = input.preset; const stamp = now(); const existing = value.id ? p.exportPresets.find((preset) => preset.id === value.id) : undefined; const preset: ProjectExportPreset = { id: value.id ? id(value.id, 'presetId') : randomUUID(), name: text(value.name, 'preset 이름'), format: value.format, options: value.options, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, ...(value.archived ? { archived: true } : {}) }; p.exportPresets = [...p.exportPresets.filter((item) => item.id !== preset.id), preset] }) }
+  async saveExportPreset(input: ProjectSaveExportPresetInput): Promise<ProjectSnapshot> { return this.mutate(input.projectId, input.expectedRevision, (p) => { const value = input.preset; const stamp = now(); const existing = value.id ? p.exportPresets.find((preset) => preset.id === value.id) : undefined; const preset: ProjectExportPreset = { id: value.id ? id(value.id, 'presetId') : randomUUID(), name: text(value.name, 'preset 이름'), format: value.format, options: presetOptions(value.options), createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, ...(value.archived ? { archived: true } : {}) }; p.exportPresets = [...p.exportPresets.filter((item) => item.id !== preset.id), preset] }) }
   async archiveExportPreset(input: ProjectArchiveExportPresetInput): Promise<ProjectSnapshot> { return this.mutate(input.projectId, input.expectedRevision, (p) => { const preset = p.exportPresets.find((item) => item.id === id(input.presetId, 'presetId')); if (!preset) throw new Error('export preset을 찾을 수 없습니다.'); preset.archived = true; preset.updatedAt = now() }) }
 
   private async mutate(projectId: string, expected: number, change: (project: StoredProject) => void): Promise<ProjectSnapshot> {
@@ -135,5 +149,5 @@ export class ProjectStore {
   private pathError(error: unknown): Error { const code = (error as NodeJS.ErrnoException).code; return new Error(code === 'EACCES' || code === 'EPERM' ? '선택한 폴더에 접근할 권한이 없습니다.' : '선택한 폴더를 찾을 수 없습니다.') }
   private profiles(value: ProjectEquipmentProfile[]): ProjectEquipmentProfile[] { if (!Array.isArray(value)) throw new Error('장비 profile이 올바르지 않습니다.'); return value.map((p) => ({ alias: text(p.alias, '장비 alias', 120), profileId: id(p.profileId, 'profileId'), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
   private pins(value: ProjectTemplatePin[]): ProjectTemplatePin[] { if (!Array.isArray(value)) throw new Error('template pin이 올바르지 않습니다.'); return value.map((p) => ({ templateId: id(p.templateId, 'templateId'), revision: revision(p.revision), pinnedAt: text(p.pinnedAt, 'pinnedAt', 80) })) }
-  private presets(value: ProjectExportPreset[]): ProjectExportPreset[] { if (!Array.isArray(value)) throw new Error('export preset이 올바르지 않습니다.'); return value.map((p) => ({ ...p, id: id(p.id, 'presetId'), name: text(p.name, 'preset 이름'), format: p.format, options: p.options, createdAt: text(p.createdAt, 'createdAt', 80), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
+  private presets(value: ProjectExportPreset[]): ProjectExportPreset[] { if (!Array.isArray(value)) throw new Error('export preset이 올바르지 않습니다.'); return value.map((p) => ({ ...p, id: id(p.id, 'presetId'), name: text(p.name, 'preset 이름'), format: p.format, options: presetOptions(p.options), createdAt: text(p.createdAt, 'createdAt', 80), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
 }
