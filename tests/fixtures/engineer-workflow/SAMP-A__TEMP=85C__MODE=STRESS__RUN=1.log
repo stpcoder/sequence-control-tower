@@ -1,0 +1,26 @@
+# SYNTHETIC_METADATA
+SAMPLE=SAMP-A;
+TEMP=85C;
+MODE=STRESS;
+RUN=1;
+COMPARISON_KEY=SAMP-A|85C|STRESS;
+EXPECTED_RESULT=SYSTEM_REBOOT;
+PAIR_TRANSITION=RECOVERY;
+TARGET_TEMPERATURE=85C;
+MEASURED_TEMPERATURE=85.0C;
+VDD=0.90V;
+REQUESTED_TEST_MODE=STRESS;
+OBSERVED_TEST_MODE=STRESS;
+INFO pmic_sequence=nominal;
+DEBUG refclk_lock=1;
+POWER_ON state=asserted;
+UEFI entry firmware=SYN-UEFI-01;
+ExitBootServices status=success;
+OS boot start loader=SYN-OS-01;
+stressapp start profile=synthetic-memory;
+stressapp heartbeat=stable;
+stressapp completed result=PASS;
+HIDAG START mode=STRESS;
+FAILURE_POINT=WATCHDOG_RECOVERY;
+WATCHDOG_RESET reason=synthetic-timeout;
+SYSTEM_REBOOT;

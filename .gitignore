@@ -9,4 +9,6 @@ coverage/
 /data/
 !docs/**/*.log
 !tests/fixtures/soc-logs/**/*.log
+!tests/fixtures/engineer-workflow/**/*.log
+!tests/fixtures/qualcomm-bringup/**/*.log
 omh-store-upload/
