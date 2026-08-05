@@ -19,7 +19,7 @@
 
 ![Log Workbench](docs/images/manual-lw-00-overview.png)
 
-[Log Workbench 사용 안내](docs/manual/00-log-workbench.md) · [SoC 실장 평가 로그 실무 예제](docs/manual/01-practical-workflows.md)
+[사용자 매뉴얼](docs/manual/README.md) · [시작하기](docs/manual/10-시작하기.md) · [로그 워크벤치](docs/manual/20-로그-워크벤치.md) · [여러 폴더 반복 분석](docs/manual/30-여러-폴더-반복-분석.md)
 
 ## 작업 순서
 
@@ -54,7 +54,7 @@
 
 폴더 가져오기, 검색, 규칙 판정, 결과표 생성은 로컬에서 실행되며 LLM을 호출하지 않습니다. AI 분석은 사용자가 요청한 경우에만 구조화된 최소 근거를 사내 OpenAI-compatible API로 전송합니다. 로그 원문 전체, 절대경로, API key는 요청에 포함하지 않습니다.
 
-Endpoint, model ID, API key, RPM/TPM, timeout 설정은 [LLM 연결 안내](docs/manual/05-settings.md)를 참고하세요. `모델 목록 확인`을 선택한 경우에만 `/models`를 조회합니다.
+Endpoint, model ID, API key, RPM/TPM, timeout 설정은 [LLM 연결 안내](docs/manual/50-LLM-연결-검증.md)를 참고하세요. `모델 목록 확인`을 선택한 경우에만 `/models`를 조회합니다.
 
 ## 데이터와 보안
 
@@ -100,7 +100,7 @@ npm run dist:win
 npm run dist:mac
 ```
 
-`tests/fixtures/soc-logs/`에는 합성 SoC 로그 33개 시나리오가 있습니다. PASS, fail, halt, reboot, marker 충돌·역순·누락, 온도/VDD 불일치, filename 오류, NUL, CRLF, truncated/4MiB line을 포함합니다.
+`tests/fixtures/soc-logs/`에는 기존 합성 SoC 시나리오가 있고, `tests/fixtures/qualcomm-bringup/`에는 160개 규모의 결정적 Qualcomm-style bring-up corpus가 분리되어 있습니다. 생성 명령과 안전 주의사항은 [Qualcomm synthetic corpus](docs/testing/qualcomm-synthetic-corpus.md)를 참고하세요.
 
 ## 배포
 
@@ -111,8 +111,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.

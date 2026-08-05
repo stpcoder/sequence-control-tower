@@ -20,6 +20,7 @@ import type {
   EvaluationSaveBatchInput,
   EvaluationSaveDecisionInput,
   EvaluationSaveRecipeInput,
+  EvaluationSaveRecipeAndBatchInput,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   StartAnalysisInput,
@@ -42,6 +43,10 @@ interface Services {
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
 const activeArtifactSearches = new Map<number, AbortController>()
+const activeArtifactEvidenceInspections = new Map<number, AbortController>()
+const activeArtifactFolderImports = new Map<string, symbol>()
+const FOLDER_IMPORT_IN_PROGRESS_ERROR =
+  '폴더 가져오기가 이미 진행 중입니다. 현재 작업이 끝난 후 다시 시도해 주세요.'
 
 function isExactPackagedRenderer(frameUrl: string): boolean {
   try {
@@ -106,25 +111,38 @@ export function registerIpc(services: Services): void {
       ? await dialog.showOpenDialog(owner, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled) {
-      return { cancelled: true, artifacts: [], failures: [], skippedCount: 0 }
+      return { cancelled: true, limitReached: false, artifacts: [], failures: [], skippedCount: 0 }
     }
     return services.artifacts.importFiles(result.filePaths)
   })
 
   handle(IPC_CHANNELS.artifactImportFolder, async (event, rawOptions) => {
-    const options = (rawOptions ?? {}) as ArtifactImportOptions
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    const pickerOptions: OpenDialogOptions = {
-      title: '분석할 로그 폴더 선택',
-      properties: ['openDirectory', 'multiSelections']
+    const importChannel = IPC_CHANNELS.artifactImportFolder
+    if (activeArtifactFolderImports.has(importChannel)) {
+      throw new Error(FOLDER_IMPORT_IN_PROGRESS_ERROR)
     }
-    const result = owner
-      ? await dialog.showOpenDialog(owner, pickerOptions)
-      : await dialog.showOpenDialog(pickerOptions)
-    if (result.canceled || !result.filePaths.length) {
-      return { cancelled: true, artifacts: [], failures: [], skippedCount: 0 }
+    const lock = Symbol('artifact-folder-import')
+    activeArtifactFolderImports.set(importChannel, lock)
+
+    try {
+      const options = (rawOptions ?? {}) as ArtifactImportOptions
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const pickerOptions: OpenDialogOptions = {
+        title: '분석할 로그 폴더 선택',
+        properties: ['openDirectory', 'multiSelections']
+      }
+      const result = owner
+        ? await dialog.showOpenDialog(owner, pickerOptions)
+        : await dialog.showOpenDialog(pickerOptions)
+      if (result.canceled || !result.filePaths.length) {
+        return { cancelled: true, limitReached: false, artifacts: [], failures: [], skippedCount: 0 }
+      }
+      return await services.artifacts.importFolders(result.filePaths, options)
+    } finally {
+      if (activeArtifactFolderImports.get(importChannel) === lock) {
+        activeArtifactFolderImports.delete(importChannel)
+      }
     }
-    return services.artifacts.importFolders(result.filePaths, options)
   })
 
   handle(IPC_CHANNELS.artifactList, () => services.artifacts.list())
@@ -144,13 +162,15 @@ export function registerIpc(services: Services): void {
   })
   handle(IPC_CHANNELS.artifactInspectEvidence, async (event, input) => {
     const senderId = event.sender.id
-    activeArtifactSearches.get(senderId)?.abort()
+    activeArtifactEvidenceInspections.get(senderId)?.abort()
     const controller = new AbortController()
-    activeArtifactSearches.set(senderId, controller)
+    activeArtifactEvidenceInspections.set(senderId, controller)
     try {
       return await services.artifacts.inspectEvidence(input as ArtifactEvidenceInput, controller.signal)
     } finally {
-      if (activeArtifactSearches.get(senderId) === controller) activeArtifactSearches.delete(senderId)
+      if (activeArtifactEvidenceInspections.get(senderId) === controller) {
+        activeArtifactEvidenceInspections.delete(senderId)
+      }
     }
   })
   handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
@@ -174,6 +194,9 @@ export function registerIpc(services: Services): void {
   )
   handle(IPC_CHANNELS.evaluationSaveBatch, (_event, input) =>
     services.evaluations.saveBatch(input as EvaluationSaveBatchInput)
+  )
+  handle(IPC_CHANNELS.evaluationSaveRecipeAndBatch, (_event, input) =>
+    services.evaluations.saveRecipeAndBatch(input as EvaluationSaveRecipeAndBatchInput)
   )
   handle(IPC_CHANNELS.evaluationApproveMetadata, (_event, input) =>
     services.evaluations.approveMetadata(input as EvaluationApproveMetadataInput)
@@ -215,6 +238,8 @@ export function registerIpc(services: Services): void {
 export function unregisterIpc(): void {
   activeArtifactSearches.forEach((controller) => controller.abort())
   activeArtifactSearches.clear()
+  activeArtifactEvidenceInspections.forEach((controller) => controller.abort())
+  activeArtifactEvidenceInspections.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
     if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.appCommand) {
       ipcMain.removeHandler(channel)

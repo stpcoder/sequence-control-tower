@@ -80,7 +80,7 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 
 ## 메타데이터와 결과 내보내기
 
-`결과표`에는 파일명, 폴더, `Sample`, 온도, `Mode`, 결과, 판정 검토, 근거 수가 표시됩니다. 기본 파일명 `LOT12_S01_85C_DIAG.log`에서는 Sample `01`, 온도 `85`, Mode `DIAG`가 후보가 됩니다.
+`결과표`에는 `파일명`, `폴더`, `Sample`, `온도`, `Mode`, `결과`, `판정 검토`, `근거`가 표시됩니다. 기본 파일명 `LOT12_S01_85C_DIAG.log`에서는 Sample `01`, 온도 `85`, Mode `DIAG`가 후보가 됩니다.
 
 1. 원문의 sample, temperature, mode marker와 후보를 대조합니다.
 2. 값이 일치할 때 후보를 눌러 `승인` 상태로 저장합니다.
@@ -88,7 +88,9 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 4. 필요한 필터를 적용합니다.
 5. Excel에 붙여넣을 때 `TSV 복사`, 파일로 전달할 때 `CSV`를 누릅니다.
 
-CSV/TSV의 메타데이터 열은 `sample_candidate`, `temperature_candidate`, `mode_candidate`입니다. 승인 상태 전용 열은 없으므로 전달 전 화면의 `승인` 표시를 확인합니다.
+`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `결과`, `결과 출처`, `검토`입니다.
+
+`열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
 
 ![메타데이터와 판정을 확인하고 결과를 내보내는 화면](../images/manual-lw-05-results.png)
 

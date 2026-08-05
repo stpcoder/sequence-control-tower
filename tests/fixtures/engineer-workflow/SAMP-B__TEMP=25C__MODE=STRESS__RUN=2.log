@@ -1,0 +1,25 @@
+# SYNTHETIC_METADATA
+SAMPLE=SAMP-B;
+TEMP=25C;
+MODE=STRESS;
+RUN=2;
+COMPARISON_KEY=SAMP-B|25C|STRESS;
+EXPECTED_RESULT=SYSTEM_HALT;
+PAIR_TRANSITION=STABLE_FAILURE;
+TARGET_TEMPERATURE=25C;
+MEASURED_TEMPERATURE=24.6C;
+VDD=0.80V;
+REQUESTED_TEST_MODE=STRESS;
+OBSERVED_TEST_MODE=STRESS;
+INFO pmic_sequence=nominal;
+DEBUG refclk_lock=1;
+POWER_ON state=asserted;
+UEFI entry firmware=SYN-UEFI-01;
+ExitBootServices status=success;
+OS boot start loader=SYN-OS-01;
+stressapp start profile=synthetic-memory;
+stressapp heartbeat=stable;
+stressapp completed result=PASS;
+HIDAG START mode=STRESS;
+FAILURE_POINT=HIDAG_EXECUTION;
+INFO console_state=halted;

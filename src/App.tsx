@@ -15,6 +15,7 @@ import {
   artifactFiles,
   DEMO_LOGS,
   dedupeWorkbenchFiles,
+  mergeWorkbenchFiles,
   WorkbenchView,
   type WorkbenchDecision,
   type WorkbenchFile,
@@ -23,14 +24,78 @@ import {
 } from './views/WorkbenchView'
 import './data-views.css'
 import type {
+  ArtifactRecord,
   EvaluationBatchExceptionCode,
   EvaluationBatchOutcomeInput,
   EvaluationProjectSnapshot,
   EvaluationRecipeRule,
+  RendererCommand,
 } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
 
 const PROJECT_ID = 'log-workbench'
+
+export interface AppLifecycle {
+  mounted: boolean
+  generation: number
+}
+
+export function setupAppLifecycle(lifecycle: AppLifecycle): () => void {
+  lifecycle.mounted = true
+  const generation = lifecycle.generation
+  return () => {
+    if (lifecycle.generation !== generation) return
+    lifecycle.mounted = false
+    lifecycle.generation += 1
+  }
+}
+
+export function isAppLifecycleActive(lifecycle: AppLifecycle, generation?: number): boolean {
+  return lifecycle.mounted && (generation === undefined || lifecycle.generation === generation)
+}
+
+export function reconcileListedFiles(
+  current: readonly WorkbenchFile[],
+  artifacts: readonly ArtifactRecord[],
+): WorkbenchFile[] {
+  const listedLogs = dedupeWorkbenchFiles(artifacts
+    .filter((artifact) => artifact.extension.replace(/^\./, '').toLowerCase() === 'log')
+    .flatMap(artifactFiles))
+  return mergeWorkbenchFiles(current, listedLogs)
+}
+
+export function setupAppCommandListener(
+  lifecycle: AppLifecycle,
+  onCommand: (listener: (command: RendererCommand) => void) => () => void,
+  navigate: (page: AppPage) => void,
+  scheduleAnimationFrame: (callback: () => void) => number = (callback) => window.requestAnimationFrame(callback),
+  cancelAnimationFrame: (frameId: number) => void = (frameId) => window.cancelAnimationFrame(frameId),
+  dispatchCommand: (command: RendererCommand) => void = (command) => {
+    window.dispatchEvent(new CustomEvent('sequence-control-tower:command', { detail: command }))
+  },
+): () => void {
+  const generation = lifecycle.generation
+  const pendingAnimationFrames = new Set<number>()
+  const unsubscribe = onCommand((command) => {
+    if (!isAppLifecycleActive(lifecycle, generation)) return
+    if (command === 'preferences') {
+      navigate('settings')
+      return
+    }
+    navigate('workbench')
+    const frameId = scheduleAnimationFrame(() => {
+      pendingAnimationFrames.delete(frameId)
+      if (!isAppLifecycleActive(lifecycle, generation)) return
+      dispatchCommand(command)
+    })
+    pendingAnimationFrames.add(frameId)
+  })
+  return () => {
+    pendingAnimationFrames.forEach((frameId) => cancelAnimationFrame(frameId))
+    pendingAnimationFrames.clear()
+    unsubscribe()
+  }
+}
 
 export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null): WorkbenchFile[] {
   if (!snapshot) return [...files]
@@ -132,8 +197,17 @@ export default function App() {
   const evaluationSnapshotRef = useRef<EvaluationProjectSnapshot | null>(null)
   const evaluationQueue = useRef<Promise<void>>(Promise.resolve())
   const shownStorageNotice = useRef('')
+  const lifecycleRef = useRef<AppLifecycle>({ mounted: false, generation: 0 })
+  const filesRef = useRef(files)
+  filesRef.current = files
 
-  const notify = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'success') => {
+  useEffect(() => {
+    return setupAppLifecycle(lifecycleRef.current)
+  }, [])
+
+  const notify = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'success', generation?: number) => {
+    const lifecycle = lifecycleRef.current
+    if (!isAppLifecycleActive(lifecycle, generation)) return
     setToast({ message, tone })
   }, [])
 
@@ -144,13 +218,15 @@ export default function App() {
     window.history.replaceState(null, '', `${window.location.pathname}?${query.toString()}`)
   }, [])
 
-  const acceptEvaluationSnapshot = useCallback((snapshot: EvaluationProjectSnapshot) => {
+  const acceptEvaluationSnapshot = useCallback((snapshot: EvaluationProjectSnapshot, generation?: number) => {
+    const lifecycle = lifecycleRef.current
+    if (!isAppLifecycleActive(lifecycle, generation)) return
     evaluationSnapshotRef.current = snapshot
     setEvaluationSnapshot(snapshot)
     setFiles((current) => hydrateEvaluation(current, snapshot))
     if (snapshot.storageNotice && shownStorageNotice.current !== snapshot.storageNotice.backupFileName) {
       shownStorageNotice.current = snapshot.storageNotice.backupFileName
-      notify(`손상된 분석 저장소를 ${snapshot.storageNotice.backupFileName}으로 보존하고 복구했습니다.`, 'info')
+      notify(`손상된 분석 저장소를 ${snapshot.storageNotice.backupFileName}으로 보존하고 복구했습니다.`, 'info', generation)
     }
   }, [notify])
 
@@ -160,6 +236,7 @@ export default function App() {
   ): Promise<void> => {
     const api = window.sequenceIntelligence
     if (!api?.evaluations) return Promise.resolve()
+    const generation = lifecycleRef.current.generation
     const task = evaluationQueue.current.then(async () => {
       let snapshot = evaluationSnapshotRef.current ?? await api.evaluations.bootstrap({ projectId: PROJECT_ID })
       let result: { snapshot: EvaluationProjectSnapshot }
@@ -170,11 +247,11 @@ export default function App() {
         snapshot = await api.evaluations.getSnapshot({ projectId: PROJECT_ID })
         result = await operation(snapshot)
       }
-      acceptEvaluationSnapshot(result.snapshot)
+      acceptEvaluationSnapshot(result.snapshot, generation)
     })
     evaluationQueue.current = task.catch(() => undefined)
     return task.catch((error) => {
-      notify(error instanceof Error ? `${failureMessage}: ${error.message}` : failureMessage, 'error')
+      notify(error instanceof Error ? `${failureMessage}: ${error.message}` : failureMessage, 'error', generation)
       throw error
     })
   }, [acceptEvaluationSnapshot, notify])
@@ -183,15 +260,17 @@ export default function App() {
     const api = window.sequenceIntelligence
     if (!api) return undefined
     let active = true
+    const generation = lifecycleRef.current.generation
     void api.artifacts.list().then((artifacts) => {
-      if (!active) return
-      const logs = dedupeWorkbenchFiles(artifacts
-        .filter((artifact) => artifact.extension.replace(/^\./, '').toLowerCase() === 'log')
-        .flatMap(artifactFiles))
-      setFiles(hydrateEvaluation(logs, evaluationSnapshotRef.current))
-      setSelectedFileId((current) => current && logs.some((file) => file.id === current) ? current : logs[0]?.id ?? null)
+      if (!active || !isAppLifecycleActive(lifecycleRef.current, generation)) return
+      const next = reconcileListedFiles(filesRef.current, artifacts)
+      filesRef.current = next
+      setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+      setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
     }).catch((error) => {
-      if (active) notify(error instanceof Error ? error.message : '저장된 로그를 불러오지 못했습니다.', 'error')
+      if (active && isAppLifecycleActive(lifecycleRef.current, generation)) {
+        notify(error instanceof Error ? error.message : '저장된 로그를 불러오지 못했습니다.', 'error', generation)
+      }
     })
     return () => { active = false }
   }, [notify])
@@ -211,14 +290,7 @@ export default function App() {
   useEffect(() => {
     const api = window.sequenceIntelligence
     if (!api?.app.onCommand) return undefined
-    return api.app.onCommand((command) => {
-      if (command === 'preferences') {
-        navigate('settings')
-        return
-      }
-      navigate('workbench')
-      window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('sequence-control-tower:command', { detail: command })))
-    })
+    return setupAppCommandListener(lifecycleRef.current, api.app.onCommand, navigate)
   }, [navigate])
 
   useEffect(() => {
@@ -256,6 +328,7 @@ export default function App() {
   }, [evaluationSnapshot])
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
+    filesRef.current = next
     setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
     setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
   }, [])
@@ -298,15 +371,7 @@ export default function App() {
       return
     }
     await enqueueEvaluation(async (snapshot) => {
-      const persistedRuleSet = await window.sequenceIntelligence!.evaluations.saveRecipe({
-        projectId: PROJECT_ID,
-        expectedRevision: snapshot.revision,
-        recipeId: 'active-batch-ruleset',
-        name: 'Applied batch rule set',
-        rules: resolution.appliedRules as EvaluationRecipeRule[],
-      })
-      const durableSnapshot = persistedRuleSet.snapshot
-      const decisionBySource = new Map(durableSnapshot.decisions.map((decision) => [
+      const decisionBySource = new Map(snapshot.decisions.map((decision) => [
         `${decision.source.sourceId}\u0000${decision.source.artifactId}`,
         decision,
       ]))
@@ -336,12 +401,15 @@ export default function App() {
           ...(resolution.conflictIds.includes(file.id) && conflict ? { conflictingDecisionId: conflict.id } : {}),
         }]
       })
-      return window.sequenceIntelligence!.evaluations.saveBatch({
+      return window.sequenceIntelligence!.evaluations.saveRecipeAndBatch({
         projectId: PROJECT_ID,
-        expectedRevision: durableSnapshot.revision,
-        status: 'completed',
-        recipeRevisionIds: [persistedRuleSet.recipe.id],
-        outcomes,
+        expectedRevision: snapshot.revision,
+        recipe: {
+          recipeId: 'active-batch-ruleset',
+          name: 'Applied batch rule set',
+          rules: resolution.appliedRules as EvaluationRecipeRule[],
+        },
+        batch: { status: 'completed', outcomes },
       })
     }, '일괄 판정 결과를 저장하지 못했습니다')
   }, [enqueueEvaluation, files])
@@ -359,6 +427,7 @@ export default function App() {
       notify(`웹 미리보기에서 ${field} 후보를 승인했습니다.`, 'info')
       return
     }
+    const generation = lifecycleRef.current.generation
     try {
       await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadata({
         projectId: PROJECT_ID,
@@ -370,7 +439,7 @@ export default function App() {
         extractorId: `default-filename-${field}-v1`,
         approval: 'approved',
       }), '메타데이터 후보를 승인하지 못했습니다')
-      notify(`${record.fileName}의 ${field} 후보를 승인했습니다.`)
+      notify(`${record.fileName}의 ${field} 후보를 승인했습니다.`, 'success', generation)
     } catch {
       // enqueueEvaluation already surfaced the durable-store failure.
     }

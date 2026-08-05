@@ -1,14 +1,58 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { ArtifactRecord, ArtifactSearchResult, ArtifactSourceLocation } from '../../electron/shared/contracts'
 import type { PrecomputedDocumentEvidence, RecipeRule } from '../../src/domain/workbench'
 import {
+  addCurrentReplacement,
+  addReplaceAll,
+  applyLogDraftLine,
+  createLogDraft,
+  resetLogDraft,
+} from '../../src/state/logDraft'
+import {
   artifactFiles,
+  advanceBatchGeneration,
+  advanceFileRequestGeneration,
+  advanceSearchRequestGeneration,
+  buildPatternReviewComment,
+  canApplyAnalysisUpdate,
+  canApplyBatchResult,
+  canApplyImportContinuation,
+  canApplyLineWindowResult,
+  canApplyRevealRequest,
+  canApplySearchResult,
+  canStartImport,
+  canRevealActiveHit,
+  chooseNextTabId,
   clauseSpecKey,
   dedupeWorkbenchFiles,
+  groupWorkbenchFiles,
+  mergeWorkbenchFiles,
+  omitFileCacheEntry,
+  invalidateImportBatchGeneration,
   resolvePrecomputedBatch,
+  resolveCurrentReplacementText,
+  resolveSearchScopeFiles,
   successfulSearchCounts,
+  shouldCancelAnalysisJob,
   type WorkbenchFile,
 } from '../../src/views/WorkbenchView'
+
+const workbenchSource = readFileSync(new URL('../../src/views/WorkbenchView.tsx', import.meta.url), 'utf8')
+const workbenchCss = readFileSync(new URL('../../src/workbench.css', import.meta.url), 'utf8')
+const legacyStyles = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8')
+
+function sourceBetween(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker)
+  const end = source.indexOf(endMarker, start + startMarker.length)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  return source.slice(start, end)
+}
+
+function cssRule(source: string, selector: string): string {
+  return sourceBetween(source, `${selector} {`, '\n}')
+}
 
 function artifact(id: string, lastSeenAt: string, rootId?: string): ArtifactRecord {
   return {
@@ -58,6 +102,299 @@ function evidence(sourceId: string, rules: RecipeRule[], count = 1): Precomputed
 }
 
 describe('Log Workbench UI data hardening', () => {
+  it('keeps source text immutable while applying current and scoped replace-all lazily', () => {
+    const source = 'lane=1 timeout\nlane=1 timeout\nkeep'
+    const draft = createLogDraft([{ id: 'file-a', text: source }])
+    const current = addCurrentReplacement(draft, {
+      fileId: 'file-a',
+      line: 1,
+      expected: { start: 7, end: 14, text: 'timeout' },
+      replacement: 'retry',
+    })
+    expect(current.validation.ok).toBe(true)
+    expect(source).toBe('lane=1 timeout\nlane=1 timeout\nkeep')
+    expect(applyLogDraftLine(current.draft, 'file-a', 1, 'lane=1 timeout').text).toBe('lane=1 retry')
+    expect(applyLogDraftLine(current.draft, 'file-a', 2, 'lane=1 timeout').text).toBe('lane=1 timeout')
+
+    const all = addReplaceAll(current.draft, {
+      fileIds: ['file-a'],
+      pattern: 'lane=1',
+      replacement: 'lane=2',
+      mode: 'literal',
+    })
+    expect(all.validation.ok).toBe(true)
+    expect(applyLogDraftLine(all.draft, 'file-a', 1, 'lane=1 timeout').text).toBe('lane=2 retry')
+    expect(applyLogDraftLine(all.draft, 'file-a', 2, 'lane=1 timeout').text).toBe('lane=2 timeout')
+    expect(resetLogDraft(all.draft).operations).toEqual([])
+  })
+
+  it('reports draft validation and stale current matches without mutating an accepted draft', () => {
+    const draft = createLogDraft()
+    expect(addCurrentReplacement(draft, {
+      fileId: 'file-a',
+      line: 1,
+      expected: { start: 0, end: 3, text: 'old' },
+      replacement: 'new\nline',
+    }).validation).toMatchObject({ ok: false, code: 'NEWLINE_REPLACEMENT' })
+    expect(addReplaceAll(draft, {
+      fileIds: ['file-a'],
+      pattern: '(?=',
+      replacement: 'x',
+      mode: 'regex',
+    }).validation).toMatchObject({ ok: false, code: 'INVALID_REGEX' })
+    expect(addReplaceAll(draft, {
+      fileIds: ['file-a'],
+      pattern: '^',
+      replacement: 'x',
+      mode: 'regex',
+    }).validation).toMatchObject({ ok: false, code: 'ZERO_WIDTH_PATTERN' })
+
+    const accepted = addCurrentReplacement(draft, {
+      fileId: 'file-a',
+      line: 1,
+      expected: { start: 0, end: 3, text: 'old' },
+      replacement: 'new',
+    })
+    expect(accepted.validation.ok).toBe(true)
+    const applied = applyLogDraftLine(accepted.draft, 'file-a', 1, 'changed')
+    expect(applied.issues[0]?.validation.code).toBe('STALE_CURRENT_MATCH')
+    expect(accepted.draft.operations).toHaveLength(1)
+  })
+
+  it('rejects current replacement for a switched tab or a backend hit past the displayed line', () => {
+    const switchedTab = resolveCurrentReplacementText(
+      'file-a',
+      { fileId: 'file-b', line: 1, start: 0, end: 3 },
+      { lineNumber: 1, text: 'old', truncated: false },
+    )
+    expect(switchedTab).toEqual({ ok: false, message: '현재 탭과 검색 결과가 다릅니다.' })
+
+    const backendOccurrenceBeyondWindow = resolveCurrentReplacementText(
+      'artifact-row',
+      { fileId: 'artifact-row', line: 7, start: 20_004, end: 20_010 },
+      { lineNumber: 7, text: `${'x'.repeat(20_000)}…`, truncated: true },
+    )
+    expect(backendOccurrenceBeyondWindow).toEqual({ ok: false, message: '원문 줄이 잘려 현재 바꿀 수 없습니다.' })
+
+    expect(resolveCurrentReplacementText(
+      'file-a',
+      { fileId: 'file-a', line: 1, start: 0, end: 3 },
+      { lineNumber: 1, text: 'old', truncated: false },
+    )).toEqual({ ok: true, text: 'old' })
+  })
+
+  it('wires replace mode to source hits, scope resolution, lifecycle reset, and shortcuts', () => {
+    expect(workbenchSource).toContain("event.key.toLowerCase() === 'h'")
+    expect(workbenchSource).toContain("openSearch(searchOpen ? searchScope : 'file', true)")
+    expect(workbenchSource).toContain('expected: { start: activeHit.start, end: activeHit.end, text: expected.text }')
+    expect(workbenchSource).toContain('if (activeFile.id !== activeHit.fileId)')
+    expect(workbenchSource).toContain('resolveCurrentReplacementText(activeFile.id, activeHit, sourceLine)')
+    expect(workbenchSource).toContain('applyLogDraftLine(result.draft, activeHit.fileId, activeHit.line, sourceLine.text)')
+    expect(workbenchSource).toContain('moveToHit(1)')
+    expect(workbenchSource).toContain('resolveSearchScopeFiles(searchScope, files, activeFileId, openFileIds)')
+    expect(workbenchSource).toContain("mode: options.regex ? 'regex' : 'literal'")
+    expect(workbenchSource).toContain('setLogDraft(resetLogDraft(logDraft))')
+    expect(workbenchSource).toContain('Ctrl/Cmd+Enter')
+    expect(workbenchSource).toContain('Ctrl/Cmd+Alt+Enter')
+    expect(workbenchSource).toContain('수정 초안 · 결과/근거는 원본 기준')
+    expect(workbenchSource).toContain('disabled={draftActiveForFile}')
+    expect(workbenchSource).toContain('draftActiveForFile ? [] : activeHitsByLine.get(lineNumber) ?? []')
+  })
+
+  it('keeps line-window freshness independent per file while rejecting stale same-file results', () => {
+    const firstA = advanceFileRequestGeneration(new Map(), 'file-a')
+    const firstB = advanceFileRequestGeneration(firstA.generations, 'file-b')
+    const secondA = advanceFileRequestGeneration(firstB.generations, 'file-a')
+
+    expect(canApplyLineWindowResult(true, secondA.generations, 'file-a', firstA.generation)).toBe(false)
+    expect(canApplyLineWindowResult(true, secondA.generations, 'file-a', secondA.generation)).toBe(true)
+    expect(canApplyLineWindowResult(true, secondA.generations, 'file-b', firstB.generation)).toBe(true)
+  })
+
+  it('rejects line-window and reveal work after unmount', () => {
+    const generations = new Map([['file-a', 1]])
+    expect(canApplyLineWindowResult(false, generations, 'file-a', 1)).toBe(false)
+    expect(canApplyRevealRequest(false, 2, 2)).toBe(false)
+  })
+
+  it('rejects stale and unmounted renderer search completions', () => {
+    const first = advanceSearchRequestGeneration(0)
+    const second = advanceSearchRequestGeneration(first)
+
+    expect(canApplySearchResult(true, second, first)).toBe(false)
+    expect(canApplySearchResult(true, second, second)).toBe(true)
+    expect(canApplySearchResult(false, second, second)).toBe(false)
+  })
+
+  it('builds a bounded non-empty pattern-review comment from the user and search context', () => {
+    const comment = buildPatternReviewComment(
+      '  training timeout 반복인지 확인해 주세요. '.repeat(20),
+      'lane1 timeout',
+      [{
+        id: 'obs-1',
+        sourceId: 'file-a',
+        query: 'TRAINING_FAIL',
+        matcherKind: 'literal',
+        target: 'content',
+        caseSensitive: false,
+        matched: true,
+        matchCount: 3,
+        role: 'search_history',
+        excerpts: [],
+      }],
+    )
+
+    expect(comment.length).toBeLessThanOrEqual(480)
+    expect(comment).toContain('사용자 메모:')
+    expect(comment).toContain('현재 검색어: lane1 timeout')
+    expect(comment).toContain('검색 관찰:')
+    expect(buildPatternReviewComment('', '', [])).not.toBe('')
+  })
+
+  it('rejects stale, different-job, and unmounted AI review updates', () => {
+    expect(canApplyAnalysisUpdate(true, 2, 1, 'job-1', 'job-1')).toBe(false)
+    expect(canApplyAnalysisUpdate(true, 1, 1, 'job-1', 'job-2')).toBe(false)
+    expect(canApplyAnalysisUpdate(false, 1, 1, 'job-1', 'job-1')).toBe(false)
+    expect(canApplyAnalysisUpdate(true, 1, 1, 'job-1', 'job-1')).toBe(true)
+  })
+
+  it('only cancels queued or running analysis jobs and never terminal jobs', () => {
+    expect(shouldCancelAnalysisJob('queued', 'job-1')).toBe(true)
+    expect(shouldCancelAnalysisJob('running', 'job-1')).toBe(true)
+    expect(shouldCancelAnalysisJob('completed', 'job-1')).toBe(false)
+    expect(shouldCancelAnalysisJob('failed', 'job-1')).toBe(false)
+    expect(shouldCancelAnalysisJob('cancelled', 'job-1')).toBe(false)
+    expect(shouldCancelAnalysisJob('running', '')).toBe(false)
+  })
+
+  it('wires the review UI to the existing analysis lifecycle and keeps it review-only', () => {
+    expect(workbenchSource).toContain('api.analysis.start({')
+    expect(workbenchSource).toContain('api.analysis.get(started.id)')
+    expect(workbenchSource).toContain('api.analysis.cancel(jobId)')
+    expect(workbenchSource).toContain('api.analysis.onJobUpdate')
+    expect(workbenchSource).toContain('검토용 제안입니다. PASS/FAIL 판정이나 규칙을 자동 적용하지 않습니다.')
+    expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
+  })
+
+  it('resolves current, open-tab, and all-log scopes while excluding closed files', () => {
+    const files: WorkbenchFile[] = [
+      { id: 'current', name: 'current.log' },
+      { id: 'open', name: 'open.log' },
+      { id: 'closed', name: 'closed.log' },
+    ]
+
+    expect(resolveSearchScopeFiles('file', files, 'current', ['current', 'open'])).toEqual([files[0]])
+    expect(resolveSearchScopeFiles('open', files, 'current', ['open', 'current'])).toEqual([files[1], files[0]])
+    expect(resolveSearchScopeFiles('open', files, 'current', ['current', 'open'])).not.toContain(files[2])
+    expect(resolveSearchScopeFiles('workspace', files, 'current', ['current', 'open'])).toEqual(files)
+  })
+
+  it('rejects obsolete batch generations after overlap, navigation, or unmount', () => {
+    const first = advanceBatchGeneration(0)
+    const second = advanceBatchGeneration(first)
+
+    expect(canApplyBatchResult(true, second, first)).toBe(false)
+    expect(canApplyBatchResult(true, second, second)).toBe(true)
+    expect(canApplyBatchResult(false, second, second)).toBe(false)
+  })
+
+  it('invalidates batch work as soon as a folder import starts', () => {
+    const first = advanceBatchGeneration(4)
+    expect(invalidateImportBatchGeneration(first)).toBe(first + 1)
+  })
+
+  it('chooses the next tab deterministically when closing the active tab', () => {
+    expect(chooseNextTabId(['a', 'b', 'c'], 'b', 'b')).toBe('c')
+    expect(chooseNextTabId(['a', 'b', 'c'], 'c', 'c')).toBe('b')
+    expect(chooseNextTabId(['a', 'b', 'c'], 'a', 'b')).toBe('b')
+    expect(chooseNextTabId(['a'], 'a', 'a')).toBe('')
+  })
+
+  it('claims an import slot immediately and rejects continuations after unmount', () => {
+    expect(canStartImport(false)).toBe(true)
+    expect(canStartImport(true)).toBe(false)
+    expect(canApplyImportContinuation(true)).toBe(true)
+    expect(canApplyImportContinuation(false)).toBe(false)
+  })
+
+  it('does not allow an older active-hit reveal after the active hit changes', () => {
+    expect(canApplyRevealRequest(true, 2, 1, 'file-a:10', 'file-b:20')).toBe(false)
+    expect(canApplyRevealRequest(true, 2, 2, 'file-b:20', 'file-b:20')).toBe(true)
+  })
+
+  it('does not let a stale workspace hit reselect a switched or closed tab', () => {
+    expect(canRevealActiveHit(true, 'file-b', 'file-a', 'hit-a', 'hit-a')).toBe(false)
+    expect(canRevealActiveHit(true, 'file-a', 'file-a', 'hit-a', '')).toBe(false)
+    expect(canRevealActiveHit(true, undefined, 'file-a', 'hit-a', 'hit-a')).toBe(false)
+    expect(canRevealActiveHit(true, 'file-a', 'file-a', 'hit-a', 'hit-a')).toBe(true)
+    expect(canRevealActiveHit(false, 'file-a', 'file-a', 'hit-a', 'hit-a')).toBe(false)
+  })
+
+  it('preserves exact log whitespace and search-mark helper behavior', () => {
+    const searchPattern = sourceBetween(workbenchSource, 'function createSearchPattern(', 'function collectHits(')
+    expect(searchPattern).toContain('if (!query) return null')
+    expect(searchPattern).toContain('const source = options.regex ? query : escapeRegExp(query)')
+    expect(searchPattern).toContain('if (options.regex && isUnsafeRegex(source)) return null')
+    expect(searchPattern).toContain('const bounded = options.wholeWord ? wholeTokenPattern(source) : source')
+    expect(searchPattern).toContain("`${global ? 'g' : ''}${options.caseSensitive ? '' : 'i'}u`")
+    expect(workbenchSource).toContain('wholeTokenPattern(source)')
+    expect(workbenchSource).toContain('isUnsafeRegex(source)')
+    expect(workbenchSource).toContain('disabled={!query || !searchFiles.length || invalidPattern || searching || Boolean(searchError)}')
+    expect(workbenchSource).toContain("setSideMode('files')")
+    expect(workbenchSource).toContain("setSearchOpen(false); setReplaceMode(false); setSideMode('files')")
+
+    const highlightedLine = sourceBetween(workbenchSource, 'function renderHighlightedLine(', 'function searchHitKey(')
+    expect(highlightedLine).toContain("if (!hits.length) return line || ' '")
+    expect(highlightedLine).toContain('nodes.push(line.slice(cursor, hit.start))')
+    expect(highlightedLine).toContain("<mark className={active ? 'is-current' : ''}")
+    expect(highlightedLine).toContain('{line.slice(hit.start, hit.end)}')
+    expect(highlightedLine).toContain('cursor = hit.end')
+    expect(workbenchSource).toContain("(activeFile.text ?? '').split(/\\r?\\n/).map((text, index) => ({ lineNumber: index + 1, text, truncated: false }))")
+  })
+
+  it('keeps artifact windows bounded and reveal scrolling tied to rendered line data', () => {
+    const lineWindow = sourceBetween(workbenchSource, 'const loadLineWindow = useCallback(', 'const scheduleAnimationFrame = useCallback(')
+    expect(lineWindow).toContain('startLine: Math.max(1, targetLine - 80)')
+    expect(lineWindow).toContain('lineCount: 240')
+
+    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 160)')
+    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 240)')
+    expect(workbenchSource).toContain('(activeWindow.lines.at(-1)?.lineNumber ?? 1) + 81')
+    expect(workbenchSource).toContain('querySelector(`[data-line="${lineNumber}"]`)?.scrollIntoView({ block: \'center\' })')
+  })
+
+  it('keeps the continuous editor structure and avoids legacy per-line sizing', () => {
+    const workbenchRootRule = cssRule(workbenchCss, '.log-workbench')
+    const legacyLineRule = cssRule(legacyStyles, '.log-line')
+    const editorRule = cssRule(workbenchCss, '.log-editor')
+    const lineRule = cssRule(workbenchCss, '.log-workbench .log-line')
+    const codeRule = cssRule(workbenchCss, '.log-workbench .log-line code')
+    const lineNumberRule = cssRule(workbenchCss, '.log-workbench .line-number')
+
+    expect(workbenchRootRule).toContain('--wb-log-type: 13.25px;')
+    expect(workbenchRootRule).toContain('--wb-log-line-height: 22px;')
+    expect(workbenchRootRule).toContain('--wb-log-row-height: 28px;')
+    expect(workbenchRootRule).toContain('--wb-log-marker-gutter: 32px;')
+    expect(workbenchRootRule).toContain('--wb-log-number-gutter: 60px;')
+    expect(legacyLineRule).toMatch(/border-bottom:\s*(?!0(?:px)?\b)[^;]+;/)
+    expect(workbenchCss).not.toMatch(/--wb-log-(?:row-height|line-height):\s*40px/)
+    expect(lineRule).not.toMatch(/(?:height|min-height|line-height):\s*40px/)
+    expect(lineRule).toContain('border-bottom: 0')
+    expect(lineRule).toContain('border-radius: 0')
+    expect(editorRule).toContain('overflow: auto')
+    expect(editorRule).toContain('padding: 0 0 84px')
+    expect(codeRule).toContain('white-space: pre')
+    expect(lineNumberRule).toContain('user-select: none')
+    expect(workbenchSource).toContain('data-line={lineNumber}')
+    expect(workbenchSource).toContain('<code>{renderHighlightedLine(')
+    expect(workbenchSource).toContain('<mark className={active ? \'is-current\' : \'\'}')
+  })
+
+  it('removes closed-tab line-window and evidence cache entries without touching other files', () => {
+    expect(omitFileCacheEntry({ 'file-a': 'window-a', 'file-b': 'window-b' }, 'file-a')).toEqual({ 'file-b': 'window-b' })
+    expect(omitFileCacheEntry({ 'file-a': [10], 'file-b': [20] }, 'file-a')).toEqual({ 'file-b': [20] })
+  })
+
   it('deduplicates a stable root source to its newest SHA without inheriting the old source id', () => {
     const oldSha = 'a'.repeat(64)
     const newSha = 'b'.repeat(64)
@@ -77,6 +414,84 @@ describe('Log Workbench UI data hardening', () => {
 
     expect(first.sourceKey).not.toBe(second.sourceKey)
     expect(dedupeWorkbenchFiles([first, second])).toHaveLength(2)
+  })
+
+  it('merges a completed import with the latest files and keeps the newest stable source', () => {
+    const current: WorkbenchFile = {
+      id: 'old-row',
+      sourceKey: 'root:root-a\u001flog.log',
+      rootId: 'root-a',
+      artifactId: 'old-artifact',
+      name: 'log.log',
+      lastSeenAt: '2026-02-01T00:00:00.000Z',
+    }
+    const imported: WorkbenchFile = {
+      id: 'new-row',
+      sourceKey: 'root:root-a\u001flog.log',
+      rootId: 'root-a',
+      artifactId: 'new-artifact',
+      name: 'log.log',
+      lastSeenAt: '2026-03-01T00:00:00.000Z',
+    }
+    const latest = { id: 'latest-row', name: 'latest.log' }
+
+    expect(mergeWorkbenchFiles([current, latest], [imported])).toEqual([imported, latest])
+  })
+
+  it('groups same-label roots separately and numbers duplicate labels', () => {
+    const first = artifactFiles(artifact('e'.repeat(64), '2026-01-01T00:00:00.000Z', 'root-one'))[0]
+    const second = { ...artifactFiles(artifact('f'.repeat(64), '2026-01-01T00:00:00.000Z', 'root-two'))[0], origin: 'logs' }
+    first.origin = 'logs'
+
+    expect(groupWorkbenchFiles([first, second])).toEqual([
+      expect.objectContaining({ key: 'root:root-one', label: 'logs · 1', files: [first] }),
+      expect.objectContaining({ key: 'root:root-two', label: 'logs · 2', files: [second] }),
+    ])
+  })
+
+  it('keeps duplicate-label ordinals mapped to stable roots when input order changes', () => {
+    const first = { id: 'root-one-file', name: 'one.log', origin: 'logs', rootId: 'root-one' }
+    const second = { id: 'root-two-file', name: 'two.log', origin: 'logs', rootId: 'root-two' }
+
+    const labels = (rows: WorkbenchFile[]) => Object.fromEntries(
+      groupWorkbenchFiles(rows).map((group) => [group.key, group.label]),
+    )
+
+    expect(labels([first, second])).toEqual({ 'root:root-one': 'logs · 1', 'root:root-two': 'logs · 2' })
+    expect(labels([second, first])).toEqual({ 'root:root-two': 'logs · 2', 'root:root-one': 'logs · 1' })
+  })
+
+  it('keeps same-label legacy roots separate while grouping files from each root', () => {
+    const firstRootFile = {
+      id: 'legacy-one-a',
+      name: 'first.log',
+      origin: 'logs',
+      relativePath: 'first/first.log',
+      sourceKey: 'legacy:source-one\u001ffirst/first.log',
+    }
+    const firstRootOtherFile = {
+      id: 'legacy-one-b',
+      name: 'second.log',
+      origin: 'logs',
+      relativePath: 'first/second.log',
+      sourceKey: 'legacy:source-one\u001ffirst/second.log',
+    }
+    const secondRootFile = {
+      id: 'legacy-two-a',
+      name: 'first.log',
+      origin: 'logs',
+      relativePath: 'second/first.log',
+      sourceKey: 'legacy:source-two\u001fsecond/first.log',
+    }
+
+    const groups = groupWorkbenchFiles([firstRootFile, firstRootOtherFile, secondRootFile])
+
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.label)).toEqual(['logs · 1', 'logs · 2'])
+    expect(groups[0].files).toEqual([firstRootFile, firstRootOtherFile])
+    expect(groups[1].files).toEqual([secondRootFile])
+    expect(groups[0].key).not.toContain('source-one')
+    expect(groups[1].key).not.toContain('source-two')
   })
 
   it('does not turn missing or failed backend results into zero-count evidence', () => {

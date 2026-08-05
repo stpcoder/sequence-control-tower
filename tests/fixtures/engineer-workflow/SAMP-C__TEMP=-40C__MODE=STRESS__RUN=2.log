@@ -1,0 +1,25 @@
+# SYNTHETIC_METADATA
+SAMPLE=SAMP-C;
+TEMP=-40C;
+MODE=STRESS;
+RUN=2;
+COMPARISON_KEY=SAMP-C|-40C|STRESS;
+EXPECTED_RESULT=DIAG_FAIL;
+PAIR_TRANSITION=STABLE_FAILURE;
+TARGET_TEMPERATURE=-40C;
+MEASURED_TEMPERATURE=-40.0C;
+VDD=0.75V;
+REQUESTED_TEST_MODE=STRESS;
+OBSERVED_TEST_MODE=STRESS;
+INFO pmic_sequence=nominal;
+DEBUG refclk_lock=1;
+POWER_ON state=asserted;
+UEFI entry firmware=SYN-UEFI-01;
+ExitBootServices status=success;
+OS boot start loader=SYN-OS-01;
+stressapp start profile=synthetic-memory;
+stressapp heartbeat=stable;
+stressapp completed result=PASS;
+HIDAG START mode=STRESS;
+FAILURE_POINT=HIDAG_DIAGNOSTIC;
+DIAG_FAIL code=SYN-DIAG-07;

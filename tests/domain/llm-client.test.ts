@@ -1,5 +1,8 @@
+import { mkdtemp, rm } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
@@ -14,6 +17,7 @@ vi.mock('electron', () => ({
 import {
   type EffectiveLlmConfig,
   LlmConfigService,
+  MIN_LLM_TOKENS_PER_MINUTE,
   OpenAiCompatibleClient
 } from '../../electron/main/llm-service'
 
@@ -25,6 +29,7 @@ interface RequestRecord {
 }
 
 const servers: Server[] = []
+const roots: string[] = []
 
 function effective(overrides: Partial<EffectiveLlmConfig> = {}): EffectiveLlmConfig {
   return {
@@ -82,7 +87,9 @@ function completion(response: ServerResponse, content = '{"summary":"ok"}'): voi
 afterEach(async () => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.()
     await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -198,10 +205,25 @@ describe('OpenAI-compatible chat client', () => {
   it('fails locally when one request cannot fit the configured TPM budget', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const request = client(effective({ baseUrl: 'http://vllm.invalid/v1', tokensPerMinute: 1_000 }))
+    const request = client(effective({ baseUrl: 'http://vllm.invalid/v1', tokensPerMinute: MIN_LLM_TOKENS_PER_MINUTE - 1 }))
 
     await expect(request.complete('x', undefined, vi.fn())).rejects.toThrow('LLM_TPM_REQUEST_TOO_LARGE')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('normalizes saved TPM settings to the safe minimum', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'llm-client-config-'))
+    roots.push(root)
+    const config = new LlmConfigService(root)
+    await config.initialize()
+    await config.save({
+      baseUrl: 'http://127.0.0.1:1/v1',
+      model: 'qwen-internal',
+      tokensPerMinute: 1
+    })
+
+    expect((await config.effective()).tokensPerMinute).toBe(MIN_LLM_TOKENS_PER_MINUTE)
+    expect((await config.summary()).limits.tokensPerMinute).toBe(MIN_LLM_TOKENS_PER_MINUTE)
   })
 
   it('queues subsequent calls until the RPM window has capacity', async () => {

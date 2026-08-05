@@ -1,3 +1,5 @@
+import { once } from 'node:events'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,9 +22,15 @@ import type {
 } from '../../electron/shared/contracts'
 import { AnalysisService } from '../../electron/main/analysis-service'
 import { ArtifactService } from '../../electron/main/artifact-service'
-import { LlmConfigService, OpenAiCompatibleClient } from '../../electron/main/llm-service'
+import {
+  LLM_COMPLETION_TOKEN_BUDGET,
+  LlmConfigService,
+  OpenAiCompatibleClient
+} from '../../electron/main/llm-service'
+import { MAX_LLM_PROMPT_CHARS } from '../../electron/main/llm-evidence'
 
 const roots: string[] = []
+const servers: Server[] = []
 const artifactId = 'a'.repeat(64)
 const rawSequenceSecret = 'RAW_LOG_BODY_MUST_NEVER_REACH_LLM'
 
@@ -54,6 +62,45 @@ const artifact: ArtifactRecord = {
   lastSeenAt: '2026-01-01T00:00:00.000Z',
   importCount: 1,
   fingerprint
+}
+
+interface TransportRecord {
+  method?: string
+  url?: string
+  authorization?: string
+  body: string
+}
+
+async function readBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of request) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function localLlmMock(): Promise<{ baseUrl: string; records: TransportRecord[] }> {
+  const records: TransportRecord[] = []
+  const server = createServer(async (request, response) => {
+    records.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+      body: await readBody(request)
+    })
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      choices: [{
+        message: {
+          content: '{"summary":"transport boundary verified","inferences":[],"questions":[],"suggestedTags":[]}'
+        }
+      }]
+    }))
+  })
+  servers.push(server)
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('local LLM mock address unavailable')
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, records }
 }
 
 function summary(configured: boolean): LlmConfigSummary {
@@ -106,7 +153,12 @@ async function finish(analysis: AnalysisService, jobId: string): Promise<Analysi
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  await Promise.all(servers.splice(0).map(async (server) => {
+    server.closeAllConnections?.()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }))
 })
 
 describe('analysis LLM call policy', () => {
@@ -174,5 +226,71 @@ describe('analysis LLM call policy', () => {
     expect(prompt).not.toContain('secret-token')
     expect(prompt).not.toContain('local-only-hash')
     expect(prompt).toContain('rawSequenceIncluded')
+    expect(prompt.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS)
+  })
+
+  it('bounds and redacts the actual chat body at the AnalysisService transport boundary', async () => {
+    const mock = await localLlmMock()
+    const root = await mkdtemp(join(tmpdir(), 'analysis-llm-transport-'))
+    roots.push(root)
+    const artifacts = {
+      require: vi.fn(async () => artifact),
+      readText: vi.fn(async () => ({
+        artifactId,
+        text: `temperature=105\n${rawSequenceSecret}\n@PASS`,
+        truncated: false,
+        totalBytes: 100,
+        encoding: 'utf-8' as const
+      })),
+      findSimilar: vi.fn(async () => [])
+    } as unknown as ArtifactService
+    const llmConfig = new LlmConfigService(root)
+    await llmConfig.initialize()
+    await llmConfig.save({
+      baseUrl: mock.baseUrl,
+      model: 'qwen-internal',
+      apiKey: 'transport-api-key',
+      requestsPerMinute: 8,
+      tokensPerMinute: 80_000,
+      timeoutSeconds: 5,
+      maxRetries: 0
+    })
+    const analysis = new AnalysisService(
+      root,
+      artifacts,
+      llmConfig,
+      new OpenAiCompatibleClient(llmConfig),
+      vi.fn()
+    )
+    await analysis.initialize()
+
+    const finished = await finish(analysis, analysis.start({
+      artifactId,
+      userComment: `${'context '.repeat(2_000)} Authorization: Bearer prompt-secret /Users/customer/private/run.log`,
+      projectContext: 'C:\\Customer Secret\\Project Q\\sequence.seq'
+    }).id)
+
+    expect(finished.result?.source).toBe('llm')
+    expect(mock.records).toHaveLength(1)
+    expect(mock.records[0]).toEqual(expect.objectContaining({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      authorization: 'Bearer transport-api-key'
+    }))
+
+    const body = JSON.parse(mock.records[0].body) as {
+      messages: Array<{ role: string; content: string }>
+      max_tokens: number
+    }
+    const userMessage = body.messages.find((message) => message.role === 'user')
+    expect(userMessage).toBeDefined()
+    expect(userMessage?.content.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS)
+    expect(mock.records[0].body.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS + 2_000)
+    expect(body.max_tokens).toBe(LLM_COMPLETION_TOKEN_BUDGET)
+    expect(mock.records[0].body).not.toContain(rawSequenceSecret)
+    expect(mock.records[0].body).not.toContain('prompt-secret')
+    expect(mock.records[0].body).not.toContain('transport-api-key')
+    expect(mock.records[0].body).not.toContain('Customer Secret')
+    expect(mock.records[0].body).not.toContain('/Users/customer/private')
   })
 })
