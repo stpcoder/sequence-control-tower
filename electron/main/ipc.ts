@@ -35,6 +35,7 @@ import { LlmConfigService } from './llm-service'
 import { isSameRendererDocument } from './renderer-document'
 import { WikiService } from './wiki-service'
 import { ProjectStore } from './project-store'
+import { AgentService } from './agent-service'
 import { createHash } from 'node:crypto'
 import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
 
@@ -45,6 +46,7 @@ interface Services {
   llmConfig: LlmConfigService
   wiki: WikiService
   projects: ProjectStore
+  agent: AgentService
 }
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -251,6 +253,13 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.analysisGet, (_event, id) => services.analysis.get(String(id ?? '')))
   handle(IPC_CHANNELS.analysisCancel, (_event, id) => services.analysis.cancel(String(id ?? '')))
 
+  handle(IPC_CHANNELS.agentStart, (_event, input) => services.agent.start(input as never))
+  handle(IPC_CHANNELS.agentGet, (_event, id) => services.agent.get(String(id ?? '')))
+  handle(IPC_CHANNELS.agentAnswer, (_event, input) => services.agent.answer(input as never))
+  handle(IPC_CHANNELS.agentMessage, (_event, input) => services.agent.message(input as never))
+  handle(IPC_CHANNELS.agentConfirm, (_event, input) => services.agent.confirm(input as never))
+  handle(IPC_CHANNELS.agentCancel, (_event, input) => services.agent.cancel(input as never))
+
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())
   handle(IPC_CHANNELS.settingsSaveLlm, (_event, input) =>
     services.llmConfig.save(input as LlmConfigInput)
@@ -284,7 +293,7 @@ export function unregisterIpc(): void {
   activeArtifactEvidenceInspections.forEach((controller) => controller.abort())
   activeArtifactEvidenceInspections.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
-    if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.appCommand) {
+    if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.agentUpdate && channel !== IPC_CHANNELS.appCommand) {
       ipcMain.removeHandler(channel)
     }
   })

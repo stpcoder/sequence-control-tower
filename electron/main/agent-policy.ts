@@ -1,5 +1,6 @@
 import type {
   AgentAnswerValue,
+  AgentActionName,
   AgentToolName,
   Candidate,
   ConversationMessage,
@@ -11,6 +12,7 @@ export const AGENT_LIMITS = Object.freeze({
   maxLlmCompletions: 3,
   maxTools: 8,
   maxSearches: 5,
+  maxInspectSpecs: 8,
   maxLineWindows: 3,
   maxLinesPerWindow: 20,
   maxCharsPerLine: 800,
@@ -22,6 +24,7 @@ export const AGENT_LIMITS = Object.freeze({
 })
 
 export const AGENT_TOOL_ALLOWLIST: readonly AgentToolName[] = ['search', 'lineWindow', 'inspect']
+export const AGENT_ACTION_ALLOWLIST: readonly AgentActionName[] = ['ask', 'search', 'lineWindow', 'inspect', 'candidate', 'summary', 'stop']
 export type AgentPolicyFailure = 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action'
 
 export interface AgentBudget {
@@ -101,6 +104,26 @@ export function authorizeToolAction(action: unknown, depth = 0): PolicyResult<To
     }
   }
   return { ok: true, value: action as ToolAction }
+}
+
+/** Validates the complete model envelope before the service dispatches it. */
+export function authorizeAgentAction(action: unknown, depth = 0): PolicyResult<Record<string, unknown>> {
+  if (!action || typeof action !== 'object') return { ok: false, failure: 'invalid-action' }
+  const value = action as Record<string, unknown>
+  const name = typeof value.action === 'string' ? value.action : value.tool
+  if (typeof name !== 'string' || !AGENT_ACTION_ALLOWLIST.includes(name as AgentActionName)) return { ok: false, failure: 'unknown-tool' }
+  if (name === 'search' || name === 'lineWindow' || name === 'inspect') return authorizeToolAction({ tool: name, input: value.input }, depth) as PolicyResult<Record<string, unknown>>
+  if (name === 'summary' || name === 'stop') return { ok: true, value }
+  const payload = value[name === 'ask' ? 'question' : 'candidate'] ?? value.input
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false, failure: 'invalid-action' }
+  if (name === 'ask') {
+    const question = payload as Record<string, unknown>
+    if (typeof question.id !== 'string' || typeof question.prompt !== 'string' || question.prompt.length > 800) return { ok: false, failure: 'invalid-action' }
+  } else {
+    const candidate = payload as Record<string, unknown>
+    if (!['metadata', 'result', 'question', 'action'].includes(String(candidate.kind)) || !['candidate', 'approved', 'unknown'].includes(String(candidate.status)) || !Array.isArray(candidate.observationIds) || candidate.observationIds.length > AGENT_LIMITS.maxTools) return { ok: false, failure: 'invalid-action' }
+  }
+  return { ok: true, value }
 }
 
 export function boundLine(line: string): string {

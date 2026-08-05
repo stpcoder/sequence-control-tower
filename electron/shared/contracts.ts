@@ -613,10 +613,12 @@ export interface AppStatus {
 /** v0.7 agent core contracts. These are deliberately reference-only: raw log
  * payloads and unbounded arrays must not cross the agent boundary. */
 export type AgentStageName = 'plan' | 'search' | 'inspect' | 'synthesize' | 'complete' | 'failed'
-export type AgentRunStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type AgentRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type AgentState = 'INIT_QA' | 'METADATA_HYPOTHESIS' | 'PLAN' | 'TOOL_LOOP' | 'CANDIDATE_RESULT' | 'HUMAN_CONFIRM' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 export type AgentQuestionKind = 'clarification' | 'approval'
 export type AgentAnswerValue = string | number | boolean | string[]
 export type AgentToolName = 'search' | 'lineWindow' | 'inspect'
+export type AgentActionName = 'ask' | AgentToolName | 'candidate' | 'summary' | 'stop'
 
 export interface AgentRun {
   id: string
@@ -630,7 +632,30 @@ export interface AgentRun {
   startedAt: string
   updatedAt: string
   failureCode?: 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action'
+  state?: AgentState
+  projectId?: string
+  generation?: number
+  needsReview?: boolean
+  failureReason?: string
+  candidate?: Candidate
+  question?: Question
+  queueMessage?: string
 }
+
+export interface AgentStartInput { projectId: string; artifactIds?: string[] }
+export interface AgentAnswerInput { runId: string; questionId?: string; value: AgentAnswerValue }
+export interface AgentMessageInput { runId: string; content: string }
+export type AgentConfirmKind = 'decision' | 'metadata' | 'recipe'
+export interface AgentConfirmInput {
+  runId: string
+  kind: AgentConfirmKind
+  expectedRevision: number
+  decision?: EvaluationSaveDecisionInput
+  metadata?: EvaluationApproveMetadataInput
+  recipe?: EvaluationSaveRecipeInput
+}
+export interface AgentCancelInput { runId: string }
+export interface AgentConfirmResult { run: AgentRun; saved?: EvaluationDecisionSaveResult | EvaluationMetadataSaveResult | EvaluationRecipeSaveResult }
 
 export interface Stage {
   name: AgentStageName
@@ -785,6 +810,15 @@ export interface SequenceIntelligenceApi {
     cancel(jobId: string): Promise<boolean>
     onJobUpdate(listener: (job: AnalysisJobSnapshot) => void): () => void
   }
+  agent: {
+    start(input: AgentStartInput): Promise<AgentRun>
+    get(runId: string): Promise<AgentRun | null>
+    answer(input: AgentAnswerInput): Promise<AgentRun>
+    message(input: AgentMessageInput): Promise<AgentRun>
+    confirm(input: AgentConfirmInput): Promise<AgentConfirmResult>
+    cancel(input: AgentCancelInput): Promise<AgentRun>
+    onRunUpdate(listener: (run: AgentRun) => void): () => void
+  }
   settings: {
     getLlm(): Promise<LlmConfigSummary>
     saveLlm(input: LlmConfigInput): Promise<LlmConfigSummary>
@@ -823,6 +857,8 @@ export const IPC_CHANNELS = {
   analysisGet: 'analysis:get',
   analysisCancel: 'analysis:cancel',
   analysisUpdate: 'analysis:update',
+  agentStart: 'agent:start', agentGet: 'agent:get', agentAnswer: 'agent:answer', agentMessage: 'agent:message',
+  agentConfirm: 'agent:confirm', agentCancel: 'agent:cancel', agentUpdate: 'agent:update',
   settingsGetLlm: 'settings:get-llm',
   settingsSaveLlm: 'settings:save-llm',
   settingsDiscoverModels: 'settings:discover-models',

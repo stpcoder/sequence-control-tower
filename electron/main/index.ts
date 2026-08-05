@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
+import { AgentService } from './agent-service'
 import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from './app-menu'
 import { ArtifactService } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
@@ -117,6 +118,12 @@ async function bootstrap(): Promise<void> {
       if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.analysisUpdate, job)
     })
   })
+  const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
+  agent.onUpdate((run) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.agentUpdate, run)
+    })
+  })
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
@@ -125,7 +132,7 @@ async function bootstrap(): Promise<void> {
     wiki.initialize(),
     analysis.initialize()
   ])
-  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects })
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)

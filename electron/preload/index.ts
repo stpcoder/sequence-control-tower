@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AnalysisJobSnapshot,
+  AgentAnswerInput,
+  AgentConfirmInput,
+  AgentMessageInput,
+  AgentRun,
+  AgentStartInput,
+  AgentConfirmResult,
   ArtifactEvidenceInput,
   ArtifactImportOptions,
   ArtifactLineWindowInput,
@@ -57,6 +63,19 @@ const api: SequenceIntelligenceApi = {
       const handler = (_event: Electron.IpcRendererEvent, job: AnalysisJobSnapshot): void => listener(job)
       ipcRenderer.on(IPC_CHANNELS.analysisUpdate, handler)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.analysisUpdate, handler)
+    }
+  },
+  agent: {
+    start: (input: AgentStartInput) => ipcRenderer.invoke(IPC_CHANNELS.agentStart, input),
+    get: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.agentGet, runId),
+    answer: (input: AgentAnswerInput) => ipcRenderer.invoke(IPC_CHANNELS.agentAnswer, input),
+    message: (input: AgentMessageInput) => ipcRenderer.invoke(IPC_CHANNELS.agentMessage, input),
+    confirm: (input: AgentConfirmInput) => ipcRenderer.invoke(IPC_CHANNELS.agentConfirm, input),
+    cancel: (input: { runId: string }) => ipcRenderer.invoke(IPC_CHANNELS.agentCancel, input),
+    onRunUpdate: (listener: (run: AgentRun) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, run: AgentRun): void => listener(run)
+      ipcRenderer.on(IPC_CHANNELS.agentUpdate, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.agentUpdate, handler)
     }
   },
   settings: {
