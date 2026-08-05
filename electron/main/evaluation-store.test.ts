@@ -100,6 +100,48 @@ describe('EvaluationStore', () => {
     })).rejects.toThrow('occurrence count')
   })
 
+  it('allows path-like matcher patterns while retaining path protection on stored fields', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    const pathPatterns = [
+      '/var/log/lot-01/sample.log',
+      'C:\\validation\\lot-01\\sample.log',
+      '^\\\\server\\share\\sample.log'
+    ]
+
+    for (const [index, pattern] of pathPatterns.entries()) {
+      await expect(store.saveRecipe({
+        projectId: PROJECT,
+        expectedRevision: index,
+        name: `Path matcher ${index}`,
+        rules: [{
+          ...rule(`path-rule-${index}`),
+          clauses: [{ ...rule().clauses[0], matcher: { kind: 'regex', pattern, caseSensitive: false, target: 'path' } }]
+        }]
+      })).resolves.toMatchObject({ recipe: { rules: [{ clauses: [{ matcher: { pattern } }] }] } })
+    }
+
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: pathPatterns.length,
+      name: 'Path matcher with protected project id',
+      rules: [rule('protected-name')]
+    })).resolves.toBeDefined()
+
+    await expect(store.saveRecipe({
+      projectId: '/Users/engineer/project',
+      expectedRevision: pathPatterns.length + 1,
+      name: 'Protected project path',
+      rules: [rule('protected-project')]
+    })).rejects.toThrow('절대 경로')
+
+    await expect(store.saveDecision({
+      projectId: PROJECT,
+      expectedRevision: pathPatterns.length,
+      source: { ...source(), sourceKey: 'C:\\validation\\lot-01\\sample.log' },
+      result: 'PASS'
+    })).rejects.toThrow('절대 경로')
+  })
+
   it('uses optimistic project revisions to prevent stale renderer writes', async () => {
     const store = new EvaluationStore(await tempRoot())
     await store.saveDecision({ projectId: PROJECT, expectedRevision: 0, source: source(), result: 'PASS' })
@@ -448,7 +490,7 @@ describe('EvaluationStore', () => {
         ...rule(),
         clauses: [{ ...rule().clauses[0], matcher: { ...rule().clauses[0].matcher, pattern: 'C:\\Customer\\secret.log' } }]
       }]
-    })).rejects.toThrow('절대 경로')
+    })).resolves.toBeDefined()
 
     await expect(store.saveDecision({
       projectId: PROJECT,
@@ -457,7 +499,7 @@ describe('EvaluationStore', () => {
       result: 'PASS',
       token: 'Bearer abcdefghijklmnopqrstuvwxyz'
     } as EvaluationSaveDecisionInput)).rejects.toThrow('저장할 수 없는 필드')
-    expect((await store.snapshot(PROJECT)).revision).toBe(0)
+    expect((await store.snapshot(PROJECT)).revision).toBe(1)
   })
 
   it.each([

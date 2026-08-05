@@ -115,20 +115,30 @@ function isAbsolutePath(value: string): boolean {
   return /^[a-zA-Z]:(?:[\\/]|\\{2,})/.test(probe) || /^\\{2,}[^\\]+\\/.test(probe) || slashNormalized.startsWith('/')
 }
 
-function rejectSensitivePayload(value: unknown, key = ''): void {
+interface SensitivePayloadOptions {
+  allowAbsolutePath?: boolean
+}
+
+function rejectSensitivePayload(value: unknown, key = '', options: SensitivePayloadOptions = {}): void {
   const normalizedKey = key.replace(/[^a-z]/gi, '').toLocaleLowerCase()
   if (FORBIDDEN_KEYS.has(normalizedKey)) throw new Error(`저장할 수 없는 필드입니다: ${key}`)
   if (typeof value === 'string') {
     if (resemblesSecret(value)) throw new Error('비밀정보가 포함된 값은 저장할 수 없습니다.')
-    if (isAbsolutePath(value)) throw new Error('절대 경로는 저장할 수 없습니다.')
+    if (!options.allowAbsolutePath && isAbsolutePath(value)) throw new Error('절대 경로는 저장할 수 없습니다.')
     return
   }
   if (Array.isArray(value)) {
-    value.forEach((item) => rejectSensitivePayload(item, key))
+    value.forEach((item) => rejectSensitivePayload(item, key, options))
     return
   }
   if (isRecord(value)) {
-    Object.entries(value).forEach(([childKey, child]) => rejectSensitivePayload(child, childKey))
+    Object.entries(value).forEach(([childKey, child]) => rejectSensitivePayload(
+      child,
+      childKey,
+      normalizedKey === 'matcher' && childKey.replace(/[^a-z]/gi, '').toLocaleLowerCase() === 'pattern'
+        ? { ...options, allowAbsolutePath: true }
+        : options
+    ))
   }
 }
 
@@ -142,13 +152,15 @@ function safeIdentifier(value: unknown, name: string, maximum = 220): string {
   return trimmed
 }
 
-function safeText(value: unknown, name: string, maximum = 512): string {
+function safeText(value: unknown, name: string, maximum = 512, options: SensitivePayloadOptions = {}): string {
   if (typeof value !== 'string') throw new Error(`${name}이(가) 올바르지 않습니다.`)
   const trimmed = value.trim()
   if (!trimmed || trimmed.length > maximum || /[\r\n\u0000]/.test(trimmed)) {
     throw new Error(`${name}이(가) 올바르지 않습니다.`)
   }
-  if (isAbsolutePath(trimmed) || resemblesSecret(trimmed)) throw new Error(`${name}에 민감정보를 사용할 수 없습니다.`)
+  if ((!options.allowAbsolutePath && isAbsolutePath(trimmed)) || resemblesSecret(trimmed)) {
+    throw new Error(`${name}에 민감정보를 사용할 수 없습니다.`)
+  }
   return trimmed
 }
 
@@ -245,7 +257,7 @@ function recipeClause(value: EvaluationRecipeClause): EvaluationRecipeClause {
     ...(occurrence ? { occurrence } : {}),
     matcher: {
       kind: value.matcher.kind,
-      pattern: safeText(value.matcher.pattern, 'matcher pattern', 1_000),
+      pattern: safeText(value.matcher.pattern, 'matcher pattern', 1_000, { allowAbsolutePath: true }),
       caseSensitive: value.matcher.caseSensitive,
       target: value.matcher.target
     },
