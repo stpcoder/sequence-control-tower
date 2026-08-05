@@ -34,6 +34,7 @@ import { EvaluationStore } from './evaluation-store'
 import { LlmConfigService } from './llm-service'
 import { isSameRendererDocument } from './renderer-document'
 import { WikiService } from './wiki-service'
+import { ProjectStore } from './project-store'
 
 interface Services {
   artifacts: ArtifactService
@@ -41,6 +42,7 @@ interface Services {
   analysis: AnalysisService
   llmConfig: LlmConfigService
   wiki: WikiService
+  projects: ProjectStore
 }
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -84,6 +86,33 @@ export function registerIpc(services: Services): void {
     dataStoreReady: true,
     llm: await services.llmConfig.summary()
   }))
+
+  handle(IPC_CHANNELS.projectCreate, (_event, input) => services.projects.create(input as never))
+  handle(IPC_CHANNELS.projectList, (_event, input) => services.projects.list((input as { includeArchived?: boolean } | undefined)?.includeArchived === true))
+  handle(IPC_CHANNELS.projectGet, (_event, input) => services.projects.get((input as { projectId: string }).projectId))
+  handle(IPC_CHANNELS.projectLoad, (_event, input) => services.projects.load((input as { projectId: string }).projectId))
+  handle(IPC_CHANNELS.projectSave, (_event, input) => services.projects.save(input as never))
+  handle(IPC_CHANNELS.projectArchive, (_event, input) => services.projects.archive(input as never))
+  handle(IPC_CHANNELS.projectValidateFolders, (_event, input) => {
+    const value = input as { projectId: string; rootIds?: string[] }
+    return services.projects.validateFolders(value.projectId, value.rootIds)
+  })
+  handle(IPC_CHANNELS.projectAttachFolder, async (event, input) => {
+    const value = input as { projectId: string; expectedRevision: number }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner
+      ? await dialog.showOpenDialog(owner, { title: '프로젝트 로그 폴더 연결', properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ title: '프로젝트 로그 폴더 연결', properties: ['openDirectory'] })
+    if (result.canceled || !result.filePaths[0]) return { cancelled: true }
+    return services.projects.attachFolder(value.projectId, value.expectedRevision, result.filePaths[0])
+  })
+  handle(IPC_CHANNELS.projectDetachFolder, (_event, input) => {
+    const value = input as { projectId: string; expectedRevision: number; rootId: string }
+    return services.projects.detachFolder(value.projectId, value.expectedRevision, value.rootId)
+  })
+  handle(IPC_CHANNELS.projectConnectArtifacts, (_event, input) => services.projects.connectArtifacts(input as never))
+  handle(IPC_CHANNELS.projectSaveExportPreset, (_event, input) => services.projects.saveExportPreset(input as never))
+  handle(IPC_CHANNELS.projectArchiveExportPreset, (_event, input) => services.projects.archiveExportPreset(input as never))
 
   handle(IPC_CHANNELS.artifactImportFiles, async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender)

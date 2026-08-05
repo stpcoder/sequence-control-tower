@@ -610,6 +610,47 @@ export interface AppStatus {
   llm: LlmConfigSummary
 }
 
+export type ProjectFolderStatus = 'available' | 'missing' | 'permission-denied'
+/** Renderer-safe project folder identity. The canonical path is main-process only. */
+export interface ProjectFolderRef { rootId: string; displayLabel: string; status: ProjectFolderStatus; connectedAt: string }
+export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactId: string; relativePath: string }
+export interface ProjectEquipmentProfile { alias: string; profileId: string; updatedAt: string }
+export interface ProjectTemplatePin { templateId: string; revision: number; pinnedAt: string }
+export interface ProjectExportPreset {
+  id: string; name: string; format: 'csv' | 'json' | 'markdown'
+  options: Record<string, string | number | boolean>; createdAt: string; updatedAt: string; archived?: boolean
+}
+export interface ProjectSnapshot {
+  schemaVersion: 2; id: string; name: string; description?: string; revision: number; archived: boolean
+  createdAt: string; updatedAt: string; folders: ProjectFolderRef[]; artifacts: ProjectArtifactSourceRef[]
+  equipmentProfiles: ProjectEquipmentProfile[]; templatePins: ProjectTemplatePin[]; exportPresets: ProjectExportPreset[]
+}
+export interface ProjectCreateInput { name: string; description?: string }
+export interface ProjectListInput { includeArchived?: boolean }
+export interface ProjectRequest { projectId: string }
+export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[] }
+export interface ProjectArchiveInput extends ProjectRequest { expectedRevision: number }
+export interface ProjectFolderInput extends ProjectRequest { expectedRevision: number }
+export interface ProjectDetachFolderInput extends ProjectFolderInput { rootId: string }
+export interface ProjectConnectArtifactsInput extends ProjectFolderInput { artifacts: Array<{ sourceId: string; rootId: string; artifactId: string; relativePath: string }> }
+export interface ProjectValidateFoldersInput extends ProjectRequest { rootIds?: string[] }
+export interface ProjectSaveExportPresetInput extends ProjectRequest { expectedRevision: number; preset: Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } }
+export interface ProjectArchiveExportPresetInput extends ProjectRequest { expectedRevision: number; presetId: string }
+export interface SequenceIntelligenceProjectsApi {
+  create(input: ProjectCreateInput): Promise<ProjectSnapshot>
+  list(input?: ProjectListInput): Promise<ProjectSnapshot[]>
+  get(input: ProjectRequest): Promise<ProjectSnapshot | null>
+  save(input: ProjectSaveInput): Promise<ProjectSnapshot>
+  archive(input: ProjectArchiveInput): Promise<ProjectSnapshot>
+  load(input: ProjectRequest): Promise<ProjectSnapshot | null>
+  attachFolder(input: ProjectFolderInput): Promise<ProjectSnapshot | { cancelled: true }>
+  detachFolder(input: ProjectDetachFolderInput): Promise<ProjectSnapshot>
+  validateFolders(input: ProjectValidateFoldersInput): Promise<ProjectFolderRef[]>
+  connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot>
+  saveExportPreset(input: ProjectSaveExportPresetInput): Promise<ProjectSnapshot>
+  archiveExportPreset(input: ProjectArchiveExportPresetInput): Promise<ProjectSnapshot>
+}
+
 export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences'
 
 /** This is the only API exposed by contextBridge. */
@@ -654,6 +695,7 @@ export interface SequenceIntelligenceApi {
     saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult>
     approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
   }
+  projects: SequenceIntelligenceProjectsApi
 }
 
 export const IPC_CHANNELS = {
@@ -684,5 +726,10 @@ export const IPC_CHANNELS = {
   evaluationArchiveRecipe: 'evaluation:archive-recipe',
   evaluationSaveBatch: 'evaluation:save-batch',
   evaluationSaveRecipeAndBatch: 'evaluation:save-recipe-and-batch',
-  evaluationApproveMetadata: 'evaluation:approve-metadata'
+  evaluationApproveMetadata: 'evaluation:approve-metadata',
+  projectCreate: 'project:create', projectList: 'project:list', projectGet: 'project:get', projectSave: 'project:save',
+  projectArchive: 'project:archive', projectLoad: 'project:load', projectAttachFolder: 'project:attach-folder',
+  projectDetachFolder: 'project:detach-folder', projectValidateFolders: 'project:validate-folders',
+  projectConnectArtifacts: 'project:connect-artifacts', projectSaveExportPreset: 'project:save-export-preset',
+  projectArchiveExportPreset: 'project:archive-export-preset'
 } as const

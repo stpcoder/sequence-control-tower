@@ -79,6 +79,20 @@ const api: SequenceIntelligenceApi = {
     saveBatch: (input: EvaluationSaveBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveBatch, input),
     saveRecipeAndBatch: (input: EvaluationSaveRecipeAndBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipeAndBatch, input),
     approveMetadata: (input: EvaluationApproveMetadataInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationApproveMetadata, input)
+  },
+  projects: {
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectCreate, input),
+    list: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectList, input),
+    get: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectGet, input),
+    save: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSave, input),
+    archive: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchive, input),
+    load: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectLoad, input),
+    attachFolder: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectAttachFolder, input),
+    detachFolder: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectDetachFolder, input),
+    validateFolders: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectValidateFolders, input),
+    connectArtifacts: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectConnectArtifacts, input),
+    saveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSaveExportPreset, input),
+    archiveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchiveExportPreset, input)
   }
 }
 

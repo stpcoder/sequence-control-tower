@@ -8,6 +8,7 @@ import { EvaluationStore } from './evaluation-store'
 import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
+import { ProjectStore } from './project-store'
 import { isSameRendererDocument } from './renderer-document'
 import { IPC_CHANNELS } from '../shared/contracts'
 import type { RendererCommand } from '../shared/contracts'
@@ -107,6 +108,7 @@ async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
   const artifacts = new ArtifactService(dataRoot)
   const evaluations = new EvaluationStore(dataRoot)
+  const projects = new ProjectStore(dataRoot)
   const llmConfig = new LlmConfigService(dataRoot)
   const llm = new OpenAiCompatibleClient(llmConfig)
   const wiki = new WikiService(dataRoot, artifacts)
@@ -118,11 +120,12 @@ async function bootstrap(): Promise<void> {
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
+    projects.initialize(),
     llmConfig.initialize(),
     wiki.initialize(),
     analysis.initialize()
   ])
-  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki })
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
