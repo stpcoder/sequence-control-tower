@@ -535,6 +535,7 @@ export class EvaluationStore {
     const candidateValue = safeOptionalText(input.candidateValue, 'candidateValue')
     const approvedValue = safeOptionalText(input.approvedValue, 'approvedValue')
     const extractorId = safeOptionalText(input.extractorId, 'extractorId', 160)
+    if (approvedValue === '미확인') throw new Error('미확인은 approvedValue로 저장할 수 없습니다.')
     if (input.approval === 'approved' && approvedValue === undefined && candidateValue === undefined) {
       throw new Error('승인할 metadata 값이 필요합니다.')
     }

@@ -77,7 +77,7 @@ export interface PivotGrid {
   sourceIds: readonly string[]
 }
 
-export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'result' | 'review' | 'evidenceCount'
+export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
 export interface PatternMatrixRow {
@@ -319,7 +319,7 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
     if (filters.result !== 'all' && row.result !== filters.result) return false
     if (filters.review !== 'all' && row.review !== filters.review) return false
     if (!query) return true
-    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.result]
+    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, row.result]
       .some((value) => normalized(value).includes(query))
   })
 }
@@ -395,7 +395,7 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
 }
 
 function sortableValue(row: LogResultRecord, key: LogRecordSortKey): string | number {
-  if (key === 'sample' || key === 'temperature' || key === 'mode') return row[key].value ?? ''
+  if (key === 'sample' || key === 'temperature' || key === 'mode' || key === 'grid') return row[key].value ?? ''
   return row[key]
 }
 
@@ -576,8 +576,13 @@ function exportRows(rows: readonly LogResultRecord[], columns: readonly LogRecor
   ]
 }
 
-function normalizedExportCell(value: unknown): string {
+export function normalizedExportCell(value: unknown): string {
   return safeSpreadsheetCell(value).replace(/[\t\r\n]+/g, ' ')
+}
+
+/** The exact logical cell value emitted by either export serializer. */
+export function exportCellValue(row: LogResultRecord, column: LogRecordExportColumn): string {
+  return normalizedExportCell(exportRowValues(row)[column])
 }
 
 function csvExportCell(value: unknown): string {
