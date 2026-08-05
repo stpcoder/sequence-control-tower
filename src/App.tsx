@@ -72,6 +72,33 @@ export function reconcileListedFiles(
   return mergeWorkbenchFiles(current, listedLogs)
 }
 
+export interface ProjectUpdateFileState {
+  files: WorkbenchFile[]
+  selectedFileId: string | null
+}
+
+export function reconcileProjectUpdateFileState(
+  current: readonly WorkbenchFile[],
+  selectedFileId: string | null,
+  previous: ProjectSnapshot | null,
+  next: ProjectSnapshot,
+): ProjectUpdateFileState {
+  if (!previous || previous.id !== next.id) return { files: [...current], selectedFileId }
+  const nextRoots = new Set(next.folders.map((folder) => folder.rootId))
+  const detachedRoots = new Set(previous.folders.map((folder) => folder.rootId).filter((rootId) => !nextRoots.has(rootId)))
+  if (!detachedRoots.size) return { files: [...current], selectedFileId }
+  const files = current.filter((file) => !file.rootId || !detachedRoots.has(file.rootId))
+  return {
+    files,
+    selectedFileId: selectedFileId && files.some((file) => file.id === selectedFileId) ? selectedFileId : files[0]?.id ?? null,
+  }
+}
+
+export function projectLoadFileState(artifacts: readonly ArtifactRecord[]): ProjectUpdateFileState {
+  const files = dedupeWorkbenchFiles(artifacts.flatMap(artifactFiles))
+  return { files, selectedFileId: files[0]?.id ?? null }
+}
+
 export function setupAppCommandListener(
   lifecycle: AppLifecycle,
   onCommand: (listener: (command: RendererCommand) => void) => () => void,
@@ -285,11 +312,19 @@ export default function App() {
     setProject(result.project)
     evaluationSnapshotRef.current = null
     setEvaluationSnapshot(null)
-    const imported = dedupeWorkbenchFiles(result.artifacts.flatMap(artifactFiles))
-    filesRef.current = imported
-    setFiles(imported)
-    setSelectedFileId(imported[0]?.id ?? null)
+    const next = projectLoadFileState(result.artifacts)
+    filesRef.current = next.files
+    setFiles(next.files)
+    setSelectedFileId(next.selectedFileId)
   }, [])
+
+  const projectUpdated = useCallback((nextProject: ProjectSnapshot) => {
+    const next = reconcileProjectUpdateFileState(filesRef.current, selectedFileId, project, nextProject)
+    setProject(nextProject)
+    filesRef.current = next.files
+    setFiles(next.files)
+    setSelectedFileId(next.selectedFileId)
+  }, [project, selectedFileId])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
@@ -519,7 +554,7 @@ export default function App() {
       <Navigation active={activePage} onChange={navigate} />
       <main className="main-shell">
         <div className="content-shell">
-          <div className="project-topbar"><ProjectControl project={project} onLoaded={projectLoaded} onProjectUpdated={setProject} onError={(message) => notify(message, 'error')} /></div>
+          <div className="project-topbar"><ProjectControl project={project} onLoaded={projectLoaded} onProjectUpdated={projectUpdated} onError={(message) => notify(message, 'error')} /></div>
           {content}
         </div>
       </main>

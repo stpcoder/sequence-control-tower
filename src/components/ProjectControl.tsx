@@ -41,6 +41,10 @@ export function buildProjectClonePlan(source: ProjectSnapshot): Pick<ProjectSave
   }
 }
 
+export function applyValidatedFolders(project: ProjectSnapshot, folders: ProjectSnapshot['folders']): ProjectSnapshot {
+  return { ...project, folders }
+}
+
 interface ProjectControlProps {
   project: ProjectSnapshot | null
   onLoaded: (result: ProjectLoadResult) => void
@@ -125,13 +129,13 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
   }
   const validate = async () => {
     if (!project) return; setBusy(true)
-    try { const folders = await api.projects.validateFolders({ projectId: project.id }); onLoaded({ project: { ...project, folders }, artifacts: [], failures: [], skippedCount: 0 }) }
+    try { const folders = await api.projects.validateFolders({ projectId: project.id }); onProjectUpdated(applyValidatedFolders(project, folders)) }
     catch (error) { onError(error instanceof Error ? error.message : '폴더 상태를 확인하지 못했습니다.') }
     finally { setBusy(false) }
   }
   const detach = async (rootId: string) => {
     if (!project) return; setBusy(true)
-    try { onLoaded({ project: await api.projects.detachFolder({ projectId: project.id, expectedRevision: project.revision, rootId }), artifacts: [], failures: [], skippedCount: 0 }) }
+    try { onProjectUpdated(await api.projects.detachFolder({ projectId: project.id, expectedRevision: project.revision, rootId })) }
     catch (error) { onError(error instanceof Error ? error.message : '폴더 연결을 해제하지 못했습니다.') }
     finally { setBusy(false) }
   }
