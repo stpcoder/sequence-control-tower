@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildLogRecordExportPreview,
   buildPivotGrid,
+  isPivotSelectionValid,
   confirmLogRecordExport,
   filterLogRecords,
   exportableLogRecords,
@@ -44,6 +45,16 @@ const files: WorkbenchFile[] = [
 ]
 
 describe('renderer log result projection', () => {
+  it('invalidates selected pivot cells when the cell or its source records disappear', () => {
+    const rows = projectLogRecords(files)
+    const grid = buildPivotGrid(rows, { rows: ['sample'], columns: ['temperature'], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' } })
+    const cellKey = `${grid.rows[0].key}-${grid.columns[0].key}`
+
+    expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows)).toBe(true)
+    expect(isPivotSelectionValid('missing-cell', new Set(['pass']), grid, rows)).toBe(false)
+    expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows.filter((row) => row.id !== 'pass'))).toBe(false)
+  })
+
   it('keeps one source log per row and marks filename metadata as unconfirmed candidates', () => {
     const rows = projectLogRecords(files)
 

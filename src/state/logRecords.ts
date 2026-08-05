@@ -77,6 +77,26 @@ export interface PivotGrid {
   sourceIds: readonly string[]
 }
 
+/** Returns whether a renderer's selected pivot cell still exists in its current scope. */
+export function isPivotSelectionValid(
+  selectedCellKey: string | null,
+  selectedSourceIds: ReadonlySet<string> | null,
+  grid: PivotGrid,
+  scopedRecords: readonly LogResultRecord[],
+): boolean {
+  if (selectedCellKey === null || selectedSourceIds === null) return true
+  const selectedCell = grid.rows.flatMap((row, rowIndex) => grid.columns.map((column, columnIndex) => ({
+    rowIndex,
+    columnIndex,
+    key: `${row.key}-${column.key}`,
+  }))).find((cell) => cell.key === selectedCellKey)
+  const rowIndex = selectedCell?.rowIndex ?? -1
+  const columnIndex = selectedCell?.columnIndex ?? -1
+  if (rowIndex < 0 || columnIndex < 0 || !grid.cells[rowIndex]?.[columnIndex]) return false
+  const availableIds = new Set(scopedRecords.map((row) => row.id))
+  return [...selectedSourceIds].every((sourceId) => availableIds.has(sourceId))
+}
+
 export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
