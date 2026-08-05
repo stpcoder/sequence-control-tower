@@ -7,6 +7,7 @@ import type {
   EvaluationException,
   LogDocument,
   MatchedRuleEvaluation,
+  OccurrenceCondition,
   PrecomputedDocumentEvidence,
   RecipeRule,
   ResultLabel,
@@ -37,6 +38,7 @@ function buildClause(observation: SearchObservation, index: number): RuleClause 
   return {
     id: `clause-${index + 1}-${stableHash(observation.id)}`,
     presence: observation.matched ? "present" : "absent",
+    occurrence: observation.matched ? { kind: "atLeast", count: 1 } : { kind: "exact", count: 0 },
     matcher: {
       kind: observation.matcherKind,
       pattern: observation.query,
@@ -146,6 +148,16 @@ function occurrenceAt(
   };
 }
 
+export function compareOccurrence(
+  occurrenceCount: number,
+  condition: OccurrenceCondition | undefined,
+  legacyPresence: RuleClause["presence"],
+): boolean {
+  if (condition?.kind === "exact") return occurrenceCount === condition.count;
+  if (condition?.kind === "atLeast") return occurrenceCount >= condition.count;
+  return legacyPresence === "present" ? occurrenceCount > 0 : occurrenceCount === 0;
+}
+
 function evaluateClause(document: LogDocument, clause: RuleClause): ClauseEvaluation {
   const value = targetText(document, clause.matcher.target);
   let occurrenceCount = 0;
@@ -180,10 +192,9 @@ function evaluateClause(document: LogDocument, clause: RuleClause): ClauseEvalua
     };
   }
 
-  const isPresent = occurrenceCount > 0;
   return {
     clauseId: clause.id,
-    satisfied: clause.presence === "present" ? isPresent : !isPresent,
+    satisfied: compareOccurrence(occurrenceCount, clause.occurrence, clause.presence),
     occurrenceCount,
     ...(firstIndex === undefined ? {} : {
       firstOccurrence: occurrenceAt(
@@ -226,32 +237,60 @@ export function precomputeDocumentEvidence(
   };
 }
 
-function ruleOrderingError(rule: RecipeRule): string | null {
+export function clauseOrderingError(orderedClauses: readonly RuleClause[], ruleId = "rule"): string | null {
   const clauses = new Map<string, RuleClause>();
-  for (const clause of rule.clauses) {
-    if (clauses.has(clause.id)) return `Rule ${rule.id} has duplicate clause ids.`;
+  for (const clause of orderedClauses) {
+    if (clauses.has(clause.id)) return `Rule ${ruleId} has duplicate clause ids.`;
     clauses.set(clause.id, clause);
   }
-  for (const clause of rule.clauses) {
+  for (const clause of orderedClauses) {
     const afterId = clause.order?.afterClauseId;
     if (!afterId) continue;
     const reference = clauses.get(afterId);
-    if (!reference || reference.id === clause.id) return `Rule ${rule.id} has an invalid order reference.`;
+    if (!reference || reference.id === clause.id) return `Rule ${ruleId} has an invalid order reference.`;
     if (clause.presence !== "present" || reference.presence !== "present") {
-      return `Rule ${rule.id} applies ordering to an absence clause.`;
+      return `Rule ${ruleId} applies ordering to an absence clause.`;
     }
     if (clause.matcher.target !== "content" || reference.matcher.target !== "content") {
-      return `Rule ${rule.id} applies ordering outside log content.`;
+      return `Rule ${ruleId} applies ordering outside log content.`;
     }
     const seen = new Set([clause.id]);
     let cursor: RuleClause | undefined = reference;
     while (cursor?.order?.afterClauseId) {
-      if (seen.has(cursor.id)) return `Rule ${rule.id} contains a cyclic order.`;
+      if (seen.has(cursor.id)) return `Rule ${ruleId} contains a cyclic order.`;
       seen.add(cursor.id);
       cursor = clauses.get(cursor.order.afterClauseId);
     }
   }
   return null;
+}
+
+export function recalculateClauseOrder(clauses: readonly RuleClause[]): RuleClause[] {
+  return clauses.map((clause, index) => {
+    const { order: _order, ...withoutOrder } = clause;
+    return index === 0
+      ? withoutOrder
+      : { ...withoutOrder, order: { afterClauseId: clauses[index - 1].id } };
+  });
+}
+
+export function reorderClauses(
+  clauses: readonly RuleClause[],
+  fromIndex: number,
+  toIndex: number,
+): RuleClause[] {
+  if (!Number.isSafeInteger(fromIndex) || !Number.isSafeInteger(toIndex)
+    || fromIndex < 0 || fromIndex >= clauses.length || toIndex < 0 || toIndex >= clauses.length) {
+    throw new Error("Clause reorder index is invalid.");
+  }
+  const next = [...clauses];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return recalculateClauseOrder(next);
+}
+
+function ruleOrderingError(rule: RecipeRule): string | null {
+  return clauseOrderingError(rule.clauses, rule.id);
 }
 
 function occurrencePosition(occurrence: EvidenceOccurrence): readonly [number, number] | null {
@@ -482,11 +521,10 @@ export function evaluatePrecomputedEvidence(
         });
         continue;
       }
-      const present = occurrenceCount > 0;
       clauseEvaluations.push({
         clauseId: clause.id,
         occurrenceCount,
-        satisfied: clause.presence === "present" ? present : !present,
+        satisfied: compareOccurrence(occurrenceCount, clause.occurrence, clause.presence),
         ...(clauseEvidence.firstOccurrence ? { firstOccurrence: clauseEvidence.firstOccurrence } : {}),
         ...(clauseEvidence.lastOccurrence ? { lastOccurrence: clauseEvidence.lastOccurrence } : {}),
       });

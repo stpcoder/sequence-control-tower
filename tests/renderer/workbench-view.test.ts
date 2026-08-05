@@ -26,6 +26,9 @@ import {
   chooseNextTabId,
   clampSearchHitIndex,
   clauseSpecKey,
+  filterUserRecipeRevisions,
+  recipeEvidenceSpecs,
+  resolveRecipeEvidenceCounts,
   dedupeWorkbenchFiles,
   groupWorkbenchFiles,
   lineWindowEdgeRequestKey,
@@ -36,6 +39,8 @@ import {
   resolvePrecomputedBatch,
   resolveCurrentReplacementText,
   resolveSearchScopeFiles,
+  occurrenceConditionForChoice,
+  reorderRuleClausesByObservationIds,
   successfulSearchCounts,
   shouldCancelAnalysisJob,
   type WorkbenchFile,
@@ -105,6 +110,61 @@ function evidence(sourceId: string, rules: RecipeRule[], count = 1): Precomputed
 }
 
 describe('Log Workbench UI data hardening', () => {
+  it('projects only user recipes and turns artifact evidence into clause counts', () => {
+    const candidate = rule('candidate', 'PASS', 'candidate')
+    const internal = { id: 'internal-revision', recipeId: 'active-batch-ruleset', revision: 1, name: 'batch', rules: [candidate], createdAt: 'now' }
+    const user = { ...internal, id: 'user-revision', recipeId: 'user-recipe' }
+    expect(filterUserRecipeRevisions([internal, user])).toEqual([user])
+
+    const specs = recipeEvidenceSpecs(candidate)
+    expect(specs[0]).toMatchObject({ id: candidate.clauses[0].id, query: 'DONE', mode: 'literal', target: 'content' })
+    expect(resolveRecipeEvidenceCounts(candidate, {
+      sourceId: 'file-1', artifactId: 'a'.repeat(64), fileName: 'sample.log',
+      evidence: [{ specId: specs[0].id, occurrenceCount: 3, firstOccurrence: { target: 'content', columnStart: 1, columnEnd: 5, excerpt: 'DONE', excerptTruncated: false } }],
+    })).toEqual({ counts: { [candidate.clauses[0].id]: 3 }, unresolvedClauseIds: [] })
+  })
+
+  it('fails closed for missing or failed artifact clause evidence', () => {
+    const candidate = rule('candidate', 'PASS', 'candidate')
+    const failed = resolveRecipeEvidenceCounts(candidate, {
+      sourceId: 'file-1', artifactId: 'a'.repeat(64), fileName: 'sample.log', error: 'read failed', evidence: [],
+    })
+    expect(failed.unresolvedClauseIds).toEqual([candidate.clauses[0].id])
+    expect(failed.counts).toEqual({})
+  })
+
+  it('keeps automatic observations separate from pinned occurrence rules', () => {
+    const observation = {
+      id: 'obs-a', sourceId: 'file-a', query: 'PASS', matcherKind: 'literal' as const,
+      target: 'content' as const, caseSensitive: false, matched: true, matchCount: 4,
+      role: 'search_history' as const, excerpts: [],
+    }
+    expect(occurrenceConditionForChoice({ kind: 'zero' }, observation)).toEqual({ kind: 'exact', count: 0 })
+    expect(occurrenceConditionForChoice({ kind: 'atLeast' }, observation)).toEqual({ kind: 'atLeast', count: 1 })
+    expect(occurrenceConditionForChoice({ kind: 'exact', count: 3 }, observation)).toEqual({ kind: 'exact', count: 3 })
+  })
+
+  it('creates explicit clause order from the user-selected observation order', () => {
+    const base = rule('ordered', 'PASS', 'candidate')
+    const clauses = [
+      { ...base.clauses[0], id: 'clause-a', sourceObservationId: 'obs-a' },
+      { ...base.clauses[0], id: 'clause-b', sourceObservationId: 'obs-b' },
+    ]
+    const ordered = reorderRuleClausesByObservationIds({ ...base, clauses }, ['obs-b', 'obs-a'])
+    expect(ordered.clauses.map((clause) => clause.sourceObservationId)).toEqual(['obs-b', 'obs-a'])
+    expect(ordered.clauses[0].order).toBeUndefined()
+    expect(ordered.clauses[1].order).toEqual({ afterClauseId: 'clause-b' })
+  })
+
+  it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
+    expect(workbenchSource).toContain('판정 조건으로 pin')
+    expect(workbenchSource).toContain('role="dialog" aria-modal="true"')
+    expect(workbenchSource).toContain('onApplyMetadataSuggestion')
+    expect(workbenchSource).toContain('field}</b> {suggestion.value}')
+    expect(workbenchSource).toContain('신뢰도')
+    expect(workbenchSource).toContain('suggestedTags.slice(0, 6).map')
+  })
+
   it('keeps source text immutable while applying current and scoped replace-all lazily', () => {
     const source = 'lane=1 timeout\nlane=1 timeout\nkeep'
     const draft = createLogDraft([{ id: 'file-a', text: source }])

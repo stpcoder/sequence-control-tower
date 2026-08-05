@@ -8,6 +8,7 @@ import type {
   EvaluationSaveDecisionInput,
   EvaluationSourceInput
 } from '../shared/contracts'
+import { getActiveEvaluationRecipeRevisions } from '../shared/contracts'
 import { EvaluationRevisionConflictError, EvaluationStore } from './evaluation-store'
 
 const roots: string[] = []
@@ -81,6 +82,65 @@ describe('EvaluationStore', () => {
     expect(serialized).not.toContain(PROJECT)
     expect(serialized).not.toContain('opaque-root')
     expect(serialized).not.toContain('sample.log')
+  })
+
+  it('validates occurrence conditions while saving recipe revisions', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      name: 'Exact occurrences',
+      rules: [{ ...rule(), clauses: [{ ...rule().clauses[0], occurrence: { kind: 'exact', count: 2 } }] }]
+    })).resolves.toMatchObject({ recipe: { rules: [{ clauses: [{ occurrence: { kind: 'exact', count: 2 } }] }] } })
+
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 1,
+      name: 'Invalid occurrence',
+      rules: [{ ...rule('invalid-occurrence'), clauses: [{ ...rule().clauses[0], occurrence: { kind: 'exact', count: -1 } }] }]
+    })).rejects.toThrow('occurrence count')
+  })
+
+  it('allows path-like matcher patterns while retaining path protection on stored fields', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    const pathPatterns = [
+      '/var/log/lot-01/sample.log',
+      'C:\\validation\\lot-01\\sample.log',
+      '^\\\\server\\share\\sample.log'
+    ]
+
+    for (const [index, pattern] of pathPatterns.entries()) {
+      await expect(store.saveRecipe({
+        projectId: PROJECT,
+        expectedRevision: index,
+        name: `Path matcher ${index}`,
+        rules: [{
+          ...rule(`path-rule-${index}`),
+          clauses: [{ ...rule().clauses[0], matcher: { kind: 'regex', pattern, caseSensitive: false, target: 'path' } }]
+        }]
+      })).resolves.toMatchObject({ recipe: { rules: [{ clauses: [{ matcher: { pattern } }] }] } })
+    }
+
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: pathPatterns.length,
+      name: 'Path matcher with protected project id',
+      rules: [rule('protected-name')]
+    })).resolves.toBeDefined()
+
+    await expect(store.saveRecipe({
+      projectId: '/Users/engineer/project',
+      expectedRevision: pathPatterns.length + 1,
+      name: 'Protected project path',
+      rules: [rule('protected-project')]
+    })).rejects.toThrow('절대 경로')
+
+    await expect(store.saveDecision({
+      projectId: PROJECT,
+      expectedRevision: pathPatterns.length,
+      source: { ...source(), sourceKey: 'C:\\validation\\lot-01\\sample.log' },
+      result: 'PASS'
+    })).rejects.toThrow('절대 경로')
   })
 
   it('uses optimistic project revisions to prevent stale renderer writes', async () => {
@@ -181,6 +241,70 @@ describe('EvaluationStore', () => {
     expect(restarted.recipes).toHaveLength(2)
     expect(restarted.batches[0].outcomes).toHaveLength(2)
     expect(restarted.metadataApprovals).toHaveLength(2)
+  })
+
+  it('archives the latest recipe as an immutable empty-rule revision and excludes it from active recipes', async () => {
+    const root = await tempRoot()
+    const store = new EvaluationStore(root)
+    const saved = await store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'archive-me',
+      name: 'Archive me',
+      rules: [rule()]
+    })
+
+    const archived = await store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 1,
+      recipeId: 'archive-me'
+    })
+
+    expect(archived.recipe).toMatchObject({
+      recipeId: saved.recipe.recipeId,
+      revision: 2,
+      name: saved.recipe.name,
+      rules: [],
+      supersedesId: saved.recipe.id,
+      archived: true
+    })
+    expect(saved.recipe.rules).toHaveLength(1)
+    expect(getActiveEvaluationRecipeRevisions(archived.snapshot.recipes)).toEqual([])
+    expect((await new EvaluationStore(root).snapshot(PROJECT)).recipes).toHaveLength(2)
+  })
+
+  it('rejects unknown recipe ids and sensitive archive payloads without changing the project', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await expect(store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'missing'
+    })).rejects.toThrow('존재하지 않는 recipeId')
+    await expect(store.archiveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'Bearer abcdefghijklmnopqrstuvwxyz'
+    })).rejects.toThrow('비밀정보')
+    expect((await store.snapshot(PROJECT)).revision).toBe(0)
+  })
+
+  it('allows only one concurrent archive for the same expected project revision', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipeId: 'concurrent',
+      name: 'Concurrent',
+      rules: [rule()]
+    })
+
+    const results = await Promise.allSettled([
+      store.archiveRecipe({ projectId: PROJECT, expectedRevision: 1, recipeId: 'concurrent' }),
+      store.archiveRecipe({ projectId: PROJECT, expectedRevision: 1, recipeId: 'concurrent' })
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect((await store.snapshot(PROJECT)).recipes).toHaveLength(2)
   })
 
   it('rejects a batch whose matched rule is not in its immutable recipe revisions', async () => {
@@ -431,7 +555,7 @@ describe('EvaluationStore', () => {
         ...rule(),
         clauses: [{ ...rule().clauses[0], matcher: { ...rule().clauses[0].matcher, pattern: 'C:\\Customer\\secret.log' } }]
       }]
-    })).rejects.toThrow('절대 경로')
+    })).resolves.toBeDefined()
 
     await expect(store.saveDecision({
       projectId: PROJECT,
@@ -440,7 +564,7 @@ describe('EvaluationStore', () => {
       result: 'PASS',
       token: 'Bearer abcdefghijklmnopqrstuvwxyz'
     } as EvaluationSaveDecisionInput)).rejects.toThrow('저장할 수 없는 필드')
-    expect((await store.snapshot(PROJECT)).revision).toBe(0)
+    expect((await store.snapshot(PROJECT)).revision).toBe(1)
   })
 
   it.each([

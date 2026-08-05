@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildLogRecordExportPreview,
+  buildPivotGrid,
+  isPivotSelectionValid,
+  confirmLogRecordExport,
   filterLogRecords,
   exportableLogRecords,
+  initLogRecordExportPreview,
   patternMatrix,
   projectLogRecords,
   selectAllFilteredLogRecords,
   selectedLogRecords,
   serializeLogRecordsCsv,
   serializeLogRecordsTsv,
+  previewLogRecordExport,
   sortLogRecords,
   toggleLogRecordSelection,
 } from '../../src/state/logRecords'
+import type { LogResultRecord } from '../../src/state/logRecords'
 import type { WorkbenchFile } from '../../src/views/WorkbenchView'
 
 const files: WorkbenchFile[] = [
@@ -38,6 +45,16 @@ const files: WorkbenchFile[] = [
 ]
 
 describe('renderer log result projection', () => {
+  it('invalidates selected pivot cells when the cell or its source records disappear', () => {
+    const rows = projectLogRecords(files)
+    const grid = buildPivotGrid(rows, { rows: ['sample'], columns: ['temperature'], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' } })
+    const cellKey = `${grid.rows[0].key}-${grid.columns[0].key}`
+
+    expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows)).toBe(true)
+    expect(isPivotSelectionValid('missing-cell', new Set(['pass']), grid, rows)).toBe(false)
+    expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows.filter((row) => row.id !== 'pass'))).toBe(false)
+  })
+
   it('keeps one source log per row and marks filename metadata as unconfirmed candidates', () => {
     const rows = projectLogRecords(files)
 
@@ -74,6 +91,18 @@ describe('renderer log result projection', () => {
       [{ value: 'A17', state: 'candidate' }, { value: 'UEFI', state: 'candidate' }],
     ])
     expect(rows[3].sample).toEqual({ value: null, state: 'malformed' })
+  })
+
+  it('projects parser grid metadata and keeps durable approval precedence', () => {
+    const [row] = projectLogRecords([
+      { id: 'grid', name: 'SAMPLE=A17.TEMP=25C.MODE=DIAG.GRID=2x4.log', text: '' },
+    ], {}, {
+      grid: { grid: { approval: 'approved', approvedValue: '4X8' } },
+    })
+
+    expect(row.grid).toEqual({ value: '4X8', state: 'approved' })
+    expect(patternMatrix([row], 'grid')).toEqual([{ value: '4X8', total: 1, counts: { UNKNOWN: 1 } }])
+    expect(serializeLogRecordsTsv([row], ['grid_value', 'grid_state'])).toContain('grid_value\tgrid_state\r\n4X8\tapproved')
   })
 
   it('canonicalizes lowercase metadata and one redundant nested sample prefix', () => {
@@ -176,6 +205,95 @@ describe('renderer log result projection', () => {
     ])
   })
 
+  it('builds bounded pivots with explicit unknown buckets, zero cells, and source tracing', () => {
+    const rows = projectLogRecords(files)
+    const grid = buildPivotGrid(rows, {
+      rows: ['temperature'],
+      columns: ['mode', 'result'],
+      aggregation: 'count',
+      filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(grid.rows.map((header) => header.label)).toEqual(['85', '105'])
+    expect(grid.columns.map((header) => header.label)).toEqual(['DIAG / PASS', 'DIAG / SYSTEM_HALT', 'DIAG / TRAINING_FAIL'])
+    expect(grid.cells).toEqual([
+      [
+        { value: 1, sourceIds: ['pass'] },
+        { value: 1, sourceIds: ['halt'] },
+        { value: 0, sourceIds: [] },
+      ],
+      [
+        { value: 0, sourceIds: [] },
+        { value: 0, sourceIds: [] },
+        { value: 1, sourceIds: ['training'] },
+      ],
+    ])
+
+    const unknown = buildPivotGrid(projectLogRecords([{ id: 'unknown', name: 'plain.log', text: '' }]), {
+      rows: ['sample'], columns: [], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    expect(unknown.rows[0].label).toBe('미확인')
+    expect(unknown.cells[0][0]).toEqual({ value: 1, sourceIds: ['unknown'] })
+  })
+
+  it('keeps zero-valued fail and evidence pivot rows out of cell source tracing while preserving counts', () => {
+    const rows = projectLogRecords([
+      { id: 'pass', name: 'pass.log', text: '' },
+      { id: 'fail', name: 'fail.log', text: 'TEST_FAIL' },
+    ])
+    const failGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'fail_count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    const evidenceGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'evidence_count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    const countGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(failGrid.total).toBe(1)
+    expect(failGrid.cells[0][0]).toEqual({ value: 1, sourceIds: ['fail'] })
+    expect(evidenceGrid.total).toBe(1)
+    expect(evidenceGrid.cells[0][0]).toEqual({ value: 1, sourceIds: ['fail'] })
+    expect(countGrid.total).toBe(2)
+    expect(countGrid.cells[0][0].sourceIds).toEqual(['pass', 'fail'])
+  })
+
+  it('rejects pivot axes over two dimensions and keeps export preview immutable and formula-safe', () => {
+    const rows = projectLogRecords(files)
+    expect(() => buildPivotGrid(rows, {
+      rows: ['sample', 'temperature', 'mode'], columns: [], aggregation: 'count',
+      filters: { query: '', result: 'all', review: 'all' },
+    })).toThrow(RangeError)
+
+    const init = initLogRecordExportPreview(rows, new Set(['pass']), ['filename', 'result'])
+    const preview = previewLogRecordExport(init, 'tsv')
+    const oneShot = buildLogRecordExportPreview(rows, new Set(['pass']), ['filename', 'result'], 'tsv')
+    expect(preview.serialized).toBe(oneShot.serialized)
+    expect(preview.serialized).toContain('LOT12_S01_85C_DIAG.log')
+    expect(confirmLogRecordExport(preview)).toBe(preview.tsv)
+    expect(Object.isFrozen(init)).toBe(true)
+    expect(Object.isFrozen(preview)).toBe(true)
+    expect(() => (init.rows as LogResultRecord[]).pop()).toThrow()
+  })
+
+  it('snapshots export rows including nested metadata before source rows change', () => {
+    const rows = projectLogRecords(files)
+    const init = initLogRecordExportPreview(rows)
+    rows[0].sample.value = 'CHANGED'
+    rows[0].sample.state = 'rejected'
+    rows[0].evidenceCount = 99
+
+    expect(init.rows[0]).toMatchObject({
+      sample: { value: '01', state: 'candidate' },
+      evidenceCount: 1,
+    })
+    expect(init.rows[0]).not.toBe(rows[0])
+    expect(init.rows[0].sample).not.toBe(rows[0].sample)
+    expect(Object.isFrozen(init.rows[0])).toBe(true)
+    expect(Object.isFrozen(init.rows[0].sample)).toBe(true)
+  })
+
   it('exports safe spreadsheet text and preserves the visible row count', () => {
     const rows = projectLogRecords([{ ...files[0], id: 'formula', name: '=cmd.log' }])
     const tsv = serializeLogRecordsTsv(rows)
@@ -220,9 +338,9 @@ describe('renderer log result projection', () => {
     const tsv = serializeLogRecordsTsv(projectLogRecords(duplicateNameFiles))
 
     expect(tsv).toBe([
-      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tresult\tresult_source\treview',
-      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review',
-      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review',
+      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tgrid_value\tgrid_state\tresult\tresult_source\treview',
+      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review',
+      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review',
     ].join('\r\n'))
   })
 
@@ -259,9 +377,9 @@ describe('renderer log result projection', () => {
     ])
 
     const lines = serializeLogRecordsTsv(rows).split('\r\n')
-    expect(lines[1].split('\t').slice(0, 16)).toEqual([
+    expect(lines[1].split('\t').slice(0, 18)).toEqual([
       'approved', '', '', 'LOT_S01_85C_DIAG_run007.log', '007', 'LOT_S01_85C_DIAG_run007.log', 'Imported logs',
-      'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', 'PASS', 'candidate', 'needs_review',
+      'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', '', 'missing', 'PASS', 'candidate', 'needs_review',
     ])
     expect(lines[2].split('\t').slice(7, 13)).toEqual(['02', 'candidate', '85', 'rejected', 'DIAG', 'candidate'])
     expect(lines[3].split('\t').slice(7, 13)).toEqual(['', 'missing', '', 'missing', '', 'missing'])
@@ -322,7 +440,7 @@ describe('renderer log result projection', () => {
     const lines = tsv.split('\r\n')
     const sourceKeyColumn = 2
 
-    expect(lines[0].split('\t')).toHaveLength(16)
+    expect(lines[0].split('\t')).toHaveLength(18)
     expect(lines.slice(1).map((line) => line.split('\t')[sourceKeyColumn])).toEqual([
       'root:opaque-posix\u001fposix.log',
       'root:opaque-windows\u001fwindows.log',

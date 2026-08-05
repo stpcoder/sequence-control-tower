@@ -81,23 +81,23 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 
 ## 메타데이터와 결과 내보내기
 
-`결과표`에는 `파일명`, `폴더`, `Sample`, `온도`, `Mode`, `결과`, `판정 검토`, `근거`가 표시됩니다. 기본 파일명 `LOT12_S01_85C_DIAG.log`에서는 Sample `01`, 온도 `85`, Mode `DIAG`가 후보가 됩니다.
+`결과표`에는 `파일명`, `폴더`, `Sample`, `온도`, `Mode`, `Grid`, `결과`, `판정 검토`, `근거`가 표시됩니다. 파일명에서 네 필드를 추출합니다. 값 하나는 `후보`로 검토하고, 값이 없거나 서로 다른 후보가 충돌하면 내부 상태와 관계없이 결과표의 값 셀은 비어 있으며 `미확인`으로 표시됩니다. 파일명에 값이 없으면 로그 본문을 검사합니다.
 
 1. 원문의 sample, temperature, mode marker와 후보를 대조합니다.
 2. 값이 일치할 때 후보를 눌러 `승인` 상태로 저장합니다.
-3. 파일명과 원문이 다르면 후보를 승인하지 않습니다. 현재 화면에는 후보 값을 직접 수정하는 기능이 없습니다.
+3. 파일명과 원문이 다르면 후보를 승인하지 않습니다. `Sample`/온도/`Mode`/`Grid` 셀을 클릭하고 값을 입력한 뒤 `저장`합니다. 입력 값은 메타데이터 승인 revision으로 저장됩니다.
 4. 필요한 필터를 적용합니다.
 5. Excel에 붙여넣을 때 `TSV 복사`, 파일로 전달할 때 `CSV`를 누릅니다.
 
-`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `결과`, `결과 출처`, `검토`입니다.
+`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `grid_value`, `grid_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `Grid 값`, `Grid 상태`, `결과`, `결과 출처`, `검토`입니다.
 
-`열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
+`열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`, `Grid 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
 
 ![메타데이터와 판정을 확인하고 결과를 내보내는 화면](../images/manual-lw-05-results.png)
 
 ## 패턴 확인
 
-`패턴`에서 `결과 분포`를 확인하고 `조건별 결과`의 축을 `Sample`, 온도, `Mode` 중 하나로 선택합니다. 결과 셀을 누르면 아래 `선택 로그`에 해당 원본 목록이 표시됩니다. 행을 누르면 `로그` 화면에서 원문이 열립니다.
+`패턴`의 `N × M 패턴 그리드`에서 `로그 수`, `Fail 수`, `Evidence 수`를 선택합니다. `행축`과 보조 행축, `열축`과 보조 열축에 `Sample`, `온도`, `Mode`, `Grid`, `결과`, `검토`, `폴더`, `Run`을 선택합니다. `결과`, `폴더`, `FAIL만`, `미확인 metadata만` 필터를 적용합니다. 결과 셀을 누르면 아래 `셀의 원본 로그`에 원본 목록이 표시되고 행을 누르면 `로그` 화면에서 원문이 열립니다.
 
 ![결과 분포와 조건별 결과를 확인하는 패턴 화면](../images/manual-lw-06-patterns.png)
 

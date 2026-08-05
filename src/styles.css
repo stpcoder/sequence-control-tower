@@ -25,6 +25,8 @@
   --blue: #75a7ff;
   --radius: 11px;
   --sidebar: 68px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -45,12 +47,26 @@ body,
 body {
   color: var(--text);
   text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
 input,
 textarea {
   font: inherit;
+}
+
+select,
+option {
+  color: var(--text);
+  background: #171a20;
+}
+
+select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 button {

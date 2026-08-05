@@ -7,6 +7,7 @@ import {
   MAX_PERSISTED_RULES,
   loadLogWorkbenchState,
   logWorkbenchStorageKey,
+  removeSavedRecipe,
   saveLogWorkbenchState,
   type StorageLike,
 } from "../../src/state/logWorkbench";
@@ -45,6 +46,17 @@ function rule(index: number): RecipeRule {
 }
 
 describe("log workbench renderer persistence", () => {
+  it("removes an archived local recipe from the persisted state", () => {
+    const state = {
+      schemaVersion: LOG_WORKBENCH_SCHEMA_VERSION,
+      observations: [], decisions: [],
+      recipes: [
+        { metadata: { id: "keep", name: "Keep", revision: 1 }, rules: [] },
+        { metadata: { id: "archive", name: "Archive", revision: 1 }, rules: [] },
+      ],
+    };
+    expect(removeSavedRecipe(state, "archive").recipes.map((item) => item.metadata.id)).toEqual(["keep"])
+  });
   it("round-trips DIAG_FAIL decisions and explicit marker ordering", () => {
     const storage = new MemoryStorage();
     const diagRule = rule(90);

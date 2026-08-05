@@ -55,6 +55,7 @@ describe('renderer workspace state', () => {
       inferences: [],
       questions: [{ id: 'purpose', question: '목적?', why: '파일에 없음' }],
       suggestedTags: [],
+      metadataSuggestions: [],
       warnings: [],
     })).toBe(78)
   })

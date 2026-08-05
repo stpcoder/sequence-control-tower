@@ -203,10 +203,23 @@ function sanitizeClause(value: unknown): RuleClause | null {
     ? undefined
     : isRecord(value.order) ? safeIdentifier(value.order.afterClauseId) : null;
   if (afterClauseId === null) return null;
+  const occurrence = value.occurrence === undefined
+    ? undefined
+    : (() => {
+      const candidate = value.occurrence;
+      if (!isRecord(candidate)
+        || (candidate.kind !== "exact" && candidate.kind !== "atLeast")
+        || typeof candidate.count !== "number"
+        || !Number.isSafeInteger(candidate.count)
+        || candidate.count < (candidate.kind === "atLeast" ? 1 : 0)) return null;
+      return { kind: candidate.kind, count: candidate.count } as RuleClause["occurrence"];
+    })();
+  if (occurrence === null) return null;
 
   return {
     id,
     presence: value.presence,
+    ...(occurrence ? { occurrence } : {}),
     matcher: {
       kind: value.matcher.kind,
       pattern,
@@ -332,6 +345,13 @@ export function saveLogWorkbenchState(
   } catch (error) {
     return { ok: false, state, error: error instanceof Error ? error.message : "Storage write failed" };
   }
+}
+
+export function removeSavedRecipe(
+  state: LogWorkbenchPersistedState,
+  recipeId: string,
+): LogWorkbenchPersistedState {
+  return { ...state, recipes: state.recipes.filter((recipe) => recipe.metadata.id !== recipeId) };
 }
 
 export function loadLogWorkbenchState(storage: StorageLike, projectId: string): LoadLogWorkbenchResult {

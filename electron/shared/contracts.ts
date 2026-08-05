@@ -239,6 +239,15 @@ export interface ClarifyingQuestion {
   choices?: string[]
 }
 
+export type MetadataSuggestionField = 'sample' | 'temperature' | 'mode' | 'grid'
+
+export interface MetadataSuggestion {
+  field: MetadataSuggestionField
+  value: string
+  confidence: number
+  reason: string
+}
+
 export interface AnalysisResult {
   artifactId: string
   parentArtifactId?: string
@@ -253,6 +262,8 @@ export interface AnalysisResult {
   inferences: AnalysisInference[]
   questions: ClarifyingQuestion[]
   suggestedTags: string[]
+  /** Suggestions are emitted only for filename fields that are unknown or conflicting. */
+  metadataSuggestions: MetadataSuggestion[]
   warnings: string[]
 }
 
@@ -405,6 +416,7 @@ export interface EvaluationDecisionRevision {
 export interface EvaluationRecipeClause {
   id: string
   presence: 'present' | 'absent'
+  occurrence?: { kind: 'exact' | 'atLeast'; count: number }
   matcher: {
     kind: 'literal' | 'regex'
     pattern: string
@@ -435,6 +447,20 @@ export interface EvaluationRecipeRevision {
   rules: EvaluationRecipeRule[]
   createdAt: string
   supersedesId?: string
+  /** Absent in legacy snapshots; archived revisions are excluded from active rules. */
+  archived?: boolean
+}
+
+/** Returns the newest non-archived revision for each recipe identity. */
+export function getActiveEvaluationRecipeRevisions(
+  revisions: readonly EvaluationRecipeRevision[]
+): EvaluationRecipeRevision[] {
+  const latest = new Map<string, EvaluationRecipeRevision>()
+  revisions.forEach((revision) => {
+    const current = latest.get(revision.recipeId)
+    if (!current || revision.revision > current.revision) latest.set(revision.recipeId, revision)
+  })
+  return [...latest.values()].filter((revision) => revision.archived !== true)
 }
 
 export type EvaluationBatchExceptionCode =
@@ -519,6 +545,11 @@ export interface EvaluationSaveRecipeInput extends EvaluationProjectRequest {
   recipeId?: string
   name: string
   rules: EvaluationRecipeRule[]
+}
+
+export interface EvaluationArchiveRecipeInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  recipeId: string
 }
 
 export interface EvaluationSaveBatchInput extends EvaluationProjectRequest {
@@ -618,6 +649,7 @@ export interface SequenceIntelligenceApi {
     getSnapshot(input: EvaluationProjectRequest): Promise<EvaluationProjectSnapshot>
     saveDecision(input: EvaluationSaveDecisionInput): Promise<EvaluationDecisionSaveResult>
     saveRecipe(input: EvaluationSaveRecipeInput): Promise<EvaluationRecipeSaveResult>
+    archiveRecipe(input: EvaluationArchiveRecipeInput): Promise<EvaluationRecipeSaveResult>
     saveBatch(input: EvaluationSaveBatchInput): Promise<EvaluationBatchSaveResult>
     saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult>
     approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
@@ -649,6 +681,7 @@ export const IPC_CHANNELS = {
   evaluationGetSnapshot: 'evaluation:get-snapshot',
   evaluationSaveDecision: 'evaluation:save-decision',
   evaluationSaveRecipe: 'evaluation:save-recipe',
+  evaluationArchiveRecipe: 'evaluation:archive-recipe',
   evaluationSaveBatch: 'evaluation:save-batch',
   evaluationSaveRecipeAndBatch: 'evaluation:save-recipe-and-batch',
   evaluationApproveMetadata: 'evaluation:approve-metadata'

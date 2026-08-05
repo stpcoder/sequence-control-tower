@@ -44,9 +44,13 @@
 - 로그별 first/last 근거 줄 저장
 - `PASS`, `DIAG_FAIL`, `TEST_FAIL`, `TRAINING_FAIL`, `SYSTEM_HALT`, `SYSTEM_REBOOT`, `INCOMPLETE`, `UNKNOWN`, `EXCLUDED`
 - 규칙 충돌, 근거 누락, 검색 실패의 검토 상태 관리
-- 결과표 검색, 필터, 정렬, pagination, CSV/TSV 내보내기
-- Sample, 온도, Mode metadata 후보 추출과 승인
-- 결과 분포와 Sample/온도/Mode 피벗
+- 결과표 검색, 필터, 정렬, pagination, CSV/TSV 확인창 후 확정
+- 파일명에서 Sample, 온도, Mode, Grid를 추출하고 값을 직접 수정
+- 확인되지 않은 metadata는 LLM 후보 제안으로 검토
+- 검색 결과를 판정 조건으로 pin하고 0개, 1개 이상, 정확히 N개와 marker 순서를 지정
+- 저장한 규칙을 불러오고 revision을 관리하며 이전 규칙을 보관
+- N × M 피벗: 최대 2개 행축과 2개 열축 조합
+- 결과표의 `FAIL 모아보기` 및 `미확인·검토필요` preset
 - 판정, 규칙, 일괄 판정, metadata 승인의 revision 저장
 - 파일 내용 SHA가 변경된 경우 새 revision 검토
 
@@ -111,8 +115,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.5.1
-git push origin v0.5.1
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.
@@ -121,7 +125,7 @@ git push origin v0.5.1
 
 - 폴더 가져오기 진행률과 취소 UI
 - 대용량 로그용 sparse line index
-- metadata extractor 편집과 여러 행 일괄 승인
+- 여러 행 metadata 일괄 승인
 - 사내 VPN, private CA, vLLM endpoint 실기 검증
 - Windows 10/11 설치, 업데이트, 제거 smoke test
 - 조직 인증서를 사용한 Windows/macOS 서명 배포

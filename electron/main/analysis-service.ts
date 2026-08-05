@@ -5,6 +5,8 @@ import type {
   AnalysisJobSnapshot,
   AnalysisResult,
   ClarifyingQuestion,
+  MetadataSuggestion,
+  MetadataSuggestionField,
   SemanticChange,
   SequenceFact,
   StartAnalysisInput
@@ -14,8 +16,9 @@ import { AtomicJsonStore } from './json-store'
 import { buildMinimalLlmEvidence, buildMinimalLlmPrompt } from './llm-evidence'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { PARSER_VERSION, parseSequence, semanticChanges } from './sequence-parser'
+import { parseFilenameMetadata } from '../../src/domain/workbench/filenameMetadata'
 
-const ANALYSIS_PROMPT_VERSION = 'intent-review-2-minimal-evidence'
+const ANALYSIS_PROMPT_VERSION = 'intent-review-3-metadata-suggestions'
 
 interface AnalysisCache {
   schemaVersion: 1
@@ -33,7 +36,10 @@ interface LlmAnalysisShape {
   inferences?: unknown
   questions?: unknown
   suggestedTags?: unknown
+  metadataSuggestions?: unknown
 }
+
+const METADATA_FIELDS: readonly MetadataSuggestionField[] = ['sample', 'temperature', 'mode', 'grid']
 
 function boundedString(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -114,6 +120,24 @@ function validateTags(value: unknown): string[] {
         .filter(Boolean)
     )
   ].slice(0, 12)
+}
+
+/** Accept suggestions only for unresolved deterministic filename metadata. */
+export function validateMetadataSuggestions(value: unknown, unresolved: ReadonlySet<MetadataSuggestionField>): MetadataSuggestion[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 8).flatMap((item): MetadataSuggestion[] => {
+    if (!item || typeof item !== 'object') return []
+    const record = item as Record<string, unknown>
+    const field = boundedString(record.field, 30) as MetadataSuggestionField
+    const suggestion = boundedString(record.value, 180)
+    const reason = boundedString(record.reason, 400)
+    if (!METADATA_FIELDS.includes(field) || !unresolved.has(field) || !suggestion || !reason) return []
+    return [{ field, value: suggestion, confidence: confidence(record.confidence), reason }]
+  })
+}
+
+function compatibleCachedResult(result: AnalysisResult): AnalysisResult {
+  return { ...result, metadataSuggestions: Array.isArray(result.metadataSuggestions) ? result.metadataSuggestions : [] }
 }
 
 function deterministicSummary(name: string, facts: SequenceFact[], changes: SemanticChange[]): string {
@@ -244,12 +268,16 @@ export class AnalysisService {
       : undefined
     const changes = semanticChanges(parentFingerprint, current)
     const llmSummary = await this.llmConfig.summary()
+    const filenameMetadata = parseFilenameMetadata(artifact.originalNames[0] ?? 'artifact.seq')
+    const unresolvedMetadata = new Set<MetadataSuggestionField>(
+      METADATA_FIELDS.filter((field) => filenameMetadata[field].state === 'unknown' || filenameMetadata[field].state === 'conflict')
+    )
     // LLM calls are deliberately selective. With neither a human hint nor a
     // parent diff, a model has no reliable basis for intent and would only
     // consume shared TPM/RPM while increasing hallucination risk.
     const shouldUseLlm =
       llmSummary.configured &&
-      Boolean(input.userComment || (input.parentArtifactId && changes.length > 0))
+      Boolean(input.userComment || (input.parentArtifactId && changes.length > 0) || unresolvedMetadata.size > 0)
     const cacheKey = createHash('sha256')
       .update(
         JSON.stringify({
@@ -259,12 +287,13 @@ export class AnalysisService {
           parent: input.parentArtifactId,
           comment: input.userComment,
           context: input.projectContext,
+          filenameMetadata: METADATA_FIELDS.map((field) => [field, filenameMetadata[field].state, filenameMetadata[field].candidates]),
           llm: llmSummary.configured ? `${llmSummary.baseUrl}|${llmSummary.model}` : 'fallback'
         })
       )
       .digest('hex')
     const cached = (await this.cache.read()).entries[cacheKey]
-    if (cached) return { ...cached, cached: true }
+    if (cached) return { ...compatibleCachedResult(cached), cached: true }
 
     const warnings: string[] = []
     if (currentText.truncated) {
@@ -276,6 +305,7 @@ export class AnalysisService {
     let inferences: AnalysisInference[] = []
     let questions: ClarifyingQuestion[] = []
     let suggestedTags = current.facts.map((item) => item.key)
+    let metadataSuggestions: MetadataSuggestion[] = []
 
     if (input.userComment) {
       inferences.push({
@@ -304,6 +334,7 @@ export class AnalysisService {
         inferences = [...inferences, ...validateInferences(parsed.inferences)].slice(0, 6)
         questions = validateQuestions(parsed.questions)
         suggestedTags = validateTags(parsed.suggestedTags)
+        metadataSuggestions = validateMetadataSuggestions(parsed.metadataSuggestions, unresolvedMetadata)
         source = 'llm'
         model = completion.model
       } catch (error) {
@@ -365,6 +396,7 @@ export class AnalysisService {
       inferences,
       questions,
       suggestedTags,
+      metadataSuggestions,
       warnings
     }
 

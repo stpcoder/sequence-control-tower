@@ -1,11 +1,12 @@
 import type { ResultLabel } from '../domain/workbench'
 import type { MetadataFieldDefinition } from '../domain/workbench/records'
+import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
 export type ResultSource = 'engineer' | 'candidate' | 'unreviewed'
-export type PatternAxis = 'sample' | 'temperature' | 'mode'
+export type PatternAxis = 'sample' | 'temperature' | 'mode' | 'grid'
 
 export interface CandidateValue {
   value: string | null
@@ -31,6 +32,7 @@ export interface LogResultRecord {
   sample: CandidateValue
   temperature: CandidateValue
   mode: CandidateValue
+  grid: CandidateValue
   result: ResultLabel
   resultSource: ResultSource
   review: ReviewState
@@ -45,7 +47,57 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'result' | 'review' | 'evidenceCount'
+export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run'
+export type PivotAggregation = 'count' | 'fail_count' | 'evidence_count'
+
+/** Configuration for the results pivot. Axis lists are intentionally bounded to two dimensions. */
+export interface PivotConfig {
+  rows: readonly PivotDimension[]
+  columns: readonly PivotDimension[]
+  aggregation: PivotAggregation
+  filters: LogRecordFilters
+}
+
+export interface PivotHeader {
+  key: string
+  values: readonly string[]
+  label: string
+}
+
+export interface PivotCell {
+  value: number
+  sourceIds: readonly string[]
+}
+
+export interface PivotGrid {
+  rows: readonly PivotHeader[]
+  columns: readonly PivotHeader[]
+  cells: readonly (readonly PivotCell[])[]
+  total: number
+  sourceIds: readonly string[]
+}
+
+/** Returns whether a renderer's selected pivot cell still exists in its current scope. */
+export function isPivotSelectionValid(
+  selectedCellKey: string | null,
+  selectedSourceIds: ReadonlySet<string> | null,
+  grid: PivotGrid,
+  scopedRecords: readonly LogResultRecord[],
+): boolean {
+  if (selectedCellKey === null || selectedSourceIds === null) return true
+  const selectedCell = grid.rows.flatMap((row, rowIndex) => grid.columns.map((column, columnIndex) => ({
+    rowIndex,
+    columnIndex,
+    key: `${row.key}-${column.key}`,
+  }))).find((cell) => cell.key === selectedCellKey)
+  const rowIndex = selectedCell?.rowIndex ?? -1
+  const columnIndex = selectedCell?.columnIndex ?? -1
+  if (rowIndex < 0 || columnIndex < 0 || !grid.cells[rowIndex]?.[columnIndex]) return false
+  const availableIds = new Set(scopedRecords.map((row) => row.id))
+  return [...selectedSourceIds].every((sourceId) => availableIds.has(sourceId))
+}
+
+export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
 export interface PatternMatrixRow {
@@ -59,6 +111,7 @@ export const DEFAULT_METADATA_FIELDS: readonly MetadataFieldDefinition[] = [
   { key: 'sample', label: 'Sample', target: 'file_name', pattern: '(?:^|[_.-])(?:SAMPLE|SMP|S)[=_-]?(?:(?:SAMPLE|SMP)[=_-])?(?<value>[A-Z0-9-]+?)(?=[_.-])', captureGroup: 'value' },
   { key: 'temperature', label: 'Temperature', target: 'file_name', pattern: '(?:TEMP[=_-]?)?(?<value>-?\\d+(?:[p.]\\d+)?)C(?=[_.-]|$)', captureGroup: 'value' },
   { key: 'mode', label: 'Mode', target: 'file_name', pattern: '(?:MODE[=_-]?)?(?<value>DIAG|TEST|TRAINING|STRESS|NORMAL|UEFI)(?=[_.-]|$)', captureGroup: 'value' },
+  { key: 'grid', label: 'Grid', target: 'file_name', pattern: '(?:^|[_.+@-])(?:(?:GRID|MATRIX)[=_-]?|G[=_-])(?<value>[A-Z0-9][A-Z0-9xX*-]*?)(?=[_.-]|$)', captureGroup: 'value' },
 ] as const
 
 const RESULT_ORDER: readonly ResultLabel[] = [
@@ -125,12 +178,17 @@ function fallbackFromContent(file: WorkbenchFile, key: PatternAxis): CandidateVa
     ? /temperature\s*=\s*(?<value>-?\d+(?:\.\d+)?)\s*C/giu
     : key === 'mode'
       ? /mode\s*:\s*(?<value>[A-Z][A-Z0-9_-]*)/giu
-      : /sample\s*[:=]\s*(?<value>[A-Z0-9_-]+)/giu
+      : key === 'grid'
+        ? /(?:grid|matrix|test\s+grid)\s*[:=]\s*(?<value>[A-Z0-9][A-Z0-9xX*-]*)/giu
+        : /sample\s*[:=]\s*(?<value>[A-Z0-9_-]+)/giu
   const values = uniqueMatches(text, pattern)
   return values.length === 1 ? { value: values[0], state: 'candidate' } : { value: null, state: values.length > 1 ? 'malformed' : 'missing' }
 }
 
 function metadataCandidate(file: WorkbenchFile, key: PatternAxis): CandidateValue {
+  const parsed = parseFilenameMetadata(file.name)[key]
+  if (parsed.state === 'extracted') return { value: parsed.value, state: 'candidate' }
+  if (parsed.state === 'conflict') return { value: null, state: 'malformed' }
   const definition = DEFAULT_METADATA_FIELDS.find((field) => field.key === key)
   if (!definition) return { value: null, state: 'missing' }
   const fromName = candidateFromName(file.name, definition)
@@ -238,6 +296,7 @@ export function projectLogRecords(
     const sample = applyMetadataApproval(metadataCandidate(file, 'sample'), approvals.sample)
     const temperature = applyMetadataApproval(metadataCandidate(file, 'temperature'), approvals.temperature)
     const mode = applyMetadataApproval(metadataCandidate(file, 'mode'), approvals.mode)
+    const grid = applyMetadataApproval(metadataCandidate(file, 'grid'), approvals.grid)
     const inferred = inferResultCandidate(file)
     const result = file.decision ?? file.ruleResult ?? inferred.result
     const resultSource: ResultSource = file.decision
@@ -259,6 +318,7 @@ export function projectLogRecords(
       sample,
       temperature,
       mode,
+      grid,
       result,
       resultSource,
       review: file.decision && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
@@ -279,13 +339,83 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
     if (filters.result !== 'all' && row.result !== filters.result) return false
     if (filters.review !== 'all' && row.review !== filters.review) return false
     if (!query) return true
-    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.result]
+    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, row.result]
       .some((value) => normalized(value).includes(query))
   })
 }
 
+const PIVOT_UNKNOWN = '미확인'
+
+function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension): string {
+  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') {
+    return row[dimension].value ?? PIVOT_UNKNOWN
+  }
+  if (dimension === 'run') return row.run ?? PIVOT_UNKNOWN
+  return String(row[dimension] || PIVOT_UNKNOWN)
+}
+
+function pivotKey(values: readonly string[]): string {
+  return JSON.stringify(values)
+}
+
+function comparePivotHeaders(left: PivotHeader, right: PivotHeader): number {
+  return left.label.localeCompare(right.label, 'ko-KR', { numeric: true, sensitivity: 'base' })
+}
+
+function pivotAmount(row: LogResultRecord, aggregation: PivotAggregation): number {
+  if (aggregation === 'evidence_count') return row.evidenceCount
+  if (aggregation === 'count') return 1
+  return row.result !== 'PASS' && row.result !== 'UNKNOWN' && row.result !== 'INCOMPLETE' && row.result !== 'EXCLUDED' ? 1 : 0
+}
+
+function validatePivotAxes(axis: readonly PivotDimension[], name: string): void {
+  if (axis.length > 2) throw new RangeError(`Pivot ${name} may contain at most two dimensions`)
+  if (new Set(axis).size !== axis.length) throw new RangeError(`Pivot ${name} may not contain duplicate dimensions`)
+}
+
+/** Builds a deterministic, source-traceable pivot without mutating records or configuration. */
+export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotConfig): PivotGrid {
+  validatePivotAxes(config.rows, 'rows')
+  validatePivotAxes(config.columns, 'columns')
+  const filtered = filterLogRecords(rows, config.filters)
+  const rowMap = new Map<string, PivotHeader>()
+  const columnMap = new Map<string, PivotHeader>()
+  const values = new Map<string, { value: number; sourceIds: string[] }>()
+  const allSourceIds: string[] = []
+
+  for (const row of filtered) {
+    const rowValues = config.rows.map((dimension) => pivotDimensionValue(row, dimension))
+    const columnValues = config.columns.map((dimension) => pivotDimensionValue(row, dimension))
+    const rowHeader: PivotHeader = { key: pivotKey(rowValues), values: [...rowValues], label: rowValues.join(' / ') || '전체' }
+    const columnHeader: PivotHeader = { key: pivotKey(columnValues), values: [...columnValues], label: columnValues.join(' / ') || '전체' }
+    rowMap.set(rowHeader.key, rowHeader)
+    columnMap.set(columnHeader.key, columnHeader)
+    const cellKey = `${rowHeader.key}\u0000${columnHeader.key}`
+    const cell = values.get(cellKey) ?? { value: 0, sourceIds: [] }
+    const amount = pivotAmount(row, config.aggregation)
+    cell.value += amount
+    if (amount !== 0 && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
+    values.set(cellKey, cell)
+    if (!allSourceIds.includes(row.id)) allSourceIds.push(row.id)
+  }
+
+  const pivotRows = [...rowMap.values()].sort(comparePivotHeaders)
+  const pivotColumns = [...columnMap.values()].sort(comparePivotHeaders)
+  const cells = pivotRows.map((rowHeader) => pivotColumns.map((columnHeader) => {
+    const cell = values.get(`${rowHeader.key}\u0000${columnHeader.key}`)
+    return { value: cell?.value ?? 0, sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]) }
+  }))
+  return {
+    rows: Object.freeze(pivotRows.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
+    columns: Object.freeze(pivotColumns.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
+    cells: Object.freeze(cells.map((row) => Object.freeze(row))),
+    total: filtered.reduce((sum, row) => sum + pivotAmount(row, config.aggregation), 0),
+    sourceIds: Object.freeze(allSourceIds),
+  }
+}
+
 function sortableValue(row: LogResultRecord, key: LogRecordSortKey): string | number {
-  if (key === 'sample' || key === 'temperature' || key === 'mode') return row[key].value ?? ''
+  if (key === 'sample' || key === 'temperature' || key === 'mode' || key === 'grid') return row[key].value ?? ''
   return row[key]
 }
 
@@ -386,6 +516,8 @@ const BASE_EXPORT_HEADER = [
   'temperature_state',
   'mode_value',
   'mode_state',
+  'grid_value',
+  'grid_state',
   'result',
   'result_source',
   'review',
@@ -415,6 +547,8 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'temperature_state', label: '온도 상태' },
   { key: 'mode_value', label: 'Mode 값' },
   { key: 'mode_state', label: 'Mode 상태' },
+  { key: 'grid_value', label: 'Grid 값' },
+  { key: 'grid_state', label: 'Grid 상태' },
   { key: 'result', label: '결과' },
   { key: 'result_source', label: '결과 출처' },
   { key: 'review', label: '검토' },
@@ -442,6 +576,8 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     temperature_state: row.temperature.state,
     mode_value: row.mode.value ?? '',
     mode_state: row.mode.state,
+    grid_value: row.grid.value ?? '',
+    grid_state: row.grid.state,
     result: row.result,
     result_source: row.resultSource,
     review: row.review,
@@ -460,8 +596,13 @@ function exportRows(rows: readonly LogResultRecord[], columns: readonly LogRecor
   ]
 }
 
-function normalizedExportCell(value: unknown): string {
+export function normalizedExportCell(value: unknown): string {
   return safeSpreadsheetCell(value).replace(/[\t\r\n]+/g, ' ')
+}
+
+/** The exact logical cell value emitted by either export serializer. */
+export function exportCellValue(row: LogResultRecord, column: LogRecordExportColumn): string {
+  return normalizedExportCell(exportRowValues(row)[column])
 }
 
 function csvExportCell(value: unknown): string {
@@ -482,4 +623,74 @@ export function serializeLogRecordsCsv(
 ): string {
   const selectedColumns = normalizeExportColumns(columns)
   return `\uFEFF${exportRows(rows, selectedColumns).map((record) => record.map(csvExportCell).join(',')).join('\r\n')}`
+}
+
+export type LogRecordExportFormat = 'csv' | 'tsv'
+
+export interface LogRecordExportPreviewInit {
+  readonly phase: 'init'
+  readonly rows: readonly LogResultRecord[]
+  readonly columns: readonly LogRecordExportColumn[]
+}
+
+export interface LogRecordExportPreview {
+  readonly phase: 'preview'
+  readonly rows: readonly LogResultRecord[]
+  readonly columns: readonly LogRecordExportColumn[]
+  readonly format: LogRecordExportFormat
+  readonly serialized: string
+  readonly csv: string
+  readonly tsv: string
+}
+
+/** Creates the immutable input snapshot used by an export init → preview flow. */
+export function initLogRecordExportPreview(
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+): LogRecordExportPreviewInit {
+  const snapshotRows = exportableLogRecords(rows, selectedIds).map((row) => Object.freeze({
+    ...row,
+    sample: Object.freeze({ ...row.sample }),
+    temperature: Object.freeze({ ...row.temperature }),
+    mode: Object.freeze({ ...row.mode }),
+    grid: Object.freeze({ ...row.grid }),
+  }))
+  return Object.freeze({
+    phase: 'init' as const,
+    rows: Object.freeze(snapshotRows),
+    columns: Object.freeze(normalizeExportColumns(columns)),
+  })
+}
+
+/** Purely materializes both supported serializers so a UI can show a preview before confirmation. */
+export function previewLogRecordExport(
+  init: LogRecordExportPreviewInit,
+  format: LogRecordExportFormat = 'csv',
+): LogRecordExportPreview {
+  const csv = serializeLogRecordsCsv(init.rows, init.columns)
+  const tsv = serializeLogRecordsTsv(init.rows, init.columns)
+  return Object.freeze({
+    phase: 'preview' as const,
+    rows: init.rows,
+    columns: init.columns,
+    format,
+    serialized: format === 'csv' ? csv : tsv,
+    csv,
+    tsv,
+  })
+}
+
+/** Confirmation remains side-effect free; the caller owns the actual download/write operation. */
+export function confirmLogRecordExport(preview: LogRecordExportPreview): string {
+  return preview.serialized
+}
+
+export function buildLogRecordExportPreview(
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  format: LogRecordExportFormat = 'csv',
+): LogRecordExportPreview {
+  return previewLogRecordExport(initLogRecordExportPreview(rows, selectedIds, columns), format)
 }

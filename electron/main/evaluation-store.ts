@@ -3,6 +3,7 @@ import { readFile, rename } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
   EvaluationApproveMetadataInput,
+  EvaluationArchiveRecipeInput,
   EvaluationBatchOutcome,
   EvaluationBatchOutcomeInput,
   EvaluationBatchRun,
@@ -115,20 +116,30 @@ function isAbsolutePath(value: string): boolean {
   return /^[a-zA-Z]:(?:[\\/]|\\{2,})/.test(probe) || /^\\{2,}[^\\]+\\/.test(probe) || slashNormalized.startsWith('/')
 }
 
-function rejectSensitivePayload(value: unknown, key = ''): void {
+interface SensitivePayloadOptions {
+  allowAbsolutePath?: boolean
+}
+
+function rejectSensitivePayload(value: unknown, key = '', options: SensitivePayloadOptions = {}): void {
   const normalizedKey = key.replace(/[^a-z]/gi, '').toLocaleLowerCase()
   if (FORBIDDEN_KEYS.has(normalizedKey)) throw new Error(`저장할 수 없는 필드입니다: ${key}`)
   if (typeof value === 'string') {
     if (resemblesSecret(value)) throw new Error('비밀정보가 포함된 값은 저장할 수 없습니다.')
-    if (isAbsolutePath(value)) throw new Error('절대 경로는 저장할 수 없습니다.')
+    if (!options.allowAbsolutePath && isAbsolutePath(value)) throw new Error('절대 경로는 저장할 수 없습니다.')
     return
   }
   if (Array.isArray(value)) {
-    value.forEach((item) => rejectSensitivePayload(item, key))
+    value.forEach((item) => rejectSensitivePayload(item, key, options))
     return
   }
   if (isRecord(value)) {
-    Object.entries(value).forEach(([childKey, child]) => rejectSensitivePayload(child, childKey))
+    Object.entries(value).forEach(([childKey, child]) => rejectSensitivePayload(
+      child,
+      childKey,
+      normalizedKey === 'matcher' && childKey.replace(/[^a-z]/gi, '').toLocaleLowerCase() === 'pattern'
+        ? { ...options, allowAbsolutePath: true }
+        : options
+    ))
   }
 }
 
@@ -142,13 +153,15 @@ function safeIdentifier(value: unknown, name: string, maximum = 220): string {
   return trimmed
 }
 
-function safeText(value: unknown, name: string, maximum = 512): string {
+function safeText(value: unknown, name: string, maximum = 512, options: SensitivePayloadOptions = {}): string {
   if (typeof value !== 'string') throw new Error(`${name}이(가) 올바르지 않습니다.`)
   const trimmed = value.trim()
   if (!trimmed || trimmed.length > maximum || /[\r\n\u0000]/.test(trimmed)) {
     throw new Error(`${name}이(가) 올바르지 않습니다.`)
   }
-  if (isAbsolutePath(trimmed) || resemblesSecret(trimmed)) throw new Error(`${name}에 민감정보를 사용할 수 없습니다.`)
+  if ((!options.allowAbsolutePath && isAbsolutePath(trimmed)) || resemblesSecret(trimmed)) {
+    throw new Error(`${name}에 민감정보를 사용할 수 없습니다.`)
+  }
   return trimmed
 }
 
@@ -231,15 +244,21 @@ function recipeClause(value: EvaluationRecipeClause): EvaluationRecipeClause {
   if (value.matcher.kind !== 'literal' && value.matcher.kind !== 'regex') throw new Error('matcher kind가 올바르지 않습니다.')
   if (!['content', 'file_name', 'path'].includes(String(value.matcher.target))) throw new Error('matcher target이 올바르지 않습니다.')
   if (typeof value.matcher.caseSensitive !== 'boolean') throw new Error('caseSensitive가 올바르지 않습니다.')
+  const occurrence = value.occurrence === undefined
+    ? undefined
+    : isRecord(value.occurrence) && (value.occurrence.kind === 'exact' || value.occurrence.kind === 'atLeast')
+      ? { kind: value.occurrence.kind, count: safeInteger(value.occurrence.count, 'occurrence count', value.occurrence.kind === 'atLeast' ? 1 : 0) }
+      : (() => { throw new Error('occurrence 조건이 올바르지 않습니다.') })()
   const order = value.order === undefined
     ? undefined
     : { afterClauseId: safeIdentifier(value.order.afterClauseId, 'afterClauseId') }
   return {
     id: safeIdentifier(value.id, 'clauseId'),
     presence: value.presence,
+    ...(occurrence ? { occurrence } : {}),
     matcher: {
       kind: value.matcher.kind,
-      pattern: safeText(value.matcher.pattern, 'matcher pattern', 1_000),
+      pattern: safeText(value.matcher.pattern, 'matcher pattern', 1_000, { allowAbsolutePath: true }),
       caseSensitive: value.matcher.caseSensitive,
       target: value.matcher.target
     },
@@ -418,6 +437,28 @@ export class EvaluationStore {
     return { snapshot, recipe: saved }
   }
 
+  async archiveRecipe(input: EvaluationArchiveRecipeInput): Promise<EvaluationRecipeSaveResult> {
+    rejectSensitivePayload(input)
+    const recipeId = safeIdentifier(input.recipeId, 'recipeId')
+    let saved!: EvaluationRecipeRevision
+    const snapshot = await this.mutate(input.projectId, input.expectedRevision, (project) => {
+      const previous = [...project.recipes].reverse().find((item) => item.recipeId === recipeId)
+      if (!previous) throw new Error('존재하지 않는 recipeId입니다.')
+      saved = {
+        id: this.makeId(),
+        recipeId: previous.recipeId,
+        revision: previous.revision + 1,
+        name: previous.name,
+        rules: [],
+        createdAt: this.now().toISOString(),
+        supersedesId: previous.id,
+        archived: true
+      }
+      project.recipes.push(saved)
+    })
+    return { snapshot, recipe: saved }
+  }
+
   async saveBatch(input: EvaluationSaveBatchInput): Promise<EvaluationBatchSaveResult> {
     rejectSensitivePayload(input)
     if (!['completed', 'failed', 'cancelled'].includes(String(input.status))) throw new Error('batch status가 올바르지 않습니다.')
@@ -529,6 +570,7 @@ export class EvaluationStore {
     const candidateValue = safeOptionalText(input.candidateValue, 'candidateValue')
     const approvedValue = safeOptionalText(input.approvedValue, 'approvedValue')
     const extractorId = safeOptionalText(input.extractorId, 'extractorId', 160)
+    if (approvedValue === '미확인') throw new Error('미확인은 approvedValue로 저장할 수 없습니다.')
     if (input.approval === 'approved' && approvedValue === undefined && candidateValue === undefined) {
       throw new Error('승인할 metadata 값이 필요합니다.')
     }
