@@ -405,6 +405,7 @@ export interface EvaluationDecisionRevision {
 export interface EvaluationRecipeClause {
   id: string
   presence: 'present' | 'absent'
+  occurrence?: { kind: 'exact' | 'atLeast'; count: number }
   matcher: {
     kind: 'literal' | 'regex'
     pattern: string

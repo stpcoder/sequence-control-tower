@@ -25,6 +25,10 @@ export type ObservationRole = "search_history" | "decision_evidence";
 export type SearchTarget = "content" | "file_name" | "path";
 export type MatcherKind = "literal" | "regex";
 
+export type OccurrenceCondition =
+  | { kind: "exact"; count: number }
+  | { kind: "atLeast"; count: number };
+
 /**
  * A search is history by default. It becomes decision evidence only through an
  * explicit engineer action; merely repeating a search never promotes it.
@@ -72,6 +76,8 @@ export interface RuleScope {
 export interface RuleClause {
   id: string;
   presence: "present" | "absent";
+  /** Optional count condition; omitted clauses retain legacy presence semantics. */
+  occurrence?: OccurrenceCondition;
   matcher: {
     kind: MatcherKind;
     pattern: string;

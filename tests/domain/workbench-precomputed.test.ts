@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateDocument,
   evaluatePrecomputedEvidence,
+  compareOccurrence,
   type PrecomputedDocumentEvidence,
   type RecipeRule,
 } from "../../src/domain/workbench";
@@ -53,6 +54,27 @@ function evidence(sourceId: string, rules: RecipeRule[], present = 1, pass = 0):
 }
 
 describe("precomputed recipe evaluation", () => {
+  it.each([
+    [{ kind: "exact", count: 0 } as const, [0, 1], [true, false]],
+    [{ kind: "atLeast", count: 1 } as const, [0, 1, 3], [false, true, true]],
+    [{ kind: "exact", count: 2 } as const, [1, 2, 3], [false, true, false]],
+  ])("compares occurrence conditions at the boundary", (condition, counts, expected) => {
+    expect(counts.map((count) => compareOccurrence(count, condition, "present"))).toEqual(expected);
+  });
+
+  it("uses an exact occurrence condition identically for raw and precomputed evaluation", () => {
+    const exact = { ...rule("exact", "PASS"), clauses: [{
+      ...rule("exact", "PASS").clauses[0], matcher: { ...rule("exact", "PASS").clauses[0].matcher, pattern: "@PASS" }, occurrence: { kind: "exact" as const, count: 2 },
+    }] };
+    const fromText = evaluateDocument({ id: "exact-log", text: "@PASS @PASS" }, [exact]);
+    const fromCounts = evaluatePrecomputedEvidence({
+      sourceId: "exact-log",
+      rules: [{ ruleId: exact.id, clauses: [{ clauseId: exact.clauses[0].id, occurrenceCount: 2 }] }],
+    }, [exact]);
+    expect(fromText.result).toBe("PASS");
+    expect(fromCounts.result).toBe(fromText.result);
+  });
+
   it("matches raw-text evaluation for present and absent clauses", () => {
     const halt = rule("halt", "SYSTEM_HALT");
     const fromText = evaluateDocument({ id: "log-1", text: "stressapp started\nsystem stopped" }, [halt]);

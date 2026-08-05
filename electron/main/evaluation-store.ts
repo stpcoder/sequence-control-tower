@@ -231,12 +231,18 @@ function recipeClause(value: EvaluationRecipeClause): EvaluationRecipeClause {
   if (value.matcher.kind !== 'literal' && value.matcher.kind !== 'regex') throw new Error('matcher kind가 올바르지 않습니다.')
   if (!['content', 'file_name', 'path'].includes(String(value.matcher.target))) throw new Error('matcher target이 올바르지 않습니다.')
   if (typeof value.matcher.caseSensitive !== 'boolean') throw new Error('caseSensitive가 올바르지 않습니다.')
+  const occurrence = value.occurrence === undefined
+    ? undefined
+    : isRecord(value.occurrence) && (value.occurrence.kind === 'exact' || value.occurrence.kind === 'atLeast')
+      ? { kind: value.occurrence.kind, count: safeInteger(value.occurrence.count, 'occurrence count', value.occurrence.kind === 'atLeast' ? 1 : 0) }
+      : (() => { throw new Error('occurrence 조건이 올바르지 않습니다.') })()
   const order = value.order === undefined
     ? undefined
     : { afterClauseId: safeIdentifier(value.order.afterClauseId, 'afterClauseId') }
   return {
     id: safeIdentifier(value.id, 'clauseId'),
     presence: value.presence,
+    ...(occurrence ? { occurrence } : {}),
     matcher: {
       kind: value.matcher.kind,
       pattern: safeText(value.matcher.pattern, 'matcher pattern', 1_000),

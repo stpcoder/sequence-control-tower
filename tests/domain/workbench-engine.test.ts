@@ -4,9 +4,13 @@ import {
   createObservation,
   evaluateDocument,
   evaluateText,
+  clauseOrderingError,
+  recalculateClauseOrder,
+  reorderClauses,
   recordObservation,
   selectDecisionEvidence,
   type RecipeRule,
+  type RuleClause,
 } from "../../src/domain/workbench";
 
 function verified(rule: RecipeRule, id = rule.id): RecipeRule {
@@ -14,6 +18,32 @@ function verified(rule: RecipeRule, id = rule.id): RecipeRule {
 }
 
 describe("teach-by-search recipe engine", () => {
+  it("reorders clauses purely and rebuilds predecessor references", () => {
+    const clauses: RuleClause[] = ["a", "b", "c"].map((id) => ({
+      id, presence: "present" as const,
+      matcher: { kind: "literal" as const, pattern: id, caseSensitive: true, target: "content" as const },
+      sourceObservationId: `${id}-obs`,
+    }));
+    const reordered = reorderClauses(clauses, 2, 0);
+    expect(reordered.map((clause) => clause.id)).toEqual(["c", "a", "b"]);
+    expect(reordered.map((clause) => clause.order?.afterClauseId)).toEqual([undefined, "c", "a"]);
+    expect(clauses.every((clause) => clause.order === undefined)).toBe(true);
+    expect(recalculateClauseOrder(reordered)).toEqual(reordered);
+  });
+
+  it.each([
+    ["cycle", (clauses: RecipeRule["clauses"]) => clauses.map((clause, index) => ({ ...clause, order: { afterClauseId: clauses[(index + 1) % clauses.length].id } })), "cyclic"],
+    ["absence", (clauses: RecipeRule["clauses"]) => clauses.map((clause, index) => index === 1 ? { ...clause, presence: "absent" as const, order: { afterClauseId: clauses[0].id } } : clause), "absence"],
+    ["non-content", (clauses: RecipeRule["clauses"]) => clauses.map((clause, index) => index === 1 ? { ...clause, matcher: { ...clause.matcher, target: "path" as const }, order: { afterClauseId: clauses[0].id } } : clause), "outside log content"],
+  ])("reports %s ordering errors consistently", (_name, mutate, fragment) => {
+    const base: RuleClause[] = ["a", "b"].map((id) => ({
+      id, presence: "present" as const,
+      matcher: { kind: "literal" as const, pattern: id, caseSensitive: true, target: "content" as const },
+      sourceObservationId: `${id}-obs`,
+    }));
+    expect(clauseOrderingError(mutate(base), "rule-x")).toContain(fragment);
+  });
+
   it("deduplicates searches without silently promoting search history", () => {
     let observations = recordObservation([], {
       sourceId: "sample-1",

@@ -83,6 +83,23 @@ describe('EvaluationStore', () => {
     expect(serialized).not.toContain('sample.log')
   })
 
+  it('validates occurrence conditions while saving recipe revisions', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      name: 'Exact occurrences',
+      rules: [{ ...rule(), clauses: [{ ...rule().clauses[0], occurrence: { kind: 'exact', count: 2 } }] }]
+    })).resolves.toMatchObject({ recipe: { rules: [{ clauses: [{ occurrence: { kind: 'exact', count: 2 } }] }] } })
+
+    await expect(store.saveRecipe({
+      projectId: PROJECT,
+      expectedRevision: 1,
+      name: 'Invalid occurrence',
+      rules: [{ ...rule('invalid-occurrence'), clauses: [{ ...rule().clauses[0], occurrence: { kind: 'exact', count: -1 } }] }]
+    })).rejects.toThrow('occurrence count')
+  })
+
   it('uses optimistic project revisions to prevent stale renderer writes', async () => {
     const store = new EvaluationStore(await tempRoot())
     await store.saveDecision({ projectId: PROJECT, expectedRevision: 0, source: source(), result: 'PASS' })
