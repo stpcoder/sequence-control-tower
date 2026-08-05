@@ -65,6 +65,8 @@ export interface ArtifactImportFailure {
 
 export interface ArtifactImportResult {
   cancelled: boolean
+  /** True when the bounded folder intake stopped before scanning all candidates. */
+  limitReached: boolean
   artifacts: ArtifactRecord[]
   failures: ArtifactImportFailure[]
   skippedCount: number
@@ -286,6 +288,10 @@ export interface LlmConfigInput {
   /** Omit to retain the existing key. It is never returned to the renderer. */
   apiKey?: string
   clearApiKey?: boolean
+  requestsPerMinute?: number
+  tokensPerMinute?: number
+  timeoutSeconds?: number
+  maxRetries?: number
 }
 
 export interface LlmConfigSummary {
@@ -304,6 +310,9 @@ export interface LlmConfigSummary {
     requestsPerMinute: number
     tokensPerMinute: number
     timeoutMs: number
+    /** User-facing seconds value; timeoutMs is retained for runtime compatibility. */
+    timeoutSeconds?: number
+    maxRetries?: number
   }
 }
 
@@ -520,6 +529,12 @@ export interface EvaluationSaveBatchInput extends EvaluationProjectRequest {
   startedAt?: string
 }
 
+export interface EvaluationSaveRecipeAndBatchInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  recipe: { recipeId?: string; name: string; rules: EvaluationRecipeRule[] }
+  batch: { status: 'completed' | 'failed' | 'cancelled'; outcomes: EvaluationBatchOutcomeInput[]; startedAt?: string }
+}
+
 export interface EvaluationApproveMetadataInput extends EvaluationProjectRequest {
   expectedRevision: number
   source: EvaluationSourceInput
@@ -542,6 +557,12 @@ export interface EvaluationRecipeSaveResult {
 
 export interface EvaluationBatchSaveResult {
   snapshot: EvaluationProjectSnapshot
+  batch: EvaluationBatchRun
+}
+
+export interface EvaluationRecipeAndBatchSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  recipe: EvaluationRecipeRevision
   batch: EvaluationBatchRun
 }
 
@@ -598,6 +619,7 @@ export interface SequenceIntelligenceApi {
     saveDecision(input: EvaluationSaveDecisionInput): Promise<EvaluationDecisionSaveResult>
     saveRecipe(input: EvaluationSaveRecipeInput): Promise<EvaluationRecipeSaveResult>
     saveBatch(input: EvaluationSaveBatchInput): Promise<EvaluationBatchSaveResult>
+    saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult>
     approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
   }
 }
@@ -628,5 +650,6 @@ export const IPC_CHANNELS = {
   evaluationSaveDecision: 'evaluation:save-decision',
   evaluationSaveRecipe: 'evaluation:save-recipe',
   evaluationSaveBatch: 'evaluation:save-batch',
+  evaluationSaveRecipeAndBatch: 'evaluation:save-recipe-and-batch',
   evaluationApproveMetadata: 'evaluation:approve-metadata'
 } as const

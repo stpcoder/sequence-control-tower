@@ -17,8 +17,10 @@ import type {
   EvaluationRecipeRevision,
   EvaluationRecipeRule,
   EvaluationRecipeSaveResult,
+  EvaluationRecipeAndBatchSaveResult,
   EvaluationResultLabel,
   EvaluationSaveBatchInput,
+  EvaluationSaveRecipeAndBatchInput,
   EvaluationSaveDecisionInput,
   EvaluationSaveRecipeInput,
   EvaluationSourceInput,
@@ -476,6 +478,49 @@ export class EvaluationStore {
     return { snapshot, batch: saved }
   }
 
+  async saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult> {
+    rejectSensitivePayload(input)
+    if (!Array.isArray(input.recipe.rules) || !input.recipe.rules.length || input.recipe.rules.length > MAX_RULES_PER_RECIPE) {
+      throw new Error('저장할 규칙 개수가 올바르지 않습니다.')
+    }
+    const name = safeText(input.recipe.name, 'recipe name', 160)
+    const rules = input.recipe.rules.map(recipeRule)
+    const recipeId = input.recipe.recipeId === undefined ? this.makeId() : safeIdentifier(input.recipe.recipeId, 'recipeId')
+    if (!['completed', 'failed', 'cancelled'].includes(String(input.batch.status))) throw new Error('batch status가 올바르지 않습니다.')
+    if (!Array.isArray(input.batch.outcomes) || input.batch.outcomes.length > MAX_BATCH_OUTCOMES) throw new Error('batch outcome 개수가 올바르지 않습니다.')
+    const outcomes = this.normalizeBatchOutcomes(input.batch.outcomes)
+    let savedRecipe!: EvaluationRecipeRevision
+    let savedBatch!: EvaluationBatchRun
+    const snapshot = await this.mutate(input.projectId, input.expectedRevision, (project) => {
+      const previous = [...project.recipes].reverse().find((item) => item.recipeId === recipeId)
+      const reusable = previous && previous.name === name && JSON.stringify(previous.rules) === JSON.stringify(rules)
+      savedRecipe = reusable ? previous : {
+        id: this.makeId(),
+        recipeId,
+        revision: (previous?.revision ?? 0) + 1,
+        name,
+        rules,
+        createdAt: this.now().toISOString(),
+        ...(previous ? { supersedesId: previous.id } : {})
+      }
+      if (!reusable) project.recipes.push(savedRecipe)
+      this.validateBatch(project, [savedRecipe.id], outcomes)
+      const completedAt = this.now().toISOString()
+      savedBatch = {
+        id: this.makeId(),
+        status: input.batch.status,
+        recipeRevisionIds: [savedRecipe.id],
+        outcomes,
+        matchedCount: outcomes.filter((item) => !item.exceptionCode && item.result !== 'UNKNOWN').length,
+        exceptionCount: outcomes.filter((item) => Boolean(item.exceptionCode) || item.result === 'UNKNOWN').length,
+        startedAt: safeStartedAt(input.batch.startedAt, completedAt),
+        completedAt
+      }
+      project.batches.push(savedBatch)
+    })
+    return { snapshot, recipe: savedRecipe, batch: savedBatch }
+  }
+
   async approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult> {
     rejectSensitivePayload(input)
     if (input.approval !== 'approved' && input.approval !== 'rejected') throw new Error('metadata approval이 올바르지 않습니다.')
@@ -527,6 +572,35 @@ export class EvaluationStore {
       ...(value.conflictingDecisionId === undefined
         ? {}
         : { conflictingDecisionId: safeIdentifier(value.conflictingDecisionId, 'conflictingDecisionId') })
+    }
+  }
+
+  private normalizeBatchOutcomes(outcomes: EvaluationBatchOutcomeInput[]): EvaluationBatchOutcome[] {
+    const normalized = outcomes.map((item) => this.batchOutcome(item))
+    const sources = new Set<string>()
+    normalized.forEach((outcome) => {
+      const key = `${outcome.source.sourceId}\0${outcome.source.artifactId}`
+      if (sources.has(key)) throw new Error('batch에 같은 source revision이 중복되었습니다.')
+      sources.add(key)
+    })
+    return normalized
+  }
+
+  private validateBatch(project: StoredEvaluationProject, recipeRevisionIds: string[], outcomes: EvaluationBatchOutcome[]): void {
+    const referencedRecipes = project.recipes.filter((item) => recipeRevisionIds.includes(item.id))
+    if (referencedRecipes.length !== recipeRevisionIds.length) throw new Error('존재하지 않는 recipe revision입니다.')
+    const referencedRules = new Map(referencedRecipes.flatMap((recipe) => recipe.rules.map((rule) => [rule.id, rule] as const)))
+    const latestDecisions = new Map<string, EvaluationDecisionRevision>()
+    project.decisions.forEach((decision) => latestDecisions.set(`${decision.source.sourceId}\0${decision.source.artifactId}`, decision))
+    for (const outcome of outcomes) {
+      if (outcome.outcomeSource === 'rule' && !outcome.matchedRuleId) throw new Error('rule 결과에는 matchedRuleId가 필요합니다.')
+      const matchedRule = outcome.matchedRuleId ? referencedRules.get(outcome.matchedRuleId) : undefined
+      if (outcome.matchedRuleId && !matchedRule) throw new Error('matchedRuleId가 참조한 recipe revision에 포함되어 있지 않습니다.')
+      if (outcome.outcomeSource === 'rule' && matchedRule?.label !== outcome.result) throw new Error('rule 결과가 matched rule label과 일치하지 않습니다.')
+      const exactDecision = latestDecisions.get(`${outcome.source.sourceId}\0${outcome.source.artifactId}`)
+      if (exactDecision && (outcome.outcomeSource !== 'engineer-preserved' || outcome.result !== exactDecision.result)) throw new Error('batch 결과가 exact engineer decision을 보존하지 않았습니다.')
+      if (!exactDecision && outcome.outcomeSource === 'engineer-preserved') throw new Error('보존할 exact engineer decision이 존재하지 않습니다.')
+      if (outcome.conflictingDecisionId && outcome.conflictingDecisionId !== exactDecision?.id) throw new Error('conflictingDecisionId가 exact engineer decision과 일치하지 않습니다.')
     }
   }
 

@@ -15,6 +15,10 @@ interface SavedLlmConfig {
   encryptedApiKey?: string
   apiKeyOrigin?: string
   updatedAt?: string
+  requestsPerMinute?: number
+  tokensPerMinute?: number
+  timeoutSeconds?: number
+  maxRetries?: number
 }
 
 export interface EffectiveLlmConfig {
@@ -27,9 +31,37 @@ export interface EffectiveLlmConfig {
   maxRetries: number
 }
 
+export const LLM_COMPLETION_TOKEN_BUDGET = 1_200
+const MIN_NON_EMPTY_PROMPT_TOKENS = 1
+export const MIN_LLM_TOKENS_PER_MINUTE = LLM_COMPLETION_TOKEN_BUDGET + MIN_NON_EMPTY_PROMPT_TOKENS
+
+const LLM_LIMIT_DEFAULTS = {
+  requestsPerMinute: 8,
+  tokensPerMinute: 80_000,
+  timeoutSeconds: 60,
+  maxRetries: 2
+} as const
+
+const LLM_LIMIT_RANGES = {
+  requestsPerMinute: { min: 1, max: 10_000 },
+  tokensPerMinute: { min: MIN_LLM_TOKENS_PER_MINUTE, max: 10_000_000 },
+  timeoutSeconds: { min: 5, max: 300 },
+  maxRetries: { min: 0, max: 5 }
+} as const
+
+function boundedInteger(raw: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10)
+  return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), min), max) : fallback
+}
+
 function integerEnvironment(name: string, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(process.env[name] ?? '', 10)
   return Number.isFinite(parsed) ? Math.min(Math.max(parsed, min), max) : fallback
+}
+
+function environmentApiKey(): string | undefined {
+  const value = process.env.SEQ_LLM_API_KEY?.trim()
+  return value || undefined
 }
 
 function validateBaseUrl(raw: string): string {
@@ -134,6 +166,7 @@ export class LlmConfigService {
     const baseUrl = validateBaseUrl(input.baseUrl)
     const model = cleanModel(input.model)
     const apiKey = input.apiKey?.trim()
+    const managedApiKey = environmentApiKey()
 
     await this.store.update((draft) => {
       const previousOrigin = urlOrigin(draft.baseUrl)
@@ -141,7 +174,46 @@ export class LlmConfigService {
       draft.baseUrl = baseUrl
       draft.model = model
       draft.updatedAt = new Date().toISOString()
-      if (input.clearApiKey) {
+      if (input.requestsPerMinute !== undefined) {
+        draft.requestsPerMinute = boundedInteger(
+          input.requestsPerMinute,
+          LLM_LIMIT_DEFAULTS.requestsPerMinute,
+          LLM_LIMIT_RANGES.requestsPerMinute.min,
+          LLM_LIMIT_RANGES.requestsPerMinute.max
+        )
+      }
+      if (input.tokensPerMinute !== undefined) {
+        draft.tokensPerMinute = boundedInteger(
+          input.tokensPerMinute,
+          LLM_LIMIT_DEFAULTS.tokensPerMinute,
+          LLM_LIMIT_RANGES.tokensPerMinute.min,
+          LLM_LIMIT_RANGES.tokensPerMinute.max
+        )
+      }
+      if (input.timeoutSeconds !== undefined) {
+        draft.timeoutSeconds = boundedInteger(
+          input.timeoutSeconds,
+          LLM_LIMIT_DEFAULTS.timeoutSeconds,
+          LLM_LIMIT_RANGES.timeoutSeconds.min,
+          LLM_LIMIT_RANGES.timeoutSeconds.max
+        )
+      }
+      if (input.maxRetries !== undefined) {
+        draft.maxRetries = boundedInteger(
+          input.maxRetries,
+          LLM_LIMIT_DEFAULTS.maxRetries,
+          LLM_LIMIT_RANGES.maxRetries.min,
+          LLM_LIMIT_RANGES.maxRetries.max
+        )
+      }
+      if (managedApiKey) {
+        // Environment-managed credentials always win. Do not persist a typed
+        // key, and remove any stale app-owned credential while saving settings.
+        delete draft.encryptedApiKey
+        delete draft.apiKeyOrigin
+        this.sessionApiKey = undefined
+        this.sessionApiKeyOrigin = undefined
+      } else if (input.clearApiKey) {
         delete draft.encryptedApiKey
         delete draft.apiKeyOrigin
         this.sessionApiKey = undefined
@@ -177,28 +249,74 @@ export class LlmConfigService {
   async effective(): Promise<EffectiveLlmConfig> {
     const saved = await this.store.read()
     const encryptedKey = this.decrypt(saved.encryptedApiKey)
+    const managedApiKey = environmentApiKey()
     const baseUrl = validateBaseUrl(process.env.SEQ_LLM_BASE_URL ?? saved.baseUrl)
     const effectiveOrigin = urlOrigin(baseUrl)
     const savedKeyOrigin = saved.apiKeyOrigin ?? urlOrigin(saved.baseUrl)
     const originBoundEncryptedKey = savedKeyOrigin === effectiveOrigin ? encryptedKey : undefined
     const originBoundSessionKey = this.sessionApiKeyOrigin === effectiveOrigin ? this.sessionApiKey : undefined
+    const savedRequestsPerMinute = boundedInteger(
+      saved.requestsPerMinute,
+      LLM_LIMIT_DEFAULTS.requestsPerMinute,
+      LLM_LIMIT_RANGES.requestsPerMinute.min,
+      LLM_LIMIT_RANGES.requestsPerMinute.max
+    )
+    const savedTokensPerMinute = boundedInteger(
+      saved.tokensPerMinute,
+      LLM_LIMIT_DEFAULTS.tokensPerMinute,
+      LLM_LIMIT_RANGES.tokensPerMinute.min,
+      LLM_LIMIT_RANGES.tokensPerMinute.max
+    )
+    const savedTimeoutSeconds = boundedInteger(
+      saved.timeoutSeconds,
+      LLM_LIMIT_DEFAULTS.timeoutSeconds,
+      LLM_LIMIT_RANGES.timeoutSeconds.min,
+      LLM_LIMIT_RANGES.timeoutSeconds.max
+    )
+    const savedMaxRetries = boundedInteger(
+      saved.maxRetries,
+      LLM_LIMIT_DEFAULTS.maxRetries,
+      LLM_LIMIT_RANGES.maxRetries.min,
+      LLM_LIMIT_RANGES.maxRetries.max
+    )
     return {
       baseUrl,
       model: cleanModel(process.env.SEQ_LLM_MODEL ?? saved.model),
-      apiKey: process.env.SEQ_LLM_API_KEY ?? originBoundEncryptedKey ?? originBoundSessionKey,
-      requestsPerMinute: integerEnvironment('SEQ_LLM_RPM', 8, 1, 10_000),
-      tokensPerMinute: integerEnvironment('SEQ_LLM_TPM', 80_000, 1_000, 10_000_000),
-      timeoutMs: integerEnvironment('SEQ_LLM_TIMEOUT_MS', 60_000, 5_000, 300_000),
-      maxRetries: integerEnvironment('SEQ_LLM_MAX_RETRIES', 2, 0, 5)
+      apiKey: managedApiKey ?? originBoundEncryptedKey ?? originBoundSessionKey,
+      requestsPerMinute: integerEnvironment(
+        'SEQ_LLM_RPM',
+        savedRequestsPerMinute,
+        LLM_LIMIT_RANGES.requestsPerMinute.min,
+        LLM_LIMIT_RANGES.requestsPerMinute.max
+      ),
+      tokensPerMinute: integerEnvironment(
+        'SEQ_LLM_TPM',
+        savedTokensPerMinute,
+        LLM_LIMIT_RANGES.tokensPerMinute.min,
+        LLM_LIMIT_RANGES.tokensPerMinute.max
+      ),
+      timeoutMs: integerEnvironment(
+        'SEQ_LLM_TIMEOUT_MS',
+        savedTimeoutSeconds * 1_000,
+        LLM_LIMIT_RANGES.timeoutSeconds.min * 1_000,
+        LLM_LIMIT_RANGES.timeoutSeconds.max * 1_000
+      ),
+      maxRetries: integerEnvironment(
+        'SEQ_LLM_MAX_RETRIES',
+        savedMaxRetries,
+        LLM_LIMIT_RANGES.maxRetries.min,
+        LLM_LIMIT_RANGES.maxRetries.max
+      )
     }
   }
 
   async summary(): Promise<LlmConfigSummary> {
     const saved = await this.store.read()
+    const managedApiKey = environmentApiKey()
     const environmentFields = {
       baseUrl: Boolean(process.env.SEQ_LLM_BASE_URL),
       model: Boolean(process.env.SEQ_LLM_MODEL),
-      apiKey: Boolean(process.env.SEQ_LLM_API_KEY)
+      apiKey: Boolean(managedApiKey)
     }
     const environmentCount = Object.values(environmentFields).filter(Boolean).length
     const savedAny = Boolean(saved.baseUrl || saved.model || saved.encryptedApiKey || this.sessionApiKey)
@@ -222,10 +340,50 @@ export class LlmConfigService {
       effective = {
         baseUrl: '',
         model: '',
-        requestsPerMinute: integerEnvironment('SEQ_LLM_RPM', 8, 1, 10_000),
-        tokensPerMinute: integerEnvironment('SEQ_LLM_TPM', 80_000, 1_000, 10_000_000),
-        timeoutMs: integerEnvironment('SEQ_LLM_TIMEOUT_MS', 60_000, 5_000, 300_000),
-        maxRetries: integerEnvironment('SEQ_LLM_MAX_RETRIES', 2, 0, 5)
+        requestsPerMinute: integerEnvironment(
+          'SEQ_LLM_RPM',
+          boundedInteger(
+            saved.requestsPerMinute,
+            LLM_LIMIT_DEFAULTS.requestsPerMinute,
+            LLM_LIMIT_RANGES.requestsPerMinute.min,
+            LLM_LIMIT_RANGES.requestsPerMinute.max
+          ),
+          LLM_LIMIT_RANGES.requestsPerMinute.min,
+          LLM_LIMIT_RANGES.requestsPerMinute.max
+        ),
+        tokensPerMinute: integerEnvironment(
+          'SEQ_LLM_TPM',
+          boundedInteger(
+            saved.tokensPerMinute,
+            LLM_LIMIT_DEFAULTS.tokensPerMinute,
+            LLM_LIMIT_RANGES.tokensPerMinute.min,
+            LLM_LIMIT_RANGES.tokensPerMinute.max
+          ),
+          LLM_LIMIT_RANGES.tokensPerMinute.min,
+          LLM_LIMIT_RANGES.tokensPerMinute.max
+        ),
+        timeoutMs: integerEnvironment(
+          'SEQ_LLM_TIMEOUT_MS',
+          boundedInteger(
+            saved.timeoutSeconds,
+            LLM_LIMIT_DEFAULTS.timeoutSeconds,
+            LLM_LIMIT_RANGES.timeoutSeconds.min,
+            LLM_LIMIT_RANGES.timeoutSeconds.max
+          ) * 1_000,
+          LLM_LIMIT_RANGES.timeoutSeconds.min * 1_000,
+          LLM_LIMIT_RANGES.timeoutSeconds.max * 1_000
+        ),
+        maxRetries: integerEnvironment(
+          'SEQ_LLM_MAX_RETRIES',
+          boundedInteger(
+            saved.maxRetries,
+            LLM_LIMIT_DEFAULTS.maxRetries,
+            LLM_LIMIT_RANGES.maxRetries.min,
+            LLM_LIMIT_RANGES.maxRetries.max
+          ),
+          LLM_LIMIT_RANGES.maxRetries.min,
+          LLM_LIMIT_RANGES.maxRetries.max
+        )
       }
     }
 
@@ -234,13 +392,15 @@ export class LlmConfigService {
       model: effective.model,
       configured: Boolean(effective.baseUrl && effective.model),
       apiKeyConfigured: Boolean(effective.apiKey),
-      apiKeyPersisted: Boolean(process.env.SEQ_LLM_API_KEY || saved.encryptedApiKey),
+      apiKeyPersisted: Boolean(saved.encryptedApiKey),
       source,
       managedByEnvironment: environmentFields,
       limits: {
         requestsPerMinute: effective.requestsPerMinute,
         tokensPerMinute: effective.tokensPerMinute,
-        timeoutMs: effective.timeoutMs
+        timeoutMs: effective.timeoutMs,
+        timeoutSeconds: Math.round(effective.timeoutMs / 1_000),
+        maxRetries: effective.maxRetries
       }
     }
   }
@@ -414,7 +574,7 @@ export class OpenAiCompatibleClient {
     if (!config.baseUrl || !config.model) throw new Error('LLM_UNAVAILABLE')
     // UTF-8 bytes / 3 is intentionally conservative for Korean while still
     // remaining close enough for English-heavy structured JSON evidence.
-    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + 1_200
+    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + LLM_COMPLETION_TOKEN_BUDGET
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
@@ -454,7 +614,7 @@ export class OpenAiCompatibleClient {
               { role: 'user', content: prompt }
             ],
             temperature: 0.1,
-            max_tokens: 1_200
+            max_tokens: LLM_COMPLETION_TOKEN_BUDGET
           }),
           redirect: 'error',
           signal: timeoutController.signal

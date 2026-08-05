@@ -1,0 +1,4583 @@
+{
+  "generatorId": "qualcomm-bringup-corpus-v1",
+  "schemaVersion": 1,
+  "title": "Privacy-safe deterministic Qualcomm-style SoC bring-up corpus",
+  "privacy": "All identifiers, addresses, values, timestamps, and records are synthetic and deterministic.",
+  "flowConvention": [
+    "SYN_POWER_ON",
+    "SYN_UEFI_ENTER",
+    "SYN_UEFI_EXIT",
+    "SYN_OS_BOOT_START",
+    "SYN_OS_READY"
+  ],
+  "flowConventionNotice": "SYN_* markers are corpus conventions, NOT official Qualcomm strings.",
+  "fixtureCount": 160,
+  "fixtures": [
+    {
+      "relativePath": "pass/QBR-001__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-001",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/LOT-SYN.SAMPLE=QBR-002.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-002",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-003-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-003",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-004__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-004",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-005_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-005",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/capture-QBR-006+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-006",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/session-003/QBR-007__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-007",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-008__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-008",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-009__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-009",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/LOT-SYN.SAMPLE=QBR-010.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-010",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-011-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-011",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-012__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-012",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-013_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-013",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/capture-QBR-014+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-014",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/session-003/QBR-015__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-015",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "pass/QBR-016__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "pass",
+      "scenarioVariant": "canonical",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-016",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-017__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-017",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/LOT-SYN.SAMPLE=QBR-018.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "timeout",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-018",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_TIMEOUT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-019-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-019",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-020__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-020",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-021_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "timeout",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-021",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_TIMEOUT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/capture-QBR-022+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-022",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/session-003/QBR-023__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-023",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-024__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "timeout",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-024",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_TIMEOUT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-025__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-025",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/LOT-SYN.SAMPLE=QBR-026.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-026",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-027-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "timeout",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-027",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_TIMEOUT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-028__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-028",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-029_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-029",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/capture-QBR-030+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "timeout",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-030",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_TIMEOUT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/session-003/QBR-031__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-031",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-failure/QBR-032__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "uefi-failure",
+      "scenarioVariant": "fail",
+      "expectedTerminalResult": "UEFI_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-032",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_FAIL"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-033__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-033",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/LOT-SYN.SAMPLE=QBR-034.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-034",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-035-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-035",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-036__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-036",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-037_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-037",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/capture-QBR-038+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-038",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/session-003/QBR-039__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-039",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-040__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-040",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-041__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-041",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/LOT-SYN.SAMPLE=QBR-042.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-042",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-043-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-043",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-044__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-044",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-045_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-045",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/capture-QBR-046+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-046",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/session-003/QBR-047__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "failed-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-047",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT_FAILED"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "uefi-exit/QBR-048__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "uefi-exit",
+      "scenarioVariant": "missing-exit",
+      "expectedTerminalResult": "UEFI_EXIT_FAIL",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-048",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-049__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-049",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/LOT-SYN.SAMPLE=QBR-050.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-050",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_HALT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-051-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "incomplete",
+      "expectedTerminalResult": "INCOMPLETE",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-051",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-052__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-052",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-053_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-053",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_HALT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/capture-QBR-054+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "incomplete",
+      "expectedTerminalResult": "INCOMPLETE",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-054",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/session-003/QBR-055__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-055",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-056__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-056",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_HALT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-057__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "incomplete",
+      "expectedTerminalResult": "INCOMPLETE",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-057",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/LOT-SYN.SAMPLE=QBR-058.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-058",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-059-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-059",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_HALT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-060__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "incomplete",
+      "expectedTerminalResult": "INCOMPLETE",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-060",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-061_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-061",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/capture-QBR-062+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "halt",
+      "expectedTerminalResult": "SYSTEM_HALT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-062",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_HALT"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/session-003/QBR-063__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "incomplete",
+      "expectedTerminalResult": "INCOMPLETE",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-063",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "os-failure/QBR-064__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "os-failure",
+      "scenarioVariant": "panic",
+      "expectedTerminalResult": "OS_PANIC",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-064",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_PANIC"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-065__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-065",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/LOT-SYN.SAMPLE=QBR-066.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-066",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-067-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-067",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-068__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-068",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-069_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-069",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/capture-QBR-070+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-070",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/session-003/QBR-071__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-071",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-072__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "reboot",
+      "expectedTerminalResult": "SYSTEM_REBOOT",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-072",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET"
+      ],
+      "features": []
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-073__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-073",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/LOT-SYN.SAMPLE=QBR-074.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-074",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-075-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-075",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-076__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-076",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-077_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-077",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/capture-QBR-078+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-078",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/session-003/QBR-079__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-079",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "reboot-recovered/QBR-080__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "reboot-recovered",
+      "scenarioVariant": "recovered",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-080",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_WATCHDOG_RESET",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-081__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-terminal",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-081",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/LOT-SYN.SAMPLE=QBR-082.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "pass-fail-conflict",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-082",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-083-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-uefi",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-083",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-084__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "conflicting-exit",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-084",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-085_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-terminal",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-085",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/capture-QBR-086+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "pass-fail-conflict",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-086",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/session-003/QBR-087__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-uefi",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-087",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-088__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "conflicting-exit",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-088",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-089__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-terminal",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-089",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/LOT-SYN.SAMPLE=QBR-090.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "pass-fail-conflict",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-090",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-091-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-uefi",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-091",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-092__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "conflicting-exit",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-092",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-093_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-terminal",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-093",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/capture-QBR-094+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "pass-fail-conflict",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-094",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/session-003/QBR-095__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "stale-uefi",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-095",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "stale-conflict/QBR-096__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "stale-conflict",
+      "scenarioVariant": "conflicting-exit",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-096",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stale-or-conflicting-markers"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-097__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-097",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs",
+        "truncated-final-line"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/LOT-SYN.SAMPLE=QBR-098.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-098",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-099-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-099",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-100__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-100",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-101_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-101",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs",
+        "truncated-final-line"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/capture-QBR-102+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-102",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/session-003/QBR-103__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-103",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-104__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-104",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-105__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-105",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs",
+        "truncated-final-line"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/LOT-SYN.SAMPLE=QBR-106.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-106",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-107-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-107",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-108__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-108",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-109_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-109",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs",
+        "truncated-final-line"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/capture-QBR-110+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-110",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/session-003/QBR-111__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-111",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "multiple-runs/QBR-112__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "multiple-runs",
+      "scenarioVariant": "two-runs",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-112",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY",
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START"
+      ],
+      "features": [
+        "multiple-runs"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-113__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "temperature",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "temperature",
+        "expected": "105",
+        "observed": "62.1"
+      },
+      "metadata": {
+        "sample": "QBR-113",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/LOT-SYN.SAMPLE=QBR-114.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "vdd",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "vdd",
+        "expected": "0.75",
+        "observed": "0.72"
+      },
+      "metadata": {
+        "sample": "QBR-114",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-115-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "mode",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "mode",
+        "expected": "NORMAL",
+        "observed": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-115",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-116__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "filename-content",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "filename-vs-content",
+        "field": "mode",
+        "filename": "UEFI",
+        "content": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-116",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-117_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "temperature",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "temperature",
+        "expected": "25",
+        "observed": "62.1"
+      },
+      "metadata": {
+        "sample": "QBR-117",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/capture-QBR-118+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "vdd",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "vdd",
+        "expected": "0.75",
+        "observed": "0.72"
+      },
+      "metadata": {
+        "sample": "QBR-118",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/session-003/QBR-119__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "mode",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "mode",
+        "expected": "NORMAL",
+        "observed": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-119",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-120__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "filename-content",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "filename-vs-content",
+        "field": "mode",
+        "filename": "UEFI",
+        "content": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-120",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-121__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "temperature",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "temperature",
+        "expected": "-40",
+        "observed": "62.1"
+      },
+      "metadata": {
+        "sample": "QBR-121",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/LOT-SYN.SAMPLE=QBR-122.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "vdd",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "vdd",
+        "expected": "0.75",
+        "observed": "0.72"
+      },
+      "metadata": {
+        "sample": "QBR-122",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-123-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "mode",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "mode",
+        "expected": "NORMAL",
+        "observed": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-123",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-124__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "filename-content",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "filename-vs-content",
+        "field": "mode",
+        "filename": "UEFI",
+        "content": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-124",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-125_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "temperature",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "temperature",
+        "expected": "105",
+        "observed": "62.1"
+      },
+      "metadata": {
+        "sample": "QBR-125",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/capture-QBR-126+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "vdd",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "vdd",
+        "expected": "0.75",
+        "observed": "0.72"
+      },
+      "metadata": {
+        "sample": "QBR-126",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/session-003/QBR-127__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "mode",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "expected-vs-observed",
+        "field": "mode",
+        "expected": "NORMAL",
+        "observed": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-127",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "metadata-mismatch/QBR-128__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "metadata-mismatch",
+      "scenarioVariant": "filename-content",
+      "expectedTerminalResult": "PASS",
+      "needsReview": true,
+      "parserOracle": null,
+      "metadataMismatchOracle": {
+        "kind": "filename-vs-content",
+        "field": "mode",
+        "filename": "UEFI",
+        "content": "DIAG"
+      },
+      "metadata": {
+        "sample": "QBR-128",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "temperature-vdd-mode-mismatch"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-129__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "double-underscore",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-129",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation",
+        "crlf"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/LOT-SYN.SAMPLE=QBR-130.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "dot-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-130",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-131-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "hyphen-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-131",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-132__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "lowercase-keys",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-132",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-133_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "compact",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-133",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation",
+        "crlf"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/capture-QBR-134+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "plus-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-134",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/session-003/QBR-135__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "nested",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-135",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-136__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "mixed",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-136",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-137__MAT=H9K__TEMP=105C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "double-underscore",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-137",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation",
+        "crlf"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/LOT-SYN.SAMPLE=QBR-138.MATERIAL=K4P.TEMP=125C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "dot-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-138",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-139-Q2X--40C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "hyphen-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-139",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-140__mat=R7M__temp=0C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "lowercase-keys",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-140",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-141_H9K_25C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "compact",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-141",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation",
+        "crlf"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/capture-QBR-142+MAT-K4P+TEMP-85C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "plus-delimited",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-142",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/session-003/QBR-143__MATERIAL=Q2X__TEMP=105C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "nested",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-143",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "filename-variants/QBR-144__MATERIAL-R7M__T=125C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "filename-variants",
+      "scenarioVariant": "mixed",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": null,
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-144",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "filename-metadata-variation"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-145__MAT=H9K__TEMP=-40C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 0,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "low-half-mismatch",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 1,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 1,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-145",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/LOT-SYN.SAMPLE=QBR-146.MATERIAL=K4P.TEMP=0C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 1,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "high-half-mismatch",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 1,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 1,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-146",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-147-Q2X-25C-NORMAL-VDD0p80-R003.log",
+      "variant": 2,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "both-half-mismatch",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 2,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 1,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-147",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-148__mat=R7M__temp=85C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 3,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "repeated-address",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 3,
+        "expectedTskhynixRows": 2,
+        "expectedStressappRecords": 3,
+        "expectedTskhynixRecords": 2,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-148",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-149_H9K_105C_DIAG_VDD0p70_run001.log",
+      "variant": 4,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "crc",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 1,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 1,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-149",
+        "material": "H9K",
+        "tempC": "105",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/capture-QBR-150+MAT-K4P+TEMP-125C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 5,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "excluded",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-150",
+        "material": "K4P",
+        "tempC": "125",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/session-003/QBR-151__MATERIAL=Q2X__TEMP=-40C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 6,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "malformed",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-151",
+        "material": "Q2X",
+        "tempC": "-40",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-152__MATERIAL-R7M__T=0C__M=UEFI__V=0p90__004.log",
+      "variant": 7,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "32-bit",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 1,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 1,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-152",
+        "material": "R7M",
+        "tempC": "0",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-153__MAT=H9K__TEMP=25C__MODE=DIAG__VDD=0p70__RUN=001.log",
+      "variant": 8,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "64-bit",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 2,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 1,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-153",
+        "material": "H9K",
+        "tempC": "25",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/LOT-SYN.SAMPLE=QBR-154.MATERIAL=K4P.TEMP=85C.MODE=TEST.VDD=0p75.RUN=002.log",
+      "variant": 9,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "alias",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 1,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 1,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-154",
+        "material": "K4P",
+        "tempC": "85",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-155-Q2X-105C-NORMAL-VDD0p80-R003.log",
+      "variant": 10,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "equal-values",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-155",
+        "material": "Q2X",
+        "tempC": "105",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-156__mat=R7M__temp=125C__mode=uefi__vdd=0p90__run=004.log",
+      "variant": 11,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "missing-fields",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-156",
+        "material": "R7M",
+        "tempC": "125",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-157_H9K_-40C_DIAG_VDD0p70_run001.log",
+      "variant": 12,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "misaligned",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": "misaligned-address"
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-157",
+        "material": "H9K",
+        "tempC": "-40",
+        "mode": "DIAG",
+        "vdd": "0.70",
+        "run": "001"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/capture-QBR-158+MAT-K4P+TEMP-0C+MODE-TEST+VDD-0p75+RUN-002.log",
+      "variant": 13,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "overlong",
+      "expectedTerminalResult": "UNKNOWN",
+      "needsReview": true,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": "overlong-value"
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-158",
+        "material": "K4P",
+        "tempC": "0",
+        "mode": "TEST",
+        "vdd": "0.75",
+        "run": "002"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/session-003/QBR-159__MATERIAL=Q2X__TEMP=25C__MODE=NORMAL__VDD=0p80.log",
+      "variant": 14,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "composite",
+      "expectedTerminalResult": "TEST_FAIL",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 4,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 3,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-159",
+        "material": "Q2X",
+        "tempC": "25",
+        "mode": "NORMAL",
+        "vdd": "0.80",
+        "run": "003"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    },
+    {
+      "relativePath": "memory-records/QBR-160__MATERIAL-R7M__T=85C__M=UEFI__V=0p90__004.log",
+      "variant": 15,
+      "scenarioFamily": "memory-records",
+      "scenarioVariant": "baseline",
+      "expectedTerminalResult": "PASS",
+      "needsReview": false,
+      "parserOracle": {
+        "expectedStressappRows": 0,
+        "expectedTskhynixRows": 0,
+        "expectedStressappRecords": 0,
+        "expectedTskhynixRecords": 0,
+        "expectedParserError": null
+      },
+      "metadataMismatchOracle": null,
+      "metadata": {
+        "sample": "QBR-160",
+        "material": "R7M",
+        "tempC": "85",
+        "mode": "UEFI",
+        "vdd": "0.90",
+        "run": "004"
+      },
+      "orderedStageMarkers": [
+        "SYN_POWER_ON",
+        "SYN_UEFI_ENTER",
+        "SYN_UEFI_EXIT",
+        "SYN_OS_BOOT_START",
+        "SYN_OS_READY"
+      ],
+      "features": [
+        "stressapptest",
+        "tSKHYNIX"
+      ]
+    }
+  ]
+}

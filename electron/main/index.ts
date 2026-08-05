@@ -45,7 +45,7 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
-    title: 'Sequence Intelligence Control Tower',
+    title: 'Sequence Control Tower',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

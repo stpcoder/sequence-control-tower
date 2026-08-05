@@ -239,6 +239,53 @@ describe('EvaluationStore', () => {
     expect(snapshot.batches).toEqual([])
   })
 
+  it('atomically persists the candidate recipe and batch, including failure paths', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    const candidate = {
+      recipeId: 'active-batch-ruleset',
+      name: 'Applied batch rule set',
+      rules: [rule('atomic-rule')]
+    }
+    const invalidBatch = {
+      status: 'completed' as const,
+      outcomes: [{ source: source(), result: 'PASS' as const, outcomeSource: 'rule' as const }]
+    }
+
+    await expect(store.saveRecipeAndBatch({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipe: candidate,
+      batch: invalidBatch
+    })).rejects.toThrow('rule 결과에는 matchedRuleId가 필요합니다.')
+    expect(await store.snapshot(PROJECT)).toMatchObject({ revision: 0, recipes: [], batches: [] })
+
+    await store.saveDecision({ projectId: PROJECT, expectedRevision: 0, source: source(SHA_B, 'other-source'), result: 'PASS' })
+    await expect(store.saveRecipeAndBatch({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      recipe: candidate,
+      batch: {
+        status: 'completed',
+        outcomes: [{ source: source(), result: 'PASS', outcomeSource: 'rule', matchedRuleId: 'atomic-rule' }]
+      }
+    })).rejects.toBeInstanceOf(EvaluationRevisionConflictError)
+    expect(await store.snapshot(PROJECT)).toMatchObject({ revision: 1, recipes: [], batches: [] })
+
+    const saved = await store.saveRecipeAndBatch({
+      projectId: PROJECT,
+      expectedRevision: 1,
+      recipe: candidate,
+      batch: {
+        status: 'completed',
+        outcomes: [{ source: source(), result: 'PASS', outcomeSource: 'rule', matchedRuleId: 'atomic-rule' }]
+      }
+    })
+    expect(saved.snapshot.revision).toBe(2)
+    expect(saved.snapshot.recipes).toEqual([saved.recipe])
+    expect(saved.snapshot.batches).toEqual([saved.batch])
+    expect(saved.batch.recipeRevisionIds).toEqual([saved.recipe.id])
+  })
+
   it('rejects stale batch outcomes that do not preserve an exact engineer decision', async () => {
     const store = new EvaluationStore(await tempRoot())
     const recipe = await store.saveRecipe({

@@ -1,0 +1,574 @@
+{
+  "generatorId": "engineer-workflow-corpus-v1",
+  "schemaVersion": 1,
+  "title": "Privacy-safe deterministic engineer workflow corpus",
+  "privacy": "All identifiers, addresses, temperatures, voltages, and records are synthetic and deterministic.",
+  "axes": {
+    "samples": [
+      "SAMP-A",
+      "SAMP-B",
+      "SAMP-C",
+      "SAMP-D"
+    ],
+    "temperatures": [
+      "-40C",
+      "25C",
+      "85C"
+    ],
+    "modes": [
+      "DIAG",
+      "STRESS"
+    ],
+    "runs": [
+      1,
+      2
+    ]
+  },
+  "fixtureCount": 48,
+  "outcomeCounts": {
+    "SYSTEM_HALT": 5,
+    "PASS": 23,
+    "DIAG_FAIL": 3,
+    "TEST_FAIL": 3,
+    "TRAINING_FAIL": 3,
+    "SYSTEM_REBOOT": 4,
+    "INCOMPLETE": 4,
+    "UNKNOWN": 3
+  },
+  "pairTransitionCounts": {
+    "RECOVERY": 16,
+    "STABLE_PASS": 12,
+    "REGRESSION": 6,
+    "STABLE_FAILURE": 14
+  },
+  "fixtures": [
+    {
+      "relativePath": "SAMP-A__TEMP=-40C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "SYSTEM_HALT",
+      "expectedResult": "SYSTEM_HALT",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=-40C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=-40C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-A|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=-40C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-A|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=25C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "DIAG_FAIL",
+      "expectedResult": "DIAG_FAIL",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=25C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=25C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-A|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=25C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "TEST_FAIL",
+      "expectedResult": "TEST_FAIL",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-A|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=85C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "TRAINING_FAIL",
+      "expectedResult": "TRAINING_FAIL",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-A|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=85C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "TRAINING_FAIL",
+      "expectedResult": "TRAINING_FAIL",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-A|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=85C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-A",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "SYSTEM_REBOOT",
+      "expectedResult": "SYSTEM_REBOOT",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-A__TEMP=85C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-A",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-A|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=-40C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "TEST_FAIL",
+      "expectedResult": "TEST_FAIL",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=-40C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=-40C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-B|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=-40C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "SYSTEM_REBOOT",
+      "expectedResult": "SYSTEM_REBOOT",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-B|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=25C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "INCOMPLETE",
+      "expectedResult": "INCOMPLETE",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=25C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=25C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "SYSTEM_HALT",
+      "expectedResult": "SYSTEM_HALT",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-B|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=25C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "SYSTEM_HALT",
+      "expectedResult": "SYSTEM_HALT",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-B|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=85C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "UNKNOWN",
+      "expectedResult": "UNKNOWN",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=85C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-B|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=85C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-B",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-B|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-B__TEMP=85C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-B",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-B|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=-40C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-C|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=-40C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-C|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=-40C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "DIAG_FAIL",
+      "expectedResult": "DIAG_FAIL",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-C|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=-40C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "DIAG_FAIL",
+      "expectedResult": "DIAG_FAIL",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-C|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=25C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "TRAINING_FAIL",
+      "expectedResult": "TRAINING_FAIL",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-C|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=25C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-C|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=25C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-C|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=25C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "INCOMPLETE",
+      "expectedResult": "INCOMPLETE",
+      "pairTransition": "REGRESSION",
+      "comparisonKey": "SAMP-C|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=85C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "TEST_FAIL",
+      "expectedResult": "TEST_FAIL",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-C|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=85C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "SYSTEM_HALT",
+      "expectedResult": "SYSTEM_HALT",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-C|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=85C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-C",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-C|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-C__TEMP=85C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-C",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-C|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=-40C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "SYSTEM_REBOOT",
+      "expectedResult": "SYSTEM_REBOOT",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-D|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=-40C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "-40C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "RECOVERY",
+      "comparisonKey": "SAMP-D|-40C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=-40C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-D|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=-40C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "-40C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-D|-40C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=25C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "SYSTEM_HALT",
+      "expectedResult": "SYSTEM_HALT",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=25C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "25C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "SYSTEM_REBOOT",
+      "expectedResult": "SYSTEM_REBOOT",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|25C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=25C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "UNKNOWN",
+      "expectedResult": "UNKNOWN",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=25C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "25C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "UNKNOWN",
+      "expectedResult": "UNKNOWN",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|25C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=85C__MODE=DIAG__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 1,
+      "outcome": "INCOMPLETE",
+      "expectedResult": "INCOMPLETE",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=85C__MODE=DIAG__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "85C",
+      "mode": "DIAG",
+      "run": 2,
+      "outcome": "INCOMPLETE",
+      "expectedResult": "INCOMPLETE",
+      "pairTransition": "STABLE_FAILURE",
+      "comparisonKey": "SAMP-D|85C|DIAG"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=85C__MODE=STRESS__RUN=1.log",
+      "sample": "SAMP-D",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 1,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-D|85C|STRESS"
+    },
+    {
+      "relativePath": "SAMP-D__TEMP=85C__MODE=STRESS__RUN=2.log",
+      "sample": "SAMP-D",
+      "temperature": "85C",
+      "mode": "STRESS",
+      "run": 2,
+      "outcome": "PASS",
+      "expectedResult": "PASS",
+      "pairTransition": "STABLE_PASS",
+      "comparisonKey": "SAMP-D|85C|STRESS"
+    }
+  ]
+}

@@ -7,10 +7,23 @@ import {
   open,
   readdir,
   rename,
+  lstat,
+  realpath,
   stat,
   unlink
 } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32
+} from 'node:path'
 import type {
   ArtifactLineWindow,
   ArtifactLineWindowInput,
@@ -73,10 +86,21 @@ const LONG_LINE_ERROR = '한 줄이 4 MB를 초과해 안전하게 검색할 수
 const MATCH_LIMIT_ERROR = '한 줄의 검색 결과가 너무 많아 중단했습니다.'
 const ZERO_WIDTH_REGEX_ERROR = '길이가 0인 일치를 만드는 정규식은 안전상 사용할 수 없습니다.'
 const UNSAFE_REGEX_ERROR = '반복이 중첩된 정규식은 성능 보호를 위해 사용할 수 없습니다.'
+const SYMLINK_ROOT_ERROR = '심볼릭 링크 폴더는 가져올 수 없습니다.'
+const NOT_DIRECTORY_ERROR = '폴더만 가져올 수 있습니다.'
+const ROOT_CHANGED_ERROR = '가져오는 동안 선택한 폴더가 변경되었습니다.'
 
 interface ImportCandidate {
   filePath: string
   source: ArtifactSourceLocation
+}
+
+interface CanonicalRoot {
+  path: string
+  key: string
+  requestedPath: string
+  device: number
+  inode: number
 }
 
 interface PreparedArtifact {
@@ -132,6 +156,9 @@ function safeFailure(error: unknown): string {
     '복사 중 파일 무결성 검증에 실패했습니다.',
     '이진 파일은 텍스트로 검색할 수 없습니다.',
     '아티팩트를 찾을 수 없습니다.',
+    SYMLINK_ROOT_ERROR,
+    NOT_DIRECTORY_ERROR,
+    ROOT_CHANGED_ERROR,
     LONG_LINE_ERROR,
     MATCH_LIMIT_ERROR,
     ZERO_WIDTH_REGEX_ERROR,
@@ -139,6 +166,33 @@ function safeFailure(error: unknown): string {
   ])
   if (error instanceof Error && controlledMessages.has(error.message)) return error.message
   return '파일 처리 중 오류가 발생했습니다.'
+}
+
+function canonicalPathKey(filePath: string): string {
+  const normalized = resolve(filePath)
+  return process.platform === 'win32' ? normalized.toLocaleLowerCase() : normalized
+}
+
+export function isPathWithin(
+  parentPath: string,
+  childPath: string,
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  const pathApi = platform === 'win32' ? win32 : posix
+  const normalize = (filePath: string): string => {
+    const normalized = pathApi.resolve(filePath)
+    return platform === 'win32' ? normalized.toLocaleLowerCase() : normalized
+  }
+  const parent = normalize(parentPath)
+  const child = normalize(childPath)
+  if (child === parent) return true
+  const separator = platform === 'win32' ? '\\' : '/'
+  const parentIsRoot = platform === 'win32' ? parent.endsWith(separator) : parent === separator
+  return child.startsWith(parentIsRoot ? parent : `${parent}${separator}`)
+}
+
+function isWithinPath(parent: CanonicalRoot, child: CanonicalRoot): boolean {
+  return isPathWithin(parent.path, child.path)
 }
 
 function opaqueRootId(rootPath: string): string {
@@ -446,7 +500,7 @@ export class ArtifactService {
     }
     const database = await this.store.read()
     const artifacts = [...importedIds].flatMap((id) => database.artifacts[id] ? [database.artifacts[id]] : [])
-    return { cancelled: false, artifacts, failures, skippedCount: 0 }
+    return { cancelled: false, limitReached: false, artifacts, failures, skippedCount: 0 }
   }
 
   async importFolder(folderPath: string, options: ArtifactImportOptions = {}): Promise<ArtifactImportResult> {
@@ -459,39 +513,67 @@ export class ArtifactService {
       ? Math.floor(Math.min(Math.max(requestedMax, 1), MAX_FOLDER_FILES))
       : 5_000
     const extensions = normalizeExtensions(options.extensions)
-    const roots = [...new Set(folderPaths.map((item) => resolve(item)))]
-    if (roots.length > 100) throw new Error('한 번에 폴더 100개까지 선택할 수 있습니다.')
-    if (!roots.length) return { cancelled: false, artifacts: [], failures: [], skippedCount: 0 }
+    const requestedRoots = [...new Set(folderPaths.map((item) => resolve(item)))]
+    if (requestedRoots.length > 100) throw new Error('한 번에 폴더 100개까지 선택할 수 있습니다.')
     const candidates: ImportCandidate[] = []
     let skippedCount = 0
     let limitReached = false
     const failures: ArtifactImportFailure[] = []
 
-    const walk = async (root: string, directory: string): Promise<void> => {
-      if (candidates.length >= maxFiles) {
-        limitReached = true
-        return
+    const canonicalRoots = new Map<string, CanonicalRoot>()
+    for (const requestedRoot of requestedRoots) {
+      try {
+        const requestedStat = await lstat(requestedRoot)
+        if (requestedStat.isSymbolicLink()) throw new Error(SYMLINK_ROOT_ERROR)
+        if (!requestedStat.isDirectory()) throw new Error(NOT_DIRECTORY_ERROR)
+        const canonical = await realpath(requestedRoot)
+        const root = {
+          path: canonical,
+          key: canonicalPathKey(canonical),
+          requestedPath: requestedRoot,
+          device: requestedStat.dev,
+          inode: requestedStat.ino
+        }
+        canonicalRoots.set(root.key, root)
+      } catch (error) {
+        failures.push({ name: safeSourcePart(basename(requestedRoot), '폴더'), reason: safeFailure(error) })
       }
+    }
+
+    const roots: CanonicalRoot[] = [...canonicalRoots.values()]
+      .sort((a, b) => a.path.length - b.path.length || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .filter((root, _index, all) => !all.some((parent) => parent !== root && isWithinPath(parent, root)))
+    if (!roots.length) return {
+      cancelled: false,
+      limitReached: false,
+      artifacts: [],
+      failures,
+      skippedCount
+    }
+
+    const candidateKeys = new Set<string>()
+    const walk = async (root: string, directory: string): Promise<boolean> => {
       let entries
       try {
         entries = await readdir(directory, { withFileTypes: true })
       } catch (error) {
         failures.push({ name: safeSourcePart(basename(directory), '폴더'), reason: safeFailure(error) })
-        return
+        return false
       }
+      entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
       for (const entry of entries) {
-        if (candidates.length >= maxFiles) {
-          limitReached = true
-          break
-        }
         const filePath = join(directory, entry.name)
         if (entry.isSymbolicLink()) {
           skippedCount += 1
         } else if (entry.isDirectory()) {
-          await walk(root, filePath)
+          if (await walk(root, filePath)) return true
         } else if (entry.isFile() && extensions.has(extname(entry.name).toLowerCase())) {
+          const candidateKey = canonicalPathKey(filePath)
+          if (candidateKeys.has(candidateKey)) continue
+          if (candidates.length >= maxFiles) return true
           try {
             candidates.push({ filePath, source: sourceForFolder(root, filePath) })
+            candidateKeys.add(candidateKey)
           } catch (error) {
             failures.push({ name: safeSourcePart(entry.name, '파일'), reason: safeFailure(error) })
           }
@@ -499,24 +581,39 @@ export class ArtifactService {
           skippedCount += 1
         }
       }
+      return false
     }
 
-    for (const root of roots) {
-      if (candidates.length >= maxFiles) {
-        limitReached = true
-        break
+    const verifyRootBeforeTraversal = async (root: CanonicalRoot): Promise<void> => {
+      const currentStat = await lstat(root.requestedPath)
+      if (currentStat.isSymbolicLink()) throw new Error(SYMLINK_ROOT_ERROR)
+      if (!currentStat.isDirectory()) throw new Error(NOT_DIRECTORY_ERROR)
+      const currentCanonical = await realpath(root.requestedPath)
+      if (
+        canonicalPathKey(currentCanonical) !== root.key
+        || currentStat.dev !== root.device
+        || currentStat.ino !== root.inode
+      ) {
+        throw new Error(ROOT_CHANGED_ERROR)
       }
-      await walk(root, root)
     }
-    if (limitReached) {
-      failures.push({
-        name: '가져오기 제한',
-        reason: `파일 ${maxFiles.toLocaleString()}개 제한에 도달해 나머지 파일은 가져오지 않았습니다.`
-      })
+
+    const walkRoot = async (root: CanonicalRoot): Promise<void> => {
+      try {
+        await verifyRootBeforeTraversal(root)
+      } catch (error) {
+        failures.push({ name: safeSourcePart(basename(root.requestedPath), '폴더'), reason: safeFailure(error) })
+        return
+      }
+      limitReached = await walk(root.path, root.path)
+    }
+    for (const root of roots) {
+      await walkRoot(root)
+      if (limitReached) break
     }
     const sourceMap = new Map(candidates.map((candidate) => [candidate.filePath, candidate.source]))
     const result = await this.importFiles(candidates.map((candidate) => candidate.filePath), sourceMap)
-    return { ...result, failures: [...failures, ...result.failures], skippedCount }
+    return { ...result, failures: [...failures, ...result.failures], limitReached, skippedCount }
   }
 
   async list(): Promise<ArtifactRecord[]> {

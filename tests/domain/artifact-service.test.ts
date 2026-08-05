@@ -1,8 +1,35 @@
-import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+const rootReplacementRace = vi.hoisted(() => ({
+  requestedPath: undefined as string | undefined,
+  movedPath: undefined as string | undefined,
+  replacementPath: undefined as string | undefined,
+  done: false
+}))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    realpath: async (filePath: any) => {
+      const canonical = await actual.realpath(filePath)
+      if (
+        !rootReplacementRace.done
+        && rootReplacementRace.requestedPath
+        && String(filePath) === rootReplacementRace.requestedPath
+      ) {
+        rootReplacementRace.done = true
+        await actual.rename(rootReplacementRace.requestedPath, rootReplacementRace.movedPath!)
+        await actual.symlink(rootReplacementRace.replacementPath!, rootReplacementRace.requestedPath, 'dir')
+      }
+      return canonical
+    }
+  }
+})
+
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { ArtifactService } from '../../electron/main/artifact-service'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ArtifactService, isPathWithin } from '../../electron/main/artifact-service'
 
 const temporaryRoots: string[] = []
 
@@ -14,9 +41,24 @@ async function temporaryRoot(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  rootReplacementRace.requestedPath = undefined
+  rootReplacementRace.movedPath = undefined
+  rootReplacementRace.replacementPath = undefined
+  rootReplacementRace.done = false
 })
 
 describe('ArtifactService log workbench', () => {
+  it('handles POSIX root, Windows drive roots, and UNC roots without prefix collisions', () => {
+    expect(isPathWithin('/', '/var/logs', 'darwin')).toBe(true)
+    expect(isPathWithin('/var/logs', '/var/logs-archive', 'darwin')).toBe(false)
+
+    expect(isPathWithin('C:\\', 'c:\\Logs\\today', 'win32')).toBe(true)
+    expect(isPathWithin('C:\\Logs', 'c:\\logs\\today', 'win32')).toBe(true)
+    expect(isPathWithin('C:\\Logs', 'C:\\Logs-archive', 'win32')).toBe(false)
+    expect(isPathWithin('\\\\server\\share\\', '\\\\SERVER\\SHARE\\logs', 'win32')).toBe(true)
+    expect(isPathWithin('\\\\server\\share\\', '\\\\server\\share-two\\logs', 'win32')).toBe(false)
+  })
+
   it('imports multiple folders whose Windows-friendly names contain Korean text and spaces', async () => {
     const root = await temporaryRoot()
     const first = join(root, '고객사 A 로그')
@@ -68,6 +110,126 @@ describe('ArtifactService log workbench', () => {
     ])
     expect(records[0].sources?.[0].rootId).not.toBe(records[0].sources?.[1].rootId)
     expect(JSON.stringify(records[0])).not.toContain(root)
+  })
+
+  it('deduplicates duplicate and overlapping roots before applying the file limit', async () => {
+    const root = await temporaryRoot()
+    const parent = join(root, 'parent')
+    const child = join(parent, 'child')
+    await mkdir(child, { recursive: true })
+    await writeFile(join(parent, 'root.log'), '@ROOT\n', 'utf8')
+    await writeFile(join(child, 'nested.log'), '@NESTED\n', 'utf8')
+
+    const duplicateParent = process.platform === 'win32' ? parent.toUpperCase() : parent
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolders([child, parent, duplicateParent], {
+      extensions: ['log'],
+      maxFiles: 2
+    })
+    const records = await service.list()
+
+    expect(result.failures).toEqual([])
+    expect(result.limitReached).toBe(false)
+    expect(records).toHaveLength(2)
+    expect(records.every((record) => record.importCount === 1)).toBe(true)
+    expect(new Set(records.flatMap((record) => record.sources ?? []).map((source) => source.rootId)).size).toBe(1)
+    expect(records.flatMap((record) => record.sources ?? []).map((source) => source.relativePath)).toEqual(
+      expect.arrayContaining(['root.log', 'child/nested.log'])
+    )
+    expect(JSON.stringify(result)).not.toContain(root)
+  })
+
+  it('reports the bounded intake limit explicitly without a synthetic failure', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    await Promise.all([
+      writeFile(join(source, 'first.log'), '@FIRST\n', 'utf8'),
+      writeFile(join(source, 'second.log'), '@SECOND\n', 'utf8')
+    ])
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolder(source, { extensions: ['log'], maxFiles: 1 })
+
+    expect(result.limitReached).toBe(true)
+    expect(result.failures).toEqual([])
+    expect(result.artifacts).toHaveLength(1)
+  })
+
+  it('does not report the limit when only ineligible files or empty directories remain', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(join(source, 'nested', 'empty'), { recursive: true })
+    await Promise.all([
+      writeFile(join(source, 'first.log'), '@FIRST\n', 'utf8'),
+      writeFile(join(source, 'ignored.txt'), 'ignore me', 'utf8'),
+      writeFile(join(source, 'nested', 'ignored.cfgx'), 'ignore me', 'utf8')
+    ])
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolder(source, { extensions: ['log'], maxFiles: 1 })
+
+    expect(result.limitReached).toBe(false)
+    expect(result.failures).toEqual([])
+    expect(result.artifacts).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('fails safely when the selected root is replaced after realpath', async () => {
+    const root = await temporaryRoot()
+    const selected = join(root, 'selected')
+    const original = join(root, 'selected-original')
+    const replacement = join(root, 'replacement')
+    await mkdir(selected)
+    await mkdir(replacement)
+    await writeFile(join(selected, 'original.log'), '@ORIGINAL\n', 'utf8')
+    await writeFile(join(replacement, 'replacement.log'), '@REPLACEMENT\n', 'utf8')
+
+    rootReplacementRace.requestedPath = selected
+    rootReplacementRace.movedPath = original
+    rootReplacementRace.replacementPath = replacement
+    rootReplacementRace.done = false
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolder(selected, { extensions: ['log'] })
+
+    expect(result.artifacts).toEqual([])
+    expect(result.failures).toEqual([{
+      name: 'selected',
+      reason: '심볼릭 링크 폴더는 가져올 수 없습니다.'
+    }])
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a selected symlink root while excluding nested symlink directories', async () => {
+    const root = await temporaryRoot()
+    const target = join(root, 'target')
+    const selectedLink = join(root, 'selected-link')
+    const source = join(root, 'source')
+    const nestedLink = join(source, 'nested-link')
+    await mkdir(target)
+    await mkdir(source)
+    await writeFile(join(target, 'target.log'), '@TARGET\n', 'utf8')
+    await writeFile(join(source, 'source.log'), '@SOURCE\n', 'utf8')
+    await symlink(target, selectedLink, 'dir')
+    await symlink(target, nestedLink, 'dir')
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const rejected = await service.importFolder(selectedLink, { extensions: ['log'] })
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+
+    expect(rejected.artifacts).toEqual([])
+    expect(rejected.failures).toEqual([{
+      name: 'selected-link',
+      reason: '심볼릭 링크 폴더는 가져올 수 없습니다.'
+    }])
+    expect(imported.failures).toEqual([])
+    expect(imported.skippedCount).toBe(1)
+    expect(imported.artifacts).toHaveLength(1)
+    expect(JSON.stringify(rejected)).not.toContain(root)
   })
 
   it('keeps identical sources from different roots with the same folder label and relative path', async () => {

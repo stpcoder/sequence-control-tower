@@ -3,6 +3,7 @@ import type { SequenceFingerprint, StartAnalysisInput } from '../shared/contract
 import {
   buildMinimalLlmEvidence,
   buildMinimalLlmPrompt,
+  MAX_LLM_PROMPT_CHARS,
   redactSensitiveText
 } from './llm-evidence'
 
@@ -130,5 +131,79 @@ describe('minimal LLM evidence', () => {
     expect(serialized).not.toContain('Customer Secret')
     expect(serialized).not.toContain('Project Q')
     expect(evidence.file.name).toBe('<ABS_PATH>')
+  })
+
+  it('keeps the prompt bounded and retains first/last failure evidence under adversarial volume', () => {
+    const facts: SequenceFingerprint['facts'] = Array.from({ length: 80 }, (_item, index) => ({
+      key: index === 1 ? 'first-failure-fact' : index === 79 ? 'last-failure-fact' : `fact-${index}`,
+      label: index === 1 ? 'FIRST FAILURE evidence' : index === 79 ? 'LAST FAILURE evidence' : `Fact ${index}`,
+      value: index === 1
+        ? 'timeout password=first-secret /Users/customer/private/first-failure.log'
+        : index === 79
+          ? 'watchdog error Authorization: Bearer last-secret C:\\Customer\\private\\last-failure.log'
+          : `ordinary value ${index} MHz`,
+      evidence: index === 1
+        ? 'first failure: /opt/customer/first.log api_key=first-key'
+        : index === 79
+          ? 'last failure: /opt/customer/last.log jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signature123'
+          : `fact evidence ${index}`,
+      line: index + 1,
+      confidence: 0.9,
+      state: 'extracted'
+    }))
+    const changes = Array.from({ length: 80 }, (_item, index) => ({
+      kind: 'changed' as const,
+      key: index === 2 ? 'first-failure-change' : index === 78 ? 'last-failure-change' : `change-${index}`,
+      label: index === 2 ? 'first failure change' : index === 78 ? 'last failure change' : `Change ${index}`,
+      before: index === 2
+        ? 'error before password=change-secret /Users/customer/change-before.log'
+        : `before ${index}`,
+      after: index === 78
+        ? 'timeout after Bearer change-secret C:\\Customer\\change-after.log'
+        : `after ${index}`,
+      significance: index === 2 || index === 78 ? 'high' as const : 'low' as const
+    }))
+    const adversarialFingerprint: SequenceFingerprint = {
+      parserVersion: 'test',
+      lineCount: 2_000_000,
+      blockCount: 1_000,
+      commandCount: 5_000_000,
+      commandTokens: [
+        ...Array.from({ length: 79 }, (_item, index) => `command-${index}`),
+        'last-command /Users/customer/private/run.log Authorization: Bearer command-secret'
+      ],
+      structuralHash: 'must-not-be-sent',
+      facts
+    }
+
+    const evidence = buildMinimalLlmEvidence({
+      request: {
+        artifactId: 'a'.repeat(64),
+        projectContext: `${'context '.repeat(2_000)} /Users/customer/private/context`,
+        userComment: `${'comment '.repeat(2_000)} password=comment-secret`,
+        parentArtifactId: 'b'.repeat(64)
+      },
+      fileName: 'C:\\Customer\\private\\adversarial.seq',
+      fingerprint: adversarialFingerprint,
+      changes
+    })
+    const firstPrompt = buildMinimalLlmPrompt(evidence)
+    const secondPrompt = buildMinimalLlmPrompt(evidence)
+
+    expect(firstPrompt).toBe(secondPrompt)
+    expect(firstPrompt.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS)
+    expect(firstPrompt).toContain('first-failure-fact')
+    expect(firstPrompt).toContain('last-failure-fact')
+    expect(firstPrompt).toContain('first-failure-change')
+    expect(firstPrompt).toContain('last-failure-change')
+    expect(firstPrompt).not.toContain('first-secret')
+    expect(firstPrompt).not.toContain('last-secret')
+    expect(firstPrompt).not.toContain('change-secret')
+    expect(firstPrompt).not.toContain('command-secret')
+    expect(firstPrompt).not.toContain('Customer')
+    expect(firstPrompt).not.toContain('/Users/customer')
+    expect(firstPrompt).not.toContain('must-not-be-sent')
+    expect(firstPrompt).toContain('<SECRET>')
+    expect(firstPrompt).toContain('<ABS_PATH>')
   })
 })

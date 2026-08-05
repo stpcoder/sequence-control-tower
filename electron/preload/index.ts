@@ -10,6 +10,7 @@ import type {
   EvaluationSaveBatchInput,
   EvaluationSaveDecisionInput,
   EvaluationSaveRecipeInput,
+  EvaluationSaveRecipeAndBatchInput,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   RendererCommand,
@@ -74,6 +75,7 @@ const api: SequenceIntelligenceApi = {
     saveDecision: (input: EvaluationSaveDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveDecision, input),
     saveRecipe: (input: EvaluationSaveRecipeInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipe, input),
     saveBatch: (input: EvaluationSaveBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveBatch, input),
+    saveRecipeAndBatch: (input: EvaluationSaveRecipeAndBatchInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationSaveRecipeAndBatch, input),
     approveMetadata: (input: EvaluationApproveMetadataInput) => ipcRenderer.invoke(IPC_CHANNELS.evaluationApproveMetadata, input)
   }
 }
