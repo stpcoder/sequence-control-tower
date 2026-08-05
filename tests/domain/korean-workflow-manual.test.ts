@@ -59,7 +59,8 @@ describe("Korean engineer workflow manual", () => {
       "Timeout",
       "Retries",
       "저장",
-      "AI 패턴 검토",
+      "검토 메모 (선택)",
+      "검토 실행",
       "검토 중",
       "취소",
     ]) {
@@ -83,8 +84,8 @@ describe("Korean engineer workflow manual", () => {
     expect(manual).toContain("tests/fixtures/engineer-workflow/");
     expect(manual).toContain("tests/fixtures/qualcomm-bringup/");
     expect(manual).toContain("OpenAI-compatible vLLM");
-    expect(manual).toContain("검토용 제안 · 판정은 엔지니어가 확정");
-    expect(manual).toContain("검토용 제안입니다. PASS/FAIL 판정이나 규칙을 자동 적용하지 않습니다.");
+    expect(manual).not.toContain("검토용 제안 · 판정은 엔지니어가 확정");
+    expect(manual).not.toContain("검토용 제안입니다. PASS/FAIL 판정이나 규칙을 자동 적용하지 않습니다.");
     expect(manual).toContain("기대 결과");
     expect(manual).toContain("예외 처리");
   });

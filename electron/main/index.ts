@@ -8,32 +8,18 @@ import { EvaluationStore } from './evaluation-store'
 import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
+import { isSameRendererDocument } from './renderer-document'
 import { IPC_CHANNELS } from '../shared/contracts'
 import type { RendererCommand } from '../shared/contracts'
 
 let mainWindow: BrowserWindow | null = null
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
 
-function isExactPackagedRenderer(target: string): boolean {
-  try {
-    const actual = new URL(target)
-    const expected = new URL(packagedRendererUrl)
-    actual.hash = ''
-    return actual.href === expected.href
-  } catch {
-    return false
-  }
-}
-
 function allowedNavigation(target: string): boolean {
-  if (app.isPackaged) return isExactPackagedRenderer(target)
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (!rendererUrl) return target.startsWith('file://')
-  try {
-    return new URL(target).origin === new URL(rendererUrl).origin
-  } catch {
-    return false
-  }
+  const expectedRendererUrl = app.isPackaged
+    ? packagedRendererUrl
+    : process.env.ELECTRON_RENDERER_URL || packagedRendererUrl
+  return isSameRendererDocument(target, expectedRendererUrl)
 }
 
 function createWindow(): BrowserWindow {

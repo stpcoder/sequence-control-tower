@@ -36,7 +36,7 @@
 
 - Windows 다중 폴더 선택과 하위 `.log` 재귀 수집
 - 최대 10,000개 로그 관리와 동일 내용 중복 저장 방지
-- 240줄 단위 지연 로딩과 절대 줄 번호 이동
+- 스크롤 기반 연속 로그 로딩과 절대 줄 번호 이동
 - literal, regex, 대소문자, 단어 단위 검색
 - `Ctrl+O`, `Ctrl+F`, `Ctrl+Shift+F`, `Enter`, `Shift+Enter`, `F3`, `Shift+F3`, `Esc`
 - 탐색 검색과 판정 근거의 분리
@@ -111,8 +111,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.

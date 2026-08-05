@@ -24,9 +24,12 @@ import {
   canStartImport,
   canRevealActiveHit,
   chooseNextTabId,
+  clampSearchHitIndex,
   clauseSpecKey,
   dedupeWorkbenchFiles,
   groupWorkbenchFiles,
+  lineWindowEdgeRequestKey,
+  mergeLineWindow,
   mergeWorkbenchFiles,
   omitFileCacheEntry,
   invalidateImportBatchGeneration,
@@ -272,7 +275,30 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('api.analysis.get(started.id)')
     expect(workbenchSource).toContain('api.analysis.cancel(jobId)')
     expect(workbenchSource).toContain('api.analysis.onJobUpdate')
-    expect(workbenchSource).toContain('검토용 제안입니다. PASS/FAIL 판정이나 규칙을 자동 적용하지 않습니다.')
+    expect(workbenchSource).toContain("sideMode === 'search' ? '검색 결과'")
+    expect(workbenchSource).toContain('className={`search-result ${index === currentHit ? \'active\' : \'\'}`}')
+    expect(workbenchSource).toContain('className="search-result-file"')
+    expect(workbenchSource).toContain('className="search-result-line"')
+    expect(workbenchSource).toContain('<b>Ln {hit.line}</b>')
+    expect(workbenchSource).toContain('placeholder="검색어 입력"')
+    expect(workbenchSource).toContain('검색어를 입력하세요.')
+    expect(workbenchSource).toContain('검색 중…')
+    expect(workbenchSource).toContain('find-match-count')
+    expect(workbenchSource).toContain('aria-live="polite"')
+    expect(workbenchSource).toContain('placeholder="검토 메모 (선택)"')
+    expect(workbenchSource).toContain("patternReviewBusy ? '검토 중' : '검토 실행'")
+    expect(workbenchSource).toContain('경고 {patternReview.result.warnings.length}건')
+    expect(workbenchSource).not.toContain('검토용 제안 · 판정은 엔지니어가 확정')
+    expect(workbenchSource).not.toContain('pattern-review-source')
+    expect(workbenchSource).not.toContain('pattern-review-disclaimer')
+    expect(workbenchCss).not.toContain('.side-search-summary')
+    expect(workbenchCss).toContain('--wb-type-body: 14px;')
+    expect(workbenchCss).toContain('--wb-type-secondary: 13px;')
+    expect(workbenchCss).toContain('--wb-type-code: 13px;')
+    expect(workbenchCss).toContain('--wb-type-body: 14px; --wb-type-secondary: 13px')
+    expect(workbenchCss).toContain('font-size: var(--wb-type-body)')
+    expect(workbenchCss).toContain('.search-result-line {')
+    expect(workbenchCss).toContain('font-size: 13px')
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
   })
 
@@ -354,13 +380,67 @@ describe('Log Workbench UI data hardening', () => {
 
   it('keeps artifact windows bounded and reveal scrolling tied to rendered line data', () => {
     const lineWindow = sourceBetween(workbenchSource, 'const loadLineWindow = useCallback(', 'const scheduleAnimationFrame = useCallback(')
-    expect(lineWindow).toContain('startLine: Math.max(1, targetLine - 80)')
+    expect(lineWindow).toContain('Math.max(1, targetLine - 80)')
     expect(lineWindow).toContain('lineCount: 240')
+    expect(lineWindow).toContain('while (lineWindowTasks.current.has(file.id))')
+    expect(lineWindow).toContain("cached?.lines.some((line) => line.lineNumber === targetLine)")
 
-    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 160)')
-    expect(workbenchSource).toContain('Math.max(1, activeWindow.startLine - 240)')
-    expect(workbenchSource).toContain('(activeWindow.lines.at(-1)?.lineNumber ?? 1) + 81')
+    expect(workbenchSource).toContain('onScroll={handleEditorScroll}')
+    expect(workbenchSource).toContain("lineWindowEdgeRequestKey(file.id, 'before', boundary)")
+    expect(workbenchSource).toContain("some((key) => key.startsWith(`${file.id}:`))")
+    expect(workbenchSource).not.toContain('이전 구간')
+    expect(workbenchSource).not.toContain('다음 구간')
     expect(workbenchSource).toContain('querySelector(`[data-line="${lineNumber}"]`)?.scrollIntoView({ block: \'center\' })')
+  })
+
+  it('merges ordered unique edge windows and trims the opposite edge at 1000 lines', () => {
+    const current = {
+      startLine: 901,
+      lines: Array.from({ length: 100 }, (_, index) => ({ lineNumber: 901 + index, text: `${901 + index}`, truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: true,
+    }
+    const incoming = {
+      startLine: 661,
+      lines: Array.from({ length: 300 }, (_, index) => ({ lineNumber: 661 + index, text: `${661 + index}`, truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: true,
+    }
+    const prepended = mergeLineWindow(current, incoming, 'before', 1000)
+    expect(prepended.lines.map((line) => line.lineNumber)).toEqual(Array.from({ length: 340 }, (_, index) => 661 + index))
+    expect(new Set(prepended.lines.map((line) => line.lineNumber)).size).toBe(prepended.lines.length)
+
+    const fullWindow = {
+      startLine: 1,
+      lines: Array.from({ length: 1000 }, (_, index) => ({ lineNumber: index + 1, text: '', truncated: false })),
+      hasMoreBefore: false,
+      hasMoreAfter: true,
+    }
+    const appended = {
+      startLine: 1001,
+      lines: Array.from({ length: 240 }, (_, index) => ({ lineNumber: 1001 + index, text: '', truncated: false })),
+      hasMoreBefore: true,
+      hasMoreAfter: false,
+    }
+    const boundedAfter = mergeLineWindow(fullWindow, appended, 'after', 1000)
+    expect(boundedAfter.lines).toHaveLength(1000)
+    expect(boundedAfter.lines[0].lineNumber).toBe(241)
+    expect(boundedAfter.lines.at(-1)?.lineNumber).toBe(1240)
+    expect(boundedAfter.hasMoreBefore).toBe(true)
+    expect(boundedAfter.hasMoreAfter).toBe(false)
+
+    const boundedBefore = mergeLineWindow(boundedAfter, fullWindow, 'before', 1000)
+    expect(boundedBefore.lines[0].lineNumber).toBe(1)
+    expect(boundedBefore.lines.at(-1)?.lineNumber).toBe(1000)
+    expect(boundedBefore.hasMoreBefore).toBe(false)
+    expect(boundedBefore.hasMoreAfter).toBe(true)
+    expect(lineWindowEdgeRequestKey('file-a', 'after', 1000)).toBe('file-a:after:1000')
+  })
+
+  it('clamps the selected search hit when opened-tab results shrink', () => {
+    expect(clampSearchHitIndex(8, 3)).toBe(2)
+    expect(clampSearchHitIndex(-2, 3)).toBe(0)
+    expect(clampSearchHitIndex(2, 0)).toBe(0)
   })
 
   it('keeps the continuous editor structure and avoids legacy per-line sizing', () => {

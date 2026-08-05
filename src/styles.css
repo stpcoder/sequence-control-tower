@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family: 'Pretendard', 'Segoe UI', sans-serif;
+  font-family: 'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Segoe UI', sans-serif;
   font-synthesis: none;
   --bg: #0d0f13;
   --bg-deep: #090b0f;
@@ -1993,7 +1993,7 @@ button:disabled {
 
 .settings-layout { grid-template-columns: minmax(0, 900px); }
 .settings-content { padding: 36px 28px 48px; background: #101216; }
-.settings-title h2 { margin: 0; font-size: 20px; font-weight: 650; }
+.settings-title h2 { margin: 0; font-size: 20px; font-weight: 600; }
 .settings-title p { max-width: 640px; margin-top: 8px; color: #9ba3af; font-size: 13px; }
 .settings-card {
   margin-top: 24px;
@@ -2010,32 +2010,32 @@ button:disabled {
   padding: 12px 0;
   border-color: #292e37;
 }
-.setting-row label strong { font-size: 13.5px; }
-.setting-row label span { margin-top: 3px; font-size: 12px; }
+.setting-row label strong { font-size: 14px; }
+.setting-row label span { margin-top: 3px; font-size: 13px; }
 .setting-row > input,
-.secret-input { height: 46px; border-radius: 7px; font-size: 13.5px; }
+.secret-input { height: 46px; border-radius: 7px; font-size: 14px; }
 .secret-input { padding-inline: 12px; }
-.secret-input button { min-width: 44px; min-height: 40px; font-size: 12px; }
+.secret-input button { min-width: 44px; min-height: 40px; font-size: 13px; }
 .connection-test {
   min-height: 60px;
   padding: 0;
   border-bottom: 1px solid #292e37;
 }
-.connection-test span { font-size: 12px; }
-.connection-test button { height: 42px; padding-inline: 14px; border-radius: 7px; font-size: 13.5px; }
+.connection-test span { font-size: 13px; }
+.connection-test button { height: 42px; padding-inline: 14px; border-radius: 7px; font-size: 14px; }
 .settings-two-column { gap: 32px; margin-top: 30px; }
 .settings-two-column .settings-card { margin: 0; }
 .compact-card { padding: 0; background: transparent; }
 .settings-section-title { display: flex; align-items: center; min-height: 56px; border-bottom: 1px solid #292e37; }
-.settings-section-title strong { font-size: 14px; font-weight: 650; }
-.inline-field { min-height: 56px; border-color: #292e37; color: #b6bdc7; font-size: 13.5px; }
-.inline-field input { width: 92px; height: 40px; border-radius: 6px; font-size: 13.5px; }
-.inline-field small { font-size: 12px; }
-.offline-list { gap: 12px; margin: 18px 0; color: #c0c6cf; font-size: 13.5px; }
+.settings-section-title strong { font-size: 14px; font-weight: 600; }
+.inline-field { min-height: 56px; border-color: #292e37; color: #b6bdc7; font-size: 14px; }
+.inline-field input { width: 92px; height: 40px; border-radius: 6px; font-size: 14px; }
+.inline-field small { font-size: 13px; }
+.offline-list { gap: 12px; margin: 18px 0; color: #c0c6cf; font-size: 14px; }
 .offline-list li { min-height: 28px; gap: 9px; }
-.settings-note { margin: 18px 0 0; color: #8f98a5; font-size: 12px; line-height: 1.55; }
+.settings-note { margin: 18px 0 0; color: #8f98a5; font-size: 13px; line-height: 1.55; }
 .settings-actions { margin-top: 28px; }
-.settings-actions > span { color: #929ba7; font-size: 12px; }
+.settings-actions > span { color: #929ba7; font-size: 13px; }
 
 @media (max-width: 1280px) {
   :root { --sidebar: 68px; }

@@ -10,13 +10,17 @@ const { showOpenDialog } = vi.hoisted(() => ({
   showOpenDialog: vi.fn()
 }))
 
+const { owner } = vi.hoisted(() => ({
+  owner: { current: { isDestroyed: () => false } as { isDestroyed: () => boolean } | null }
+}))
+
 vi.mock('electron', () => ({
   app: {
     getVersion: () => 'test',
     isPackaged: false
   },
   BrowserWindow: {
-    fromWebContents: () => ({ isDestroyed: () => false })
+    fromWebContents: () => owner.current
   },
   dialog: { showOpenDialog },
   ipcMain: {
@@ -59,19 +63,29 @@ const importFolders = vi.fn((folderPaths: string[], options: unknown) => new Pro
   folderImportRequests.push({ folderPaths, options, resolve, reject })
 }))
 const saveRecipeAndBatch = vi.fn(async (input: unknown) => ({ input }))
+const lineWindow = vi.fn(async () => ({}))
+const saveLlm = vi.fn(async () => ({}))
 const services = {
   artifacts: {
     search: search.fn,
     inspectEvidence: evidence.fn,
-    importFolders
+    importFolders,
+    lineWindow
   },
-  evaluations: { saveRecipeAndBatch }
+  evaluations: { saveRecipeAndBatch },
+  llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() }
 } as unknown as Parameters<typeof registerIpc>[0]
 
 function trustedEvent(senderId = 42): unknown {
-  const frame = { url: 'file:///renderer/index.html' }
-  const sender = { id: senderId, mainFrame: frame }
+  const frame = { url: `${process.env.ELECTRON_RENDERER_URL}?screen=settings#llm` }
+  const sender = { id: senderId, mainFrame: frame, isDestroyed: () => false }
   return { sender, senderFrame: frame }
+}
+
+function eventWithUrl(url: string, senderFrame = true): unknown {
+  const frame = { url }
+  const sender = { id: 42, mainFrame: frame, isDestroyed: () => false }
+  return { sender, senderFrame: senderFrame ? frame : { url } }
 }
 
 async function invoke(channel: string, input: unknown = {}, senderId = 42): Promise<unknown> {
@@ -80,12 +94,22 @@ async function invoke(channel: string, input: unknown = {}, senderId = 42): Prom
   return listener(trustedEvent(senderId), input)
 }
 
+async function invokeEvent(channel: string, event: unknown, input: unknown = {}): Promise<unknown> {
+  const listener = handlers.get(channel)
+  if (!listener) throw new Error(`Missing IPC handler: ${channel}`)
+  return listener(event, input)
+}
+
 beforeEach(() => {
+  process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173/index.html'
+  owner.current = { isDestroyed: () => false }
   showOpenDialog.mockReset()
   search.fn.mockClear()
   evidence.fn.mockClear()
   importFolders.mockClear()
   saveRecipeAndBatch.mockClear()
+  lineWindow.mockClear()
+  saveLlm.mockClear()
   search.requests.length = 0
   evidence.requests.length = 0
   folderImportRequests.length = 0
@@ -94,6 +118,57 @@ beforeEach(() => {
 
 afterEach(() => {
   unregisterIpc()
+  delete process.env.ELECTRON_RENDERER_URL
+})
+
+describe('IPC sender URL policy', () => {
+  it.each([
+    IPC_CHANNELS.settingsSaveLlm,
+    IPC_CHANNELS.artifactLineWindow,
+    IPC_CHANNELS.artifactSearch,
+  ])('accepts query/hash navigation for %s', async (channel) => {
+    if (channel === IPC_CHANNELS.artifactSearch) {
+      const request = invokeEvent(channel, eventWithUrl('http://localhost:5173/index.html?screen=settings#llm'))
+      await vi.waitFor(() => expect(search.fn).toHaveBeenCalledTimes(1))
+      search.requests[0].resolve({ results: [] })
+      await expect(request).resolves.toEqual({ results: [] })
+      return
+    }
+    if (channel === IPC_CHANNELS.artifactLineWindow) {
+      await expect(invokeEvent(channel, eventWithUrl('http://localhost:5173/index.html?screen=workbench#log'), {}))
+        .resolves.toEqual({})
+      return
+    }
+    await expect(invokeEvent(channel, eventWithUrl('http://localhost:5173/index.html?screen=settings#llm'), {}))
+      .resolves.toEqual({})
+  })
+
+  it.each([
+    'file:///unrelated.html',
+    'http://localhost:5173/other.html',
+    'http://127.0.0.1:5173/index.html',
+  ])('rejects unrelated sender URL %s', async (url) => {
+    await expect(invokeEvent(IPC_CHANNELS.settingsSaveLlm, eventWithUrl(url))).rejects.toThrow('IPC 요청이 차단되었습니다.')
+  })
+
+  it('rejects subframes and destroyed senders', async () => {
+    await expect(invokeEvent(
+      IPC_CHANNELS.settingsSaveLlm,
+      eventWithUrl('http://localhost:5173/index.html?screen=settings', false),
+    )).rejects.toThrow('IPC 요청이 차단되었습니다.')
+
+    const frame = { url: 'http://localhost:5173/index.html' }
+    await expect(invokeEvent(IPC_CHANNELS.settingsSaveLlm, {
+      sender: { id: 42, mainFrame: frame, isDestroyed: () => true },
+      senderFrame: frame,
+    })).rejects.toThrow('IPC 요청이 차단되었습니다.')
+
+    owner.current = null
+    await expect(invokeEvent(
+      IPC_CHANNELS.settingsSaveLlm,
+      eventWithUrl('http://localhost:5173/index.html?screen=settings'),
+    )).rejects.toThrow('IPC 요청이 차단되었습니다.')
+  })
 })
 
 describe('artifact IPC cancellation', () => {

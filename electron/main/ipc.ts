@@ -31,6 +31,7 @@ import { AnalysisService } from './analysis-service'
 import { ArtifactService } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
 import { LlmConfigService } from './llm-service'
+import { isSameRendererDocument } from './renderer-document'
 import { WikiService } from './wiki-service'
 
 interface Services {
@@ -48,31 +49,20 @@ const activeArtifactFolderImports = new Map<string, symbol>()
 const FOLDER_IMPORT_IN_PROGRESS_ERROR =
   '폴더 가져오기가 이미 진행 중입니다. 현재 작업이 끝난 후 다시 시도해 주세요.'
 
-function isExactPackagedRenderer(frameUrl: string): boolean {
-  try {
-    const actual = new URL(frameUrl)
-    const expected = new URL(packagedRendererUrl)
-    // Hash navigation remains inside the same immutable renderer document.
-    actual.hash = ''
-    return actual.href === expected.href
-  } catch {
-    return false
-  }
-}
-
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
   const frameUrl = event.senderFrame?.url
   if (!frameUrl) return false
   const owner = BrowserWindow.fromWebContents(event.sender)
-  if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) return false
-  if (app.isPackaged) return isExactPackagedRenderer(frameUrl)
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (!rendererUrl) return frameUrl.startsWith('file://')
-  try {
-    return new URL(frameUrl).origin === new URL(rendererUrl).origin
-  } catch {
-    return false
-  }
+  if (
+    !owner ||
+    owner.isDestroyed() ||
+    event.sender.isDestroyed() ||
+    event.senderFrame !== event.sender.mainFrame
+  ) return false
+  const expectedRendererUrl = app.isPackaged
+    ? packagedRendererUrl
+    : process.env.ELECTRON_RENDERER_URL || packagedRendererUrl
+  return isSameRendererDocument(frameUrl, expectedRendererUrl)
 }
 
 function handle(
