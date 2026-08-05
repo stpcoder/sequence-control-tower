@@ -445,6 +445,15 @@ export default function App() {
     }
   }, [enqueueEvaluation, files, notify])
 
+  const applyMetadataSuggestion = useCallback(async (fileId: string, field: PatternAxis, value: string) => {
+    const record = records.find((item) => item.id === fileId)
+    if (!record) {
+      notify('LLM metadata 후보를 적용할 로그를 찾지 못했습니다.', 'error')
+      return
+    }
+    await approveMetadata(record, field, value)
+  }, [approveMetadata, notify, records])
+
   const openFile = useCallback((fileId: string) => {
     setSelectedFileId(fileId)
     navigate('workbench')
@@ -461,6 +470,7 @@ export default function App() {
       onDecision={updateDecision}
       onSaveRecipe={saveRecipeRevision}
       onBatchResults={updateBatchResults}
+      onApplyMetadataSuggestion={applyMetadataSuggestion}
       onNotify={notify}
     />
   ) : activePage === 'results' ? (
