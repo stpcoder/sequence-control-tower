@@ -48,6 +48,7 @@ type InternalRun = AgentRun & {
 type ModelAction = { action?: unknown; tool?: unknown; input?: unknown; reason?: unknown; candidate?: unknown; question?: unknown; summary?: unknown }
 type CachedAgentResult = Pick<AgentRun, 'candidate' | 'needsReview' | 'failureReason'> & {
   sources: Array<{ sourceId: string; artifactId: string; fileName: string; relativePath: string }>
+  observations: BoundedObservation[]
 }
 
 const failCodes = new Set(['LLM_REQUEST_TIMEOUT', 'LLM_REQUEST_FAILED', 'LLM_UNAVAILABLE', 'LLM_TPM_REQUEST_TOO_LARGE', 'LLM_HTTP_429'])
@@ -211,10 +212,12 @@ export class AgentService {
       if (run.status === 'queued') { run.status = 'running'; run.state = 'METADATA_HYPOTHESIS'; this.touch(run) }
       const cached = this.cache.get(run.cacheKey)
       const cachedCandidate = cached && this.sameSources(run.sources, cached.sources) && cached.candidate
-        ? this.revalidateCandidate(run, cached.candidate)
+        ? this.replayCachedCandidate(run, cached)
         : undefined
       if (cached && cachedCandidate && !run.messages.length) {
-        Object.assign(run, { ...cached, candidate: cachedCandidate }); run.state = 'CANDIDATE_RESULT'; run.status = 'running'; this.touch(run); this.awaitConfirm(run); return
+        run.candidate = cachedCandidate
+        run.needsReview = true
+        run.state = 'CANDIDATE_RESULT'; run.status = 'running'; this.touch(run); this.awaitConfirm(run); return
       }
       while (run.generation === generation && !run.controller.signal.aborted) {
         if (run.completionCount >= AGENT_LIMITS.maxLlmCompletions) { this.fail(run, 'budget-exceeded', 'completion budget exhausted'); return }
@@ -270,7 +273,7 @@ export class AgentService {
       const boundedCandidate = this.revalidateCandidate(run, buildAgentEvidence({ fileName: this.candidateFileName(run, candidate), observations: run.observations, candidates: [candidate] }).candidates[0])
       if (!boundedCandidate) return this.fail(run, 'invalid-action', 'invalid candidate') as never
       run.candidate = boundedCandidate
-      run.state = 'CANDIDATE_RESULT'; this.touch(run); this.cache.set(run.cacheKey, { candidate: run.candidate, needsReview: true, sources: run.sources }); return 'confirm'
+      run.state = 'CANDIDATE_RESULT'; this.touch(run); this.cache.set(run.cacheKey, { candidate: run.candidate, needsReview: true, sources: run.sources, observations: this.cacheObservations(run, run.candidate) }); return 'confirm'
     }
     if (name === 'summary' || name === 'stop') {
       if (!run.candidate) { run.candidate = { kind: 'result', result: 'UNKNOWN', status: 'unknown', observationIds: run.observations.map((item) => item.id) } }
@@ -339,6 +342,24 @@ export class AgentService {
 
   private sameSources(left: InternalRun['sources'], right: CachedAgentResult['sources']): boolean {
     return JSON.stringify(left) === JSON.stringify(right)
+  }
+
+  private cacheObservations(run: InternalRun, candidate: Candidate): BoundedObservation[] {
+    const referenced = new Set(candidate.observationIds)
+    return run.observations.filter((observation) => referenced.has(observation.id)).map(boundObservation)
+  }
+
+  private replayCachedCandidate(run: InternalRun, cached: CachedAgentResult): Candidate | undefined {
+    if (!cached.candidate || !validateCandidateShape(cached.candidate) || !Array.isArray(cached.observations)
+      || cached.observations.length > AGENT_LIMITS.maxTools) return undefined
+    const sourceIds = new Set(run.sources.map((source) => source.sourceId))
+    const ids = new Set<string>()
+    const observations = cached.observations.map(boundObservation)
+    if (observations.some((observation) => !sourceIds.has(observation.sourceId) || ids.has(observation.id))) return undefined
+    observations.forEach((observation) => ids.add(observation.id))
+    if (cached.candidate.observationIds.some((id) => !ids.has(id))) return undefined
+    run.observations = observations
+    return this.revalidateCandidate(run, cached.candidate)
   }
 
   private nextObservationId(run: InternalRun, prefix: string): string {

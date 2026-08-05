@@ -124,6 +124,22 @@ describe('AgentService', () => {
     expect(getCalls()).toBe(2)
   })
 
+  it('replays bounded evidence on a cache hit so a result candidate remains confirmable', async () => {
+    const { service, getCalls } = setup([
+      '{"action":"search","input":{"sourceId":"s1","query":"x","mode":"literal","caseSensitive":false,"observationId":"evidence-1"}}',
+      '{"action":"candidate","candidate":{"kind":"result","result":"PASS","status":"candidate","observationIds":["evidence-1"]}}'
+    ])
+    const first = await service.start({ projectId: 'p1' })
+    expect((await until(service, first.id, 'HUMAN_CONFIRM'))?.candidate).toMatchObject({ result: 'PASS', status: 'candidate', observationIds: ['evidence-1'] })
+    const second = await service.start({ projectId: 'p1' })
+    const cached = await until(service, second.id, 'HUMAN_CONFIRM')
+    expect(cached?.candidate).toMatchObject({ result: 'PASS', status: 'candidate', observationIds: ['evidence-1'] })
+    expect(getCalls()).toBe(2)
+    const result = await service.confirm({ runId: second.id, kind: 'decision', expectedRevision: 7, decision: { projectId: 'p1', expectedRevision: 7, source: { sourceId: 's1', artifactId: 'a1', sourceKey: 'cache-hit' }, result: 'PASS' } })
+    expect(result.saved).toBeDefined()
+    expect(result.run.state).toBe('COMPLETED')
+  })
+
   it('does not put a 6500-line response into the LLM transport prompt', async () => {
     const { service, getCalls, getPrompts, getLineWindowCalls } = setup([
       '{"action":"lineWindow","input":{"sourceId":"s1","startLine":1,"lineCount":20,"observationId":"w1"}}',
