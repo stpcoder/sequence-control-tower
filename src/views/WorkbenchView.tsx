@@ -138,12 +138,6 @@ export function resolveSearchScopeFiles(
   })
 }
 
-function searchScopeLabel(scope: SearchScope): string {
-  if (scope === 'file') return '현재 로그'
-  if (scope === 'open') return '열린 탭'
-  return '전체 로그'
-}
-
 interface SearchOptions {
   caseSensitive: boolean
   wholeWord: boolean
@@ -2042,7 +2036,7 @@ export function WorkbenchView({
     <div className="log-workbench">
       <aside className="workbench-sidebar">
         <header>
-          <div><strong>{sideMode === 'search' ? (searchScope === 'open' ? '열린 탭 검색' : '전체 검색') : showBatchExceptions ? '예외 로그' : '로그'}</strong><span>{showBatchExceptions ? `${batchPreview.exceptions}` : sideMode === 'search' ? searchFiles.length : files.length}</span></div>
+          <div><strong>{sideMode === 'search' ? '검색 결과' : showBatchExceptions ? '예외 로그' : '로그'}</strong>{sideMode === 'search' ? null : <span>{showBatchExceptions ? `${batchPreview.exceptions}` : files.length}</span>}</div>
           <button
             onClick={() => {
               if (sideMode === 'search') setSideMode('files')
@@ -2085,22 +2079,19 @@ export function WorkbenchView({
           </div>
         ) : (
           <div className="workspace-search-results">
-            <div className="side-search-summary">
-              <strong>{query ? searchTotal : 0}</strong><span>{searching ? '로컬 로그 검색 중…' : query ? `'${query}' 일치` : '검색어를 입력하세요'}</span>
-            </div>
             {searchError ? <div className="search-error"><AlertTriangle size={13} />{searchError}</div> : null}
             {query && hits.length ? <>{hits.slice(0, 80).map((hit, index) => {
               const file = files.find((item) => item.id === hit.fileId)
               return (
-                <button className={index === currentHit ? 'active' : ''} key={`${hit.fileId}-${hit.line}-${hit.start}`} onClick={() => navigateToSearchHit(index)}>
-                  <span><FileText size={12} />{file?.name}</span>
-                  <code><b>{hit.line}</b>{hit.excerpt}</code>
+                <button className={`search-result ${index === currentHit ? 'active' : ''}`} key={`${hit.fileId}-${hit.line}-${hit.start}`} onClick={() => navigateToSearchHit(index)}>
+                  <span className="search-result-file"><FileText size={12} />{file?.name}</span>
+                  <code className="search-result-line"><b>Ln {hit.line}</b>{hit.excerpt}</code>
                 </button>
               )
             })}{searchTotal > Math.min(hits.length, 80) ? <div className="search-result-limit">상위 {Math.min(hits.length, 80)}개 표시 · 전체 {searchTotal.toLocaleString()}개</div> : null}</> : searching ? (
-              <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>{searchScope === 'open' ? '열린 탭 원본을 로컬에서 검색하고 있습니다.' : '전체 원본을 로컬에서 검색하고 있습니다.'}</span></div>
+              <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>검색 중…</span></div>
             ) : (
-              <div className="empty-search"><Search size={22} /><span><kbd>{searchScope === 'open' ? 'Ctrl Alt F' : 'Ctrl Shift F'}</kbd>로 {searchScope === 'open' ? '열린 탭' : '모든 로그'}에서 찾습니다.</span></div>
+              <div className="empty-search"><Search size={22} /><span>검색어를 입력하세요.</span></div>
             )}
           </div>
         )}
@@ -2132,16 +2123,16 @@ export function WorkbenchView({
         </div>
 
         {searchOpen ? (
-          <div className={`find-widget ${replaceMode ? 'is-replace-mode' : ''}`} role="search" aria-label={`${searchScopeLabel(searchScope)} 검색`}>
+          <div className={`find-widget ${replaceMode ? 'is-replace-mode' : ''}`} role="search" aria-label="로그 검색">
             <Search size={18} />
             <select className="find-scope-select" value={searchScope} onChange={(event) => openSearch(event.target.value as SearchScope)} aria-label="검색 범위" title="검색 범위">
               <option value="file">현재 로그</option>
               <option value="open">열린 탭</option>
               <option value="workspace">전체 로그</option>
             </select>
-            <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder={searchScope === 'file' ? '현재 로그에서 찾기' : searchScope === 'open' ? `${searchFiles.length}개 열린 탭에서 찾기` : `${files.length}개 로그에서 찾기`} aria-invalid={invalidPattern} />
+            <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
             <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
-            <span className={invalidPattern || searchError ? 'invalid' : ''}>{searching ? '검색 중' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
+            <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
             <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
             <button onClick={() => moveToHit(1)} disabled={!hits.length} aria-label="다음 검색 결과" title="다음 결과 (Enter)"><ChevronsDown size={18} /></button>
             <button onClick={() => { setSearchOpen(false); setReplaceMode(false); setSideMode('files') }} aria-label="검색 닫기" title="닫기 (Escape)"><X size={18} /></button>
@@ -2201,13 +2192,13 @@ export function WorkbenchView({
 
               <section className="pattern-review" aria-label="AI 패턴 검토">
                 <div className="pattern-review-heading">
-                  <div><strong>AI 패턴 검토</strong><span>검토용 제안 · 판정은 엔지니어가 확정</span></div>
+                  <div><strong>AI 패턴 검토</strong></div>
                   <SearchCode size={15} />
                 </div>
                 <textarea
                   value={patternReviewComment}
                   onChange={(event) => setPatternReviewComment(event.target.value.slice(0, 160))}
-                  placeholder="짧은 검토 관점 (선택)"
+                  placeholder="검토 메모 (선택)"
                   maxLength={160}
                   rows={2}
                   disabled={patternReviewBusy}
@@ -2216,7 +2207,7 @@ export function WorkbenchView({
                 <div className="pattern-review-actions">
                   <button className="pattern-review-start" onClick={() => void startPatternReview()} disabled={!patternReviewAvailable || patternReviewBusy}>
                     {patternReviewBusy ? <LoaderCircle className="wb-spin" size={13} /> : <SearchCode size={13} />}
-                    {patternReviewBusy ? '검토 중' : 'AI 패턴 검토'}
+                    {patternReviewBusy ? '검토 중' : '검토 실행'}
                   </button>
                   {patternReviewBusy && patternReview.jobId ? <button className="pattern-review-cancel" onClick={() => void cancelPatternReview()} disabled={patternReview.status === 'cancelling'}>취소</button> : null}
                 </div>
@@ -2231,7 +2222,7 @@ export function WorkbenchView({
                 {patternReview.status === 'failed' ? <p className="pattern-review-error"><AlertTriangle size={13} />{patternReview.error || '검토에 실패했습니다.'}</p> : null}
                 {patternReview.result ? (
                   <div className="pattern-review-result">
-                    <div className="pattern-review-result-meta"><strong>검토 결과</strong><small>{patternReview.result.source === 'llm' ? `LLM${patternReview.result.model ? ` · ${patternReview.result.model}` : ''}` : '로컬 대체 분석'}</small></div>
+                    <div className="pattern-review-result-meta"><strong>검토 결과</strong>{patternReview.result.warnings.length ? <small>경고 {patternReview.result.warnings.length}건</small> : null}</div>
                     <p>{patternReview.result.summary}</p>
                     {patternReview.result.suggestedTags.length ? (
                       <div className="pattern-review-suggestions">
@@ -2239,9 +2230,7 @@ export function WorkbenchView({
                         <div>{patternReview.result.suggestedTags.slice(0, 6).map((suggestion) => <button key={suggestion} onClick={() => applySuggestedSearch(suggestion)} title="눌러서 현재 로그 검색에 사용">{suggestion}</button>)}</div>
                       </div>
                     ) : null}
-                    <div className="pattern-review-source">출처: {patternReview.result.source === 'llm' ? '구성된 LLM' : '결정적 로컬 대체'} · {patternReview.result.warnings.length ? `경고 ${patternReview.result.warnings.length}건` : '경고 없음'}</div>
                     {patternReview.result.warnings.length ? <ul>{patternReview.result.warnings.slice(0, 4).map((warning) => <li key={warning}><AlertTriangle size={12} />{warning}</li>)}</ul> : null}
-                    <small className="pattern-review-disclaimer">검토용 제안입니다. PASS/FAIL 판정이나 규칙을 자동 적용하지 않습니다.</small>
                   </div>
                 ) : null}
               </section>
