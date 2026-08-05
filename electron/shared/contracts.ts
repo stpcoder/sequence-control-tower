@@ -610,6 +610,109 @@ export interface AppStatus {
   llm: LlmConfigSummary
 }
 
+/** v0.7 agent core contracts. These are deliberately reference-only: raw log
+ * payloads and unbounded arrays must not cross the agent boundary. */
+export type AgentStageName = 'plan' | 'search' | 'inspect' | 'synthesize' | 'complete' | 'failed'
+export type AgentRunStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type AgentQuestionKind = 'clarification' | 'approval'
+export type AgentAnswerValue = string | number | boolean | string[]
+export type AgentToolName = 'search' | 'lineWindow' | 'inspect'
+
+export interface AgentRun {
+  id: string
+  status: AgentRunStatus
+  stage: AgentStageName
+  completionCount: number
+  toolCount: number
+  searchCount: number
+  lineWindowCount: number
+  promptChars: number
+  startedAt: string
+  updatedAt: string
+  failureCode?: 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action'
+}
+
+export interface Stage {
+  name: AgentStageName
+  depth: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  completionOrdinal?: number
+}
+
+export interface Question {
+  id: string
+  kind: AgentQuestionKind
+  prompt: string
+  choices?: string[]
+}
+
+export interface Answer {
+  questionId: string
+  value: AgentAnswerValue
+}
+
+export interface ToolAction {
+  tool: AgentToolName
+  input: Search | LineWindow | Inspect
+  reason?: string
+}
+
+export interface Search {
+  sourceId: string
+  query: string
+  mode: 'literal' | 'regex'
+  caseSensitive: boolean
+  observationId?: string
+}
+
+export interface LineWindow {
+  sourceId: string
+  startLine: number
+  lineCount: number
+  observationId?: string
+}
+
+export interface Inspect {
+  sourceId: string
+  target: 'metadata' | 'observation'
+  observationId?: string
+}
+
+export interface Candidate {
+  kind: 'metadata' | 'result' | 'question' | 'action'
+  field?: 'sample' | 'temperature' | 'mode' | 'grid'
+  value?: string
+  result?: EvaluationResultLabel
+  question?: Question
+  action?: ToolAction
+  status: 'candidate' | 'approved' | 'unknown'
+  observationIds: string[]
+}
+
+export interface Trend {
+  dimensions: {
+    sample: Record<string, number>
+    temperature: Record<string, number>
+    mode: Record<string, number>
+    grid: Record<string, number>
+    result: Record<string, number>
+    stage: Record<string, number>
+    channel: Record<string, number>
+  }
+  majorConcentration: {
+    dimension: keyof Trend['dimensions']
+    value: string
+    count: number
+    share: number
+  } | null
+}
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  turn: number
+}
+
 export type ProjectFolderStatus = 'available' | 'missing' | 'permission-denied'
 /** Renderer-safe project folder identity. The canonical path is main-process only. */
 export interface ProjectFolderRef { rootId: string; displayLabel: string; status: ProjectFolderStatus; connectedAt: string }
