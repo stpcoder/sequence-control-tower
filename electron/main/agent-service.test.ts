@@ -76,4 +76,56 @@ describe('AgentService', () => {
     const started = await slow.start({ projectId: 'p1' }); await new Promise((r) => setTimeout(r, 2)); await slow.cancel({ runId: started.id }); resolve({ content: '{"action":"summary"}', model: 'test' }); await new Promise((r) => setTimeout(r, 2))
     expect(slow.get(started.id)?.state).toBe('CANCELLED')
   })
+
+  it('rejects concurrent message and answer calls without mutating the active drive', async () => {
+    let calls = 0
+    let resolve!: (value: { content: string; model: string }) => void
+    const service = new AgentService({
+      projects: { get: async () => project }, artifacts: { list: async () => [artifact], search: async () => ({ query: '', mode: 'literal', caseSensitive: false, matches: [], totalMatchCount: 0, truncated: false, files: [] }), lineWindow: async () => ({ artifactId: 'a1', startLine: 1, lines: [], hasMoreBefore: false, hasMoreAfter: false }) },
+      evaluations: { saveDecision: async (input: never) => ({ snapshot: {} as never, decision: input as never }), approveMetadata: async (input: never) => ({ snapshot: {} as never, metadataApproval: input as never }), saveRecipe: async (input: never) => ({ snapshot: {} as never, recipe: input as never }) },
+      llm: { complete: async () => { calls += 1; return new Promise((r) => { resolve = r }) } }
+    })
+    const started = await service.start({ projectId: 'p1' })
+    await expect(service.message({ runId: started.id, content: 'one' })).rejects.toThrow('진행 중')
+    await expect(service.answer({ runId: started.id, value: 'two' })).rejects.toThrow('진행 중')
+    expect(calls).toBe(1); expect(service.get(started.id)?.projectId).toBe('p1')
+    resolve({ content: '{"action":"summary"}', model: 'test' })
+    expect((await until(service, started.id, 'HUMAN_CONFIRM'))?.state).toBe('HUMAN_CONFIRM')
+  })
+
+  it('claims confirmation before persistence and saves a decision exactly once', async () => {
+    let saves = 0
+    let release!: () => void
+    const service = new AgentService({
+      projects: { get: async () => project }, artifacts: { list: async () => [artifact], search: async () => ({ query: '', mode: 'literal', caseSensitive: false, matches: [], totalMatchCount: 0, truncated: false, files: [] }), lineWindow: async () => ({ artifactId: 'a1', startLine: 1, lines: [], hasMoreBefore: false, hasMoreAfter: false }) },
+      evaluations: { saveDecision: async (input: never) => { saves += 1; await new Promise<void>((r) => { release = r }); return { snapshot: {} as never, decision: input as never } }, approveMetadata: async (input: never) => ({ snapshot: {} as never, metadataApproval: input as never }), saveRecipe: async (input: never) => ({ snapshot: {} as never, recipe: input as never }) },
+      llm: { complete: async () => ({ content: '{"action":"candidate","candidate":{"kind":"result","result":"PASS","status":"candidate","observationIds":[]}}', model: 'test' }) }
+    })
+    const started = await service.start({ projectId: 'p1' }); await until(service, started.id, 'HUMAN_CONFIRM')
+    const decision = { projectId: 'p1', expectedRevision: 7, source: { sourceId: 's1', artifactId: 'a1', sourceKey: 'caller-key' }, result: 'PASS' as const }
+    const first = service.confirm({ runId: started.id, kind: 'decision', expectedRevision: 7, decision })
+    await new Promise((r) => setTimeout(r, 1))
+    await expect(service.confirm({ runId: started.id, kind: 'decision', expectedRevision: 7, decision })).rejects.toThrow('candidate')
+    expect(saves).toBe(1); release(); expect((await first).run.state).toBe('COMPLETED')
+  })
+
+  it('rejects mismatched decisions and unsupported metadata confirmations', async () => {
+    const { service } = setup(['{"action":"candidate","candidate":{"kind":"result","result":"PASS","status":"candidate","observationIds":[]}}'])
+    const started = await service.start({ projectId: 'p1' }); await until(service, started.id, 'HUMAN_CONFIRM')
+    await expect(service.confirm({ runId: started.id, kind: 'decision', expectedRevision: 7, decision: { projectId: 'p1', expectedRevision: 7, source: { sourceId: 's1', artifactId: 'a1', sourceKey: 'x' }, result: 'TEST_FAIL' } })).rejects.toThrow('일치')
+    await expect(service.confirm({ runId: started.id, kind: 'metadata', expectedRevision: 7, metadata: {} as never })).rejects.toThrow('지원되지 않습니다')
+  })
+
+  it('fails with a bounded timeout and ignores a late completion', async () => {
+    let resolve!: (value: { content: string; model: string }) => void
+    const service = new AgentService({
+      projects: { get: async () => project }, artifacts: { list: async () => [artifact], search: async () => ({ query: '', mode: 'literal', caseSensitive: false, matches: [], totalMatchCount: 0, truncated: false, files: [] }), lineWindow: async () => ({ artifactId: 'a1', startLine: 1, lines: [], hasMoreBefore: false, hasMoreAfter: false }) },
+      evaluations: { saveDecision: async (input: never) => ({ snapshot: {} as never, decision: input as never }), approveMetadata: async (input: never) => ({ snapshot: {} as never, metadataApproval: input as never }), saveRecipe: async (input: never) => ({ snapshot: {} as never, recipe: input as never }) },
+      llm: { complete: async () => new Promise((r) => { resolve = r }) }, agentDeadlineMs: 5
+    })
+    const started = await service.start({ projectId: 'p1' }); const failed = await until(service, started.id, 'FAILED')
+    expect(failed?.failureCode).toBe('agent-timeout'); expect(failed?.failureReason).toContain('time budget')
+    resolve({ content: '{"action":"summary"}', model: 'late' }); await new Promise((r) => setTimeout(r, 2))
+    expect(service.get(started.id)?.state).toBe('FAILED'); expect(service.get(started.id)?.completionCount).toBe(1)
+  })
 })

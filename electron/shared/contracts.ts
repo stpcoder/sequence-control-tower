@@ -631,7 +631,7 @@ export interface AgentRun {
   promptChars: number
   startedAt: string
   updatedAt: string
-  failureCode?: 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action'
+  failureCode?: 'malformed-json' | 'unknown-tool' | 'budget-exceeded' | 'depth-exceeded' | 'invalid-action' | 'agent-timeout'
   state?: AgentState
   projectId?: string
   generation?: number

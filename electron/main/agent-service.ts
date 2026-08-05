@@ -22,6 +22,7 @@ export interface AgentServiceDeps {
   llmConfig?: Pick<LlmConfigService, 'effective'>
   now?: () => Date
   id?: () => string
+  agentDeadlineMs?: number
 }
 
 type InternalRun = AgentRun & {
@@ -40,6 +41,8 @@ type InternalRun = AgentRun & {
   budget: ReturnType<typeof emptyAgentBudget>
   depth: number
   cacheKey: string
+  driving: boolean
+  confirming: boolean
 }
 
 type ModelAction = { action?: unknown; tool?: unknown; input?: unknown; reason?: unknown; candidate?: unknown; question?: unknown; summary?: unknown }
@@ -61,10 +64,12 @@ export class AgentService {
   private readonly listeners = new Set<(run: AgentRun) => void>()
   private readonly now: () => Date
   private readonly id: () => string
+  private readonly agentDeadlineMs: number
 
   constructor(private readonly deps: AgentServiceDeps) {
     this.now = deps.now ?? (() => new Date())
     this.id = deps.id ?? randomUUID
+    this.agentDeadlineMs = Math.max(1, deps.agentDeadlineMs ?? 90_000)
   }
 
   onUpdate(listener: (run: AgentRun) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
@@ -86,7 +91,7 @@ export class AgentService {
     const run: InternalRun = {
       id: this.id(), status: 'queued', stage: 'plan', state: 'INIT_QA', completionCount: 0, toolCount: 0, searchCount: 0, lineWindowCount: 0,
       promptChars: 0, startedAt: stamp(this.now), updatedAt: stamp(this.now), projectId: project.id, generation: 1, controller: new AbortController(),
-      project, sources, metadata, onboarding: Object.fromEntries(Object.entries(project.onboardingAnswers ?? {}).map(([key, value]) => [safeMessage(key), typeof value === 'string' ? safeMessage(value) : value])), observations: [], messages: [], answers: [], budget: emptyAgentBudget(), depth: 0, cacheKey
+      project, sources, metadata, onboarding: Object.fromEntries(Object.entries(project.onboardingAnswers ?? {}).map(([key, value]) => [safeMessage(key), typeof value === 'string' ? safeMessage(value) : value])), observations: [], messages: [], answers: [], budget: emptyAgentBudget(), depth: 0, cacheKey, driving: false, confirming: false
     }
     this.runs.set(run.id, run); this.emit(run)
     void this.drive(run)
@@ -96,6 +101,7 @@ export class AgentService {
   async answer(input: AgentAnswerInput): Promise<AgentRun> {
     const run = this.must(input.runId)
     if (run.status === 'failed' || run.status === 'cancelled') return this.public(run)!
+    if (run.driving) throw new Error('agent drive가 진행 중입니다.')
     if (run.waitingForAnswer && input.questionId && input.questionId !== run.waitingForAnswer.id) throw new Error('현재 질문과 일치하지 않습니다.')
     run.answers.push({ questionId: input.questionId ?? run.waitingForAnswer?.id ?? 'user', value: sanitizeAnswer(input.value) })
     run.messages.push({ role: 'user', content: safeMessage(String(input.value)), turn: run.messages.length + 1 })
@@ -106,26 +112,27 @@ export class AgentService {
   async message(input: AgentMessageInput): Promise<AgentRun> {
     const run = this.must(input.runId)
     const content = safeMessage(input.content); if (!content) throw new Error('메시지를 입력해 주세요.')
+    if (run.driving) throw new Error('agent drive가 진행 중입니다.')
     run.messages.push({ role: 'user', content, turn: run.messages.length + 1 }); run.waitingForAnswer = undefined; run.question = undefined; run.state = 'TOOL_LOOP'; this.touch(run); void this.drive(run)
     return this.public(run)!
   }
 
   async confirm(input: AgentConfirmInput): Promise<AgentConfirmResult> {
     const run = this.must(input.runId)
-    if (run.state !== 'HUMAN_CONFIRM' || !run.candidate) throw new Error('확인할 candidate가 없습니다.')
+    if (run.state !== 'HUMAN_CONFIRM' || !run.candidate || run.confirming) throw new Error('확인할 candidate가 없습니다.')
     if (input.kind === 'decision') {
       if (!input.decision) throw new Error('decision payload가 없습니다.')
-      const saved = await this.deps.evaluations.saveDecision({ ...input.decision, projectId: run.projectId, expectedRevision: input.expectedRevision })
-      run.state = 'COMPLETED'; run.status = 'completed'; this.touch(run); return { run: this.public(run)!, saved }
+      if (!this.matchesDecision(run, input.decision)) throw new Error('decision payload가 candidate와 일치하지 않습니다.')
+      run.confirming = true
+      try {
+        const saved = await this.deps.evaluations.saveDecision({ ...input.decision, projectId: run.projectId, expectedRevision: input.expectedRevision })
+        run.state = 'COMPLETED'; run.status = 'completed'; this.touch(run); return { run: this.public(run)!, saved }
+      } catch (error) {
+        run.confirming = false
+        throw error
+      }
     }
-    if (input.kind === 'metadata') {
-      if (!input.metadata) throw new Error('metadata payload가 없습니다.')
-      const saved = await this.deps.evaluations.approveMetadata({ ...input.metadata, projectId: run.projectId, expectedRevision: input.expectedRevision })
-      run.state = 'COMPLETED'; run.status = 'completed'; this.touch(run); return { run: this.public(run)!, saved }
-    }
-    if (!input.recipe) throw new Error('recipe payload가 없습니다.')
-    const saved = await this.deps.evaluations.saveRecipe({ ...input.recipe, projectId: run.projectId, expectedRevision: input.expectedRevision })
-    run.state = 'COMPLETED'; run.status = 'completed'; this.touch(run); return { run: this.public(run)!, saved }
+    throw new Error('metadata 및 recipe confirmation은 지원되지 않습니다.')
   }
 
   async cancel(input: { runId: string }): Promise<AgentRun> {
@@ -133,7 +140,17 @@ export class AgentService {
   }
 
   private async drive(run: InternalRun): Promise<void> {
+    if (run.driving) return
+    run.driving = true
     const generation = run.generation
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    deadlineTimer = setTimeout(() => {
+      if (run.driving && run.generation === generation && run.status !== 'failed' && run.status !== 'cancelled') {
+        run.generation += 1
+        run.controller.abort()
+        this.fail(run, 'agent-timeout', 'agent time budget exhausted')
+      }
+    }, this.agentDeadlineMs)
     try {
       if (run.status === 'queued') { run.status = 'running'; run.state = 'METADATA_HYPOTHESIS'; this.touch(run) }
       const cached = this.cache.get(run.cacheKey)
@@ -163,7 +180,18 @@ export class AgentService {
       if (run.controller.signal.aborted || run.generation !== generation) return
       const message = error instanceof Error ? error.message : 'agent failed'
       this.fail(run, failCodes.has(message) ? 'budget-exceeded' : 'invalid-action', message)
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer)
+      run.driving = false
     }
+  }
+
+  private matchesDecision(run: InternalRun, input: NonNullable<AgentConfirmInput['decision']>): boolean {
+    const candidate = run.candidate
+    if (!candidate || candidate.kind !== 'result' || candidate.result === undefined || input.projectId !== run.projectId || input.result !== candidate.result) return false
+    const candidateSourceIds = new Set(run.observations.filter((item) => candidate.observationIds.includes(item.id)).map((item) => item.sourceId))
+    const sources = run.sources.filter((source) => candidateSourceIds.has(source.sourceId) || (!candidate.observationIds.length && run.sources.length === 1))
+    return sources.length === 1 && input.source.sourceId === sources[0].sourceId && input.source.artifactId === sources[0].artifactId
   }
 
   private async execute(run: InternalRun, name: AgentActionName, raw: ModelAction): Promise<'continue' | 'wait' | 'confirm' | 'done'> {
@@ -201,6 +229,7 @@ export class AgentService {
       const searchBudget = checkAgentBudget(run.budget, 'search'); if (!searchBudget.ok) return this.fail(run, searchBudget.failure, searchBudget.failure) as never
       run.budget = searchBudget.value; run.searchCount += 1; run.stage = 'search'; this.touch(run)
       const result = await this.deps.artifacts.search({ artifactIds: [source.artifactId], query: input.query, mode: input.mode, caseSensitive: input.caseSensitive, maxMatches: 50, contextLines: 1 }, run.controller.signal)
+      if (run.status === 'failed' || run.status === 'cancelled') return 'done'
       if (result.truncated || result.matches.some((match) => match.lineTruncated)) return this.fail(run, 'invalid-action', 'critical search evidence was truncated') as never
       run.observations.push(boundObservation({ id: input.observationId ?? `search-${run.searchCount}`, sourceId: source.sourceId, kind: 'search', matched: result.matches.length > 0, excerpt: `${input.mode}:${input.query}:` + result.matches.slice(0, 50).map((match) => `${match.lineNumber}:${match.lineText}`).join('\n') }))
     } else if (name === 'lineWindow') {
@@ -211,6 +240,7 @@ export class AgentService {
       const windowBudget = checkAgentBudget(run.budget, 'lineWindow'); if (!windowBudget.ok) return this.fail(run, windowBudget.failure, windowBudget.failure) as never
       run.budget = windowBudget.value; run.lineWindowCount += 1; run.stage = 'inspect'; this.touch(run)
       const result = await this.deps.artifacts.lineWindow({ artifactId: source.artifactId, startLine: start, lineCount: Math.min(input.lineCount, 20) })
+      if (run.status === 'failed' || run.status === 'cancelled') return 'done'
       if (result.lines.some((line) => line.truncated)) return this.fail(run, 'invalid-action', 'critical line evidence was truncated') as never
       run.observations.push(boundObservation({ id: input.observationId ?? `window-${run.lineWindowCount}`, sourceId: source.sourceId, kind: 'lineWindow', lineNumber: result.startLine, lines: result.lines.map((line) => line.text) }))
     } else {
@@ -240,6 +270,6 @@ export class AgentService {
   private must(id: string): InternalRun { const run = this.runs.get(id); if (!run) throw new Error('agent run을 찾을 수 없습니다.'); return run }
   private touch(run: InternalRun): void { run.updatedAt = stamp(this.now); this.emit(run) }
   private emit(run: InternalRun): void { const value = this.public(run); if (value) this.listeners.forEach((listener) => listener(value)) }
-  private public(run: InternalRun | undefined): AgentRun | null { if (!run) return null; const { controller: _controller, project: _project, sources: _sources, metadata: _metadata, onboarding: _onboarding, observations: _observations, messages: _messages, answers: _answers, budget, waitingForAnswer: _waitingForAnswer, depth: _depth, cacheKey: _cacheKey, ...value } = run; return { ...value, candidate: run.candidate } }
+  private public(run: InternalRun | undefined): AgentRun | null { if (!run) return null; const { controller: _controller, project: _project, sources: _sources, metadata: _metadata, onboarding: _onboarding, observations: _observations, messages: _messages, answers: _answers, budget: _budget, waitingForAnswer: _waitingForAnswer, depth: _depth, cacheKey: _cacheKey, driving: _driving, confirming: _confirming, ...value } = run; return { ...value, candidate: run.candidate } }
   private filenameMetadata(fileName: string, artifact?: ArtifactRecord): Record<string, unknown> { return { basename: safeMessage(fileName), parsed: parseFilenameMetadata(safeMessage(fileName)), originalNames: artifact?.originalNames?.slice(0, 8).map(safeMessage) ?? [], fingerprint: artifact?.fingerprint ? { parserVersion: safeMessage(artifact.fingerprint.parserVersion), lineCount: artifact.fingerprint.lineCount, structuralHash: safeMessage(artifact.fingerprint.structuralHash) } : undefined } }
 }
