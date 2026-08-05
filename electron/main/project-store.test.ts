@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -18,7 +18,8 @@ describe('ProjectStore', () => {
     const stored = await readFile(join(dataRoot, 'metadata', 'projects.json'), 'utf8')
     expect(stored).not.toContain(folder)
     const rootsFile = join(dataRoot, 'config', 'canonical-roots.json')
-    expect(await readFile(rootsFile, 'utf8')).toContain(folder)
+    const rootsDatabase = JSON.parse(await readFile(rootsFile, 'utf8')) as { roots: Record<string, { canonicalPath: string }> }
+    expect(Object.values(rootsDatabase.roots).map((root) => root.canonicalPath)).toContain(await realpath(folder))
     if (process.platform !== 'win32') expect((await stat(rootsFile)).mode & 0o777).toBe(0o600)
   })
 
