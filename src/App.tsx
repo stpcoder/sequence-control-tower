@@ -12,6 +12,7 @@ import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
 import { SettingsView } from './views/SettingsView'
 import { ProjectControl } from './components/ProjectControl'
+import { AgentPanel } from './components/AgentPanel'
 import {
   artifactFiles,
   DEMO_LOGS,
@@ -196,6 +197,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<AppPage>(readInitialPage)
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -353,6 +355,8 @@ export default function App() {
     if (!window.sequenceIntelligence?.evaluations || !evaluationSnapshot) return undefined
     return filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(evaluationSnapshot.recipes))
   }, [evaluationSnapshot])
+
+  const selectedFile = useMemo(() => files.find((file) => file.id === selectedFileId), [files, selectedFileId])
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
     filesRef.current = next
@@ -519,7 +523,7 @@ export default function App() {
   ) : <SettingsView />
 
   return (
-    <div className="app-shell analysis-app" data-page={activePage}>
+    <div className={`app-shell analysis-app${activePage === 'workbench' ? ' workbench-is-open' : ''}`} data-page={activePage}>
       <Navigation active={activePage} onChange={navigate} />
       <main className="main-shell">
         <div className="content-shell">
@@ -527,6 +531,15 @@ export default function App() {
           {content}
         </div>
       </main>
+      <AgentPanel
+        open={agentOpen}
+        onOpen={() => setAgentOpen(true)}
+        onClose={() => setAgentOpen(false)}
+        project={project}
+        selectedFile={selectedFile}
+        evaluationSnapshot={evaluationSnapshot}
+        onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
+      />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}
         {toast.message}
