@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildLogRecordExportPreview,
+  buildPivotGrid,
+  confirmLogRecordExport,
   filterLogRecords,
   exportableLogRecords,
+  initLogRecordExportPreview,
   patternMatrix,
   projectLogRecords,
   selectAllFilteredLogRecords,
   selectedLogRecords,
   serializeLogRecordsCsv,
   serializeLogRecordsTsv,
+  previewLogRecordExport,
   sortLogRecords,
   toggleLogRecordSelection,
 } from '../../src/state/logRecords'
+import type { LogResultRecord } from '../../src/state/logRecords'
 import type { WorkbenchFile } from '../../src/views/WorkbenchView'
 
 const files: WorkbenchFile[] = [
@@ -174,6 +180,95 @@ describe('renderer log result projection', () => {
       { value: '85', total: 2, counts: { PASS: 1, SYSTEM_HALT: 1 } },
       { value: '105', total: 1, counts: { TRAINING_FAIL: 1 } },
     ])
+  })
+
+  it('builds bounded pivots with explicit unknown buckets, zero cells, and source tracing', () => {
+    const rows = projectLogRecords(files)
+    const grid = buildPivotGrid(rows, {
+      rows: ['temperature'],
+      columns: ['mode', 'result'],
+      aggregation: 'count',
+      filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(grid.rows.map((header) => header.label)).toEqual(['85', '105'])
+    expect(grid.columns.map((header) => header.label)).toEqual(['DIAG / PASS', 'DIAG / SYSTEM_HALT', 'DIAG / TRAINING_FAIL'])
+    expect(grid.cells).toEqual([
+      [
+        { value: 1, sourceIds: ['pass'] },
+        { value: 1, sourceIds: ['halt'] },
+        { value: 0, sourceIds: [] },
+      ],
+      [
+        { value: 0, sourceIds: [] },
+        { value: 0, sourceIds: [] },
+        { value: 1, sourceIds: ['training'] },
+      ],
+    ])
+
+    const unknown = buildPivotGrid(projectLogRecords([{ id: 'unknown', name: 'plain.log', text: '' }]), {
+      rows: ['sample'], columns: [], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    expect(unknown.rows[0].label).toBe('미확인')
+    expect(unknown.cells[0][0]).toEqual({ value: 1, sourceIds: ['unknown'] })
+  })
+
+  it('keeps zero-valued fail and evidence pivot rows out of cell source tracing while preserving counts', () => {
+    const rows = projectLogRecords([
+      { id: 'pass', name: 'pass.log', text: '' },
+      { id: 'fail', name: 'fail.log', text: 'TEST_FAIL' },
+    ])
+    const failGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'fail_count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    const evidenceGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'evidence_count', filters: { query: '', result: 'all', review: 'all' },
+    })
+    const countGrid = buildPivotGrid(rows, {
+      rows: [], columns: [], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(failGrid.total).toBe(1)
+    expect(failGrid.cells[0][0]).toEqual({ value: 1, sourceIds: ['fail'] })
+    expect(evidenceGrid.total).toBe(1)
+    expect(evidenceGrid.cells[0][0]).toEqual({ value: 1, sourceIds: ['fail'] })
+    expect(countGrid.total).toBe(2)
+    expect(countGrid.cells[0][0].sourceIds).toEqual(['pass', 'fail'])
+  })
+
+  it('rejects pivot axes over two dimensions and keeps export preview immutable and formula-safe', () => {
+    const rows = projectLogRecords(files)
+    expect(() => buildPivotGrid(rows, {
+      rows: ['sample', 'temperature', 'mode'], columns: [], aggregation: 'count',
+      filters: { query: '', result: 'all', review: 'all' },
+    })).toThrow(RangeError)
+
+    const init = initLogRecordExportPreview(rows, new Set(['pass']), ['filename', 'result'])
+    const preview = previewLogRecordExport(init, 'tsv')
+    const oneShot = buildLogRecordExportPreview(rows, new Set(['pass']), ['filename', 'result'], 'tsv')
+    expect(preview.serialized).toBe(oneShot.serialized)
+    expect(preview.serialized).toContain('LOT12_S01_85C_DIAG.log')
+    expect(confirmLogRecordExport(preview)).toBe(preview.tsv)
+    expect(Object.isFrozen(init)).toBe(true)
+    expect(Object.isFrozen(preview)).toBe(true)
+    expect(() => (init.rows as LogResultRecord[]).pop()).toThrow()
+  })
+
+  it('snapshots export rows including nested metadata before source rows change', () => {
+    const rows = projectLogRecords(files)
+    const init = initLogRecordExportPreview(rows)
+    rows[0].sample.value = 'CHANGED'
+    rows[0].sample.state = 'rejected'
+    rows[0].evidenceCount = 99
+
+    expect(init.rows[0]).toMatchObject({
+      sample: { value: '01', state: 'candidate' },
+      evidenceCount: 1,
+    })
+    expect(init.rows[0]).not.toBe(rows[0])
+    expect(init.rows[0].sample).not.toBe(rows[0].sample)
+    expect(Object.isFrozen(init.rows[0])).toBe(true)
+    expect(Object.isFrozen(init.rows[0].sample)).toBe(true)
   })
 
   it('exports safe spreadsheet text and preserves the visible row count', () => {

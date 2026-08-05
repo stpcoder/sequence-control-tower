@@ -45,6 +45,36 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
+export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'result' | 'review' | 'folder' | 'run'
+export type PivotAggregation = 'count' | 'fail_count' | 'evidence_count'
+
+/** Configuration for the results pivot. Axis lists are intentionally bounded to two dimensions. */
+export interface PivotConfig {
+  rows: readonly PivotDimension[]
+  columns: readonly PivotDimension[]
+  aggregation: PivotAggregation
+  filters: LogRecordFilters
+}
+
+export interface PivotHeader {
+  key: string
+  values: readonly string[]
+  label: string
+}
+
+export interface PivotCell {
+  value: number
+  sourceIds: readonly string[]
+}
+
+export interface PivotGrid {
+  rows: readonly PivotHeader[]
+  columns: readonly PivotHeader[]
+  cells: readonly (readonly PivotCell[])[]
+  total: number
+  sourceIds: readonly string[]
+}
+
 export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
@@ -284,6 +314,76 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
   })
 }
 
+const PIVOT_UNKNOWN = '미확인'
+
+function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension): string {
+  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode') {
+    return row[dimension].value ?? PIVOT_UNKNOWN
+  }
+  if (dimension === 'run') return row.run ?? PIVOT_UNKNOWN
+  return String(row[dimension] || PIVOT_UNKNOWN)
+}
+
+function pivotKey(values: readonly string[]): string {
+  return JSON.stringify(values)
+}
+
+function comparePivotHeaders(left: PivotHeader, right: PivotHeader): number {
+  return left.label.localeCompare(right.label, 'ko-KR', { numeric: true, sensitivity: 'base' })
+}
+
+function pivotAmount(row: LogResultRecord, aggregation: PivotAggregation): number {
+  if (aggregation === 'evidence_count') return row.evidenceCount
+  if (aggregation === 'count') return 1
+  return row.result !== 'PASS' && row.result !== 'UNKNOWN' && row.result !== 'INCOMPLETE' && row.result !== 'EXCLUDED' ? 1 : 0
+}
+
+function validatePivotAxes(axis: readonly PivotDimension[], name: string): void {
+  if (axis.length > 2) throw new RangeError(`Pivot ${name} may contain at most two dimensions`)
+  if (new Set(axis).size !== axis.length) throw new RangeError(`Pivot ${name} may not contain duplicate dimensions`)
+}
+
+/** Builds a deterministic, source-traceable pivot without mutating records or configuration. */
+export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotConfig): PivotGrid {
+  validatePivotAxes(config.rows, 'rows')
+  validatePivotAxes(config.columns, 'columns')
+  const filtered = filterLogRecords(rows, config.filters)
+  const rowMap = new Map<string, PivotHeader>()
+  const columnMap = new Map<string, PivotHeader>()
+  const values = new Map<string, { value: number; sourceIds: string[] }>()
+  const allSourceIds: string[] = []
+
+  for (const row of filtered) {
+    const rowValues = config.rows.map((dimension) => pivotDimensionValue(row, dimension))
+    const columnValues = config.columns.map((dimension) => pivotDimensionValue(row, dimension))
+    const rowHeader: PivotHeader = { key: pivotKey(rowValues), values: [...rowValues], label: rowValues.join(' / ') || '전체' }
+    const columnHeader: PivotHeader = { key: pivotKey(columnValues), values: [...columnValues], label: columnValues.join(' / ') || '전체' }
+    rowMap.set(rowHeader.key, rowHeader)
+    columnMap.set(columnHeader.key, columnHeader)
+    const cellKey = `${rowHeader.key}\u0000${columnHeader.key}`
+    const cell = values.get(cellKey) ?? { value: 0, sourceIds: [] }
+    const amount = pivotAmount(row, config.aggregation)
+    cell.value += amount
+    if (amount !== 0 && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
+    values.set(cellKey, cell)
+    if (!allSourceIds.includes(row.id)) allSourceIds.push(row.id)
+  }
+
+  const pivotRows = [...rowMap.values()].sort(comparePivotHeaders)
+  const pivotColumns = [...columnMap.values()].sort(comparePivotHeaders)
+  const cells = pivotRows.map((rowHeader) => pivotColumns.map((columnHeader) => {
+    const cell = values.get(`${rowHeader.key}\u0000${columnHeader.key}`)
+    return { value: cell?.value ?? 0, sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]) }
+  }))
+  return {
+    rows: Object.freeze(pivotRows.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
+    columns: Object.freeze(pivotColumns.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
+    cells: Object.freeze(cells.map((row) => Object.freeze(row))),
+    total: filtered.reduce((sum, row) => sum + pivotAmount(row, config.aggregation), 0),
+    sourceIds: Object.freeze(allSourceIds),
+  }
+}
+
 function sortableValue(row: LogResultRecord, key: LogRecordSortKey): string | number {
   if (key === 'sample' || key === 'temperature' || key === 'mode') return row[key].value ?? ''
   return row[key]
@@ -482,4 +582,73 @@ export function serializeLogRecordsCsv(
 ): string {
   const selectedColumns = normalizeExportColumns(columns)
   return `\uFEFF${exportRows(rows, selectedColumns).map((record) => record.map(csvExportCell).join(',')).join('\r\n')}`
+}
+
+export type LogRecordExportFormat = 'csv' | 'tsv'
+
+export interface LogRecordExportPreviewInit {
+  readonly phase: 'init'
+  readonly rows: readonly LogResultRecord[]
+  readonly columns: readonly LogRecordExportColumn[]
+}
+
+export interface LogRecordExportPreview {
+  readonly phase: 'preview'
+  readonly rows: readonly LogResultRecord[]
+  readonly columns: readonly LogRecordExportColumn[]
+  readonly format: LogRecordExportFormat
+  readonly serialized: string
+  readonly csv: string
+  readonly tsv: string
+}
+
+/** Creates the immutable input snapshot used by an export init → preview flow. */
+export function initLogRecordExportPreview(
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+): LogRecordExportPreviewInit {
+  const snapshotRows = exportableLogRecords(rows, selectedIds).map((row) => Object.freeze({
+    ...row,
+    sample: Object.freeze({ ...row.sample }),
+    temperature: Object.freeze({ ...row.temperature }),
+    mode: Object.freeze({ ...row.mode }),
+  }))
+  return Object.freeze({
+    phase: 'init' as const,
+    rows: Object.freeze(snapshotRows),
+    columns: Object.freeze(normalizeExportColumns(columns)),
+  })
+}
+
+/** Purely materializes both supported serializers so a UI can show a preview before confirmation. */
+export function previewLogRecordExport(
+  init: LogRecordExportPreviewInit,
+  format: LogRecordExportFormat = 'csv',
+): LogRecordExportPreview {
+  const csv = serializeLogRecordsCsv(init.rows, init.columns)
+  const tsv = serializeLogRecordsTsv(init.rows, init.columns)
+  return Object.freeze({
+    phase: 'preview' as const,
+    rows: init.rows,
+    columns: init.columns,
+    format,
+    serialized: format === 'csv' ? csv : tsv,
+    csv,
+    tsv,
+  })
+}
+
+/** Confirmation remains side-effect free; the caller owns the actual download/write operation. */
+export function confirmLogRecordExport(preview: LogRecordExportPreview): string {
+  return preview.serialized
+}
+
+export function buildLogRecordExportPreview(
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  format: LogRecordExportFormat = 'csv',
+): LogRecordExportPreview {
+  return previewLogRecordExport(initLogRecordExportPreview(rows, selectedIds, columns), format)
 }
