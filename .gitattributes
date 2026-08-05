@@ -1,1 +1,5 @@
 tests/fixtures/soc-logs/environment/*hot-pass-crlf.log -text -diff
+tests/fixtures/engineer-workflow/**/*.log -text -diff
+tests/fixtures/engineer-workflow/manifest.json text eol=lf
+tests/fixtures/qualcomm-bringup/**/*.log -text -diff
+tests/fixtures/qualcomm-bringup/manifest.json text eol=lf
