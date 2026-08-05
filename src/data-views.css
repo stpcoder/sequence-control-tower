@@ -581,6 +581,45 @@
   flex: 0 0 auto;
 }
 
+.trend-summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 24px;
+  border-bottom: 1px solid var(--data-line-soft);
+  color: var(--data-muted);
+  background: #111419;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-summary-count {
+  flex: 0 0 auto;
+  color: var(--data-dim);
+}
+
+.trend-summary ul {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trend-summary li::before {
+  margin-right: 6px;
+  color: #75a7ff;
+  content: '·';
+}
+
+.trend-summary b {
+  color: #dce5f4;
+  font-weight: 650;
+}
+
 .pattern-section {
   padding: 22px 24px 26px;
   border-bottom: 1px solid var(--data-line);
