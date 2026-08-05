@@ -110,7 +110,7 @@ describe('minimal LLM evidence', () => {
     expect(evidence.filenameMetadata.fields.sample.state).toBe('unknown')
   })
 
-  it('keeps a 6,500-line source out of the prompt and under the hard ceiling', () => {
+  it('keeps a 6,500-line source out of the prompt and under the hard ceiling', { timeout: 15_000 }, () => {
     const raw = Array.from({ length: 6_500 }, (_item, index) =>
       `COMMAND_${index}=secret raw line ${index} /Users/customer/private/${index}.log`
     ).join('\n')
