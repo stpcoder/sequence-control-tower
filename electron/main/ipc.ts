@@ -35,6 +35,8 @@ import { LlmConfigService } from './llm-service'
 import { isSameRendererDocument } from './renderer-document'
 import { WikiService } from './wiki-service'
 import { ProjectStore } from './project-store'
+import { createHash } from 'node:crypto'
+import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
 
 interface Services {
   artifacts: ArtifactService
@@ -79,6 +81,23 @@ function handle(
 }
 
 export function registerIpc(services: Services): void {
+  const hydrateProject = async (project: ProjectSnapshot | null): Promise<ProjectLoadResult | null> => {
+    if (!project) return null
+    const statuses = await services.projects.validateFolders(project.id)
+    const refreshed = await services.projects.get(project.id)
+    if (!refreshed) return null
+    const available = await services.projects.availableFolderPaths(project.id)
+    const imported = available.length ? await services.artifacts.importFolders(available.map((item) => item.path), { maxFiles: 10000 }) : { artifacts: [], failures: [], skippedCount: 0 }
+    const rootIds = new Set(available.map((item) => item.rootId))
+    const sources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).filter((source) => rootIds.has(source.rootId)).map((source) => ({
+      sourceId: createHash('sha256').update(`${refreshed.id}\0${source.rootId}\0${source.relativePath}`).digest('hex').slice(0, 40),
+      rootId: source.rootId,
+      artifactId: artifact.id,
+      relativePath: source.relativePath,
+    })))
+    const connected = sources.length ? await services.projects.connectArtifacts({ projectId: refreshed.id, expectedRevision: refreshed.revision, artifacts: sources }) : refreshed
+    return { project: { ...connected, folders: connected.folders.map((folder) => statuses.find((item) => item.rootId === folder.rootId) ?? folder) }, artifacts: imported.artifacts, failures: imported.failures, skippedCount: imported.skippedCount }
+  }
   handle(IPC_CHANNELS.appStatus, async () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -90,7 +109,7 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.projectCreate, (_event, input) => services.projects.create(input as never))
   handle(IPC_CHANNELS.projectList, (_event, input) => services.projects.list((input as { includeArchived?: boolean } | undefined)?.includeArchived === true))
   handle(IPC_CHANNELS.projectGet, (_event, input) => services.projects.get((input as { projectId: string }).projectId))
-  handle(IPC_CHANNELS.projectLoad, (_event, input) => services.projects.load((input as { projectId: string }).projectId))
+  handle(IPC_CHANNELS.projectLoad, async (_event, input) => hydrateProject(await services.projects.load((input as { projectId: string }).projectId)))
   handle(IPC_CHANNELS.projectSave, (_event, input) => services.projects.save(input as never))
   handle(IPC_CHANNELS.projectArchive, (_event, input) => services.projects.archive(input as never))
   handle(IPC_CHANNELS.projectValidateFolders, (_event, input) => {
@@ -104,7 +123,8 @@ export function registerIpc(services: Services): void {
       ? await dialog.showOpenDialog(owner, { title: '프로젝트 로그 폴더 연결', properties: ['openDirectory'] })
       : await dialog.showOpenDialog({ title: '프로젝트 로그 폴더 연결', properties: ['openDirectory'] })
     if (result.canceled || !result.filePaths[0]) return { cancelled: true }
-    return services.projects.attachFolder(value.projectId, value.expectedRevision, result.filePaths[0])
+    const attached = await services.projects.attachFolder(value.projectId, value.expectedRevision, result.filePaths[0])
+    return hydrateProject(attached)
   })
   handle(IPC_CHANNELS.projectDetachFolder, (_event, input) => {
     const value = input as { projectId: string; expectedRevision: number; rootId: string }

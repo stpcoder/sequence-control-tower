@@ -620,15 +620,21 @@ export interface ProjectExportPreset {
   id: string; name: string; format: 'csv' | 'json' | 'markdown'
   options: Record<string, string | number | boolean>; createdAt: string; updatedAt: string; archived?: boolean
 }
+export interface ProjectOnboardingAnswers {
+  evaluationTarget?: string
+  importantMetadata?: string
+  reuseRules?: string
+}
 export interface ProjectSnapshot {
   schemaVersion: 2; id: string; name: string; description?: string; revision: number; archived: boolean
   createdAt: string; updatedAt: string; folders: ProjectFolderRef[]; artifacts: ProjectArtifactSourceRef[]
   equipmentProfiles: ProjectEquipmentProfile[]; templatePins: ProjectTemplatePin[]; exportPresets: ProjectExportPreset[]
+  onboardingAnswers?: ProjectOnboardingAnswers
 }
-export interface ProjectCreateInput { name: string; description?: string }
+export interface ProjectCreateInput { name: string; description?: string; onboardingAnswers?: ProjectOnboardingAnswers }
 export interface ProjectListInput { includeArchived?: boolean }
 export interface ProjectRequest { projectId: string }
-export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[] }
+export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[]; onboardingAnswers?: ProjectOnboardingAnswers }
 export interface ProjectArchiveInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectFolderInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectDetachFolderInput extends ProjectFolderInput { rootId: string }
@@ -636,14 +642,15 @@ export interface ProjectConnectArtifactsInput extends ProjectFolderInput { artif
 export interface ProjectValidateFoldersInput extends ProjectRequest { rootIds?: string[] }
 export interface ProjectSaveExportPresetInput extends ProjectRequest { expectedRevision: number; preset: Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } }
 export interface ProjectArchiveExportPresetInput extends ProjectRequest { expectedRevision: number; presetId: string }
+export interface ProjectLoadResult { project: ProjectSnapshot; artifacts: ArtifactRecord[]; failures: ArtifactImportFailure[]; skippedCount: number }
 export interface SequenceIntelligenceProjectsApi {
   create(input: ProjectCreateInput): Promise<ProjectSnapshot>
   list(input?: ProjectListInput): Promise<ProjectSnapshot[]>
   get(input: ProjectRequest): Promise<ProjectSnapshot | null>
   save(input: ProjectSaveInput): Promise<ProjectSnapshot>
   archive(input: ProjectArchiveInput): Promise<ProjectSnapshot>
-  load(input: ProjectRequest): Promise<ProjectSnapshot | null>
-  attachFolder(input: ProjectFolderInput): Promise<ProjectSnapshot | { cancelled: true }>
+  load(input: ProjectRequest): Promise<ProjectLoadResult | null>
+  attachFolder(input: ProjectFolderInput): Promise<ProjectLoadResult | { cancelled: true }>
   detachFolder(input: ProjectDetachFolderInput): Promise<ProjectSnapshot>
   validateFolders(input: ProjectValidateFoldersInput): Promise<ProjectFolderRef[]>
   connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot>

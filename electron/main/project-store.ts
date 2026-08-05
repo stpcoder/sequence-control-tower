@@ -56,7 +56,7 @@ export class ProjectStore {
 
   async create(input: ProjectCreateInput): Promise<ProjectSnapshot> {
     await this.initialize(); const name = text(input?.name, '프로젝트 이름'); const description = input?.description === undefined ? undefined : text(input.description, '설명', 2_000)
-    const project: StoredProject = { id: randomUUID(), name, ...(description ? { description } : {}), revision: 0, archived: false, createdAt: now(), updatedAt: now(), folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
+    const project: StoredProject = { id: randomUUID(), name, ...(description ? { description } : {}), ...(input.onboardingAnswers ? { onboardingAnswers: input.onboardingAnswers } : {}), revision: 0, archived: false, createdAt: now(), updatedAt: now(), folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
     await this.projects.update((db) => { db.projects[project.id] = project })
     return this.public(project)
   }
@@ -69,6 +69,7 @@ export class ProjectStore {
     return this.mutate(input.projectId, input.expectedRevision, (p) => {
       if (input.name !== undefined) p.name = text(input.name, '프로젝트 이름')
       if (input.description !== undefined) p.description = text(input.description, '설명', 2_000)
+      if (input.onboardingAnswers !== undefined) p.onboardingAnswers = input.onboardingAnswers
       if (input.equipmentProfiles !== undefined) p.equipmentProfiles = this.profiles(input.equipmentProfiles)
       if (input.templatePins !== undefined) p.templatePins = this.pins(input.templatePins)
       if (input.exportPresets !== undefined) p.exportPresets = this.presets(input.exportPresets)
@@ -85,6 +86,17 @@ export class ProjectStore {
     await this.roots.update((db) => { db.roots[rootId] = { rootId, canonicalPath, displayLabel } })
     return this.mutate(projectId, expectedRevision, (p) => {
       if (!p.folders.some((folder) => folder.rootId === rootId)) p.folders.push({ rootId, displayLabel, status: 'available', connectedAt: now() })
+    })
+  }
+
+  async availableFolderPaths(projectId: string): Promise<Array<{ rootId: string; path: string }>> {
+    await this.initialize()
+    const project = (await this.projects.read()).projects[id(projectId, 'projectId')]
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    const roots = await this.roots.read()
+    return project.folders.flatMap((folder) => {
+      const path = roots.roots[folder.rootId]?.canonicalPath
+      return path && folder.status === 'available' ? [{ rootId: folder.rootId, path }] : []
     })
   }
 

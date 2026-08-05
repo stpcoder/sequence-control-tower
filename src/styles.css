@@ -109,6 +109,46 @@ button:disabled {
   background: var(--bg);
 }
 
+.project-topbar {
+  position: relative;
+  z-index: 8;
+  min-height: 62px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(13, 15, 19, 0.96);
+}
+
+.project-switcher { display: flex; align-items: center; gap: 12px; height: 62px; padding: 0 22px; }
+.project-switcher .eyebrow { color: var(--dim); font-size: 9px; font-weight: 750; letter-spacing: .16em; }
+.project-switch-button { display: inline-flex; align-items: center; gap: 8px; min-width: 170px; padding: 7px 9px; border: 0; color: var(--text); background: transparent; font-weight: 720; cursor: pointer; }
+.project-switch-button:hover { color: var(--blue); }
+.project-popover { position: absolute; top: 54px; left: 22px; width: 360px; max-height: calc(100vh - 96px); overflow: auto; padding: 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: #171a20; box-shadow: 0 20px 60px rgba(0,0,0,.42); }
+.project-popover-head, .project-row-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.project-popover-head { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.modal-close { display: grid; place-items: center; padding: 4px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.project-list { display: grid; gap: 3px; padding: 9px 0; }
+.project-list-item { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border: 1px solid transparent; border-radius: 6px; color: var(--text); text-align: left; background: transparent; cursor: pointer; }
+.project-list-item:hover, .project-list-item.active { border-color: #384455; background: #202733; }
+.project-list-item small, .project-muted, .form-hint { color: var(--muted); font-size: 11px; }
+.project-empty { margin: 10px 4px; color: var(--muted); font-size: 12px; }
+.project-add-action, .project-primary-action, .project-row-actions button { display: inline-flex; align-items: center; gap: 6px; border: 0; cursor: pointer; }
+.project-add-action { width: 100%; padding: 8px 4px; color: var(--blue); background: transparent; }
+.project-form, .project-settings-block { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.project-form input, .project-form textarea { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: #111419; resize: vertical; }
+.project-settings-block .project-meta-input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: #111419; resize: vertical; }
+.project-form input:focus, .project-form textarea:focus { border-color: var(--blue); outline: none; }
+.form-hint { margin: 0; line-height: 1.45; }
+.project-primary-action { justify-content: center; padding: 8px; border-radius: 5px; color: #10151c; background: var(--blue); font-weight: 720; }
+.project-section-label { margin-top: 5px; color: var(--dim); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.folder-status-list { margin: 0; padding: 8px 9px; border-left: 2px solid var(--line-strong); color: var(--muted); font: inherit; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.folder-status-line { display: flex; align-items: center; justify-content: space-between; padding: 7px 8px; border-left: 2px solid var(--line-strong); color: var(--muted); font-size: 12px; }
+.folder-status-line button { display: grid; place-items: center; padding: 2px; border: 0; color: var(--dim); background: transparent; cursor: pointer; }
+.folder-status-line button:hover { color: var(--signal); }
+.project-row-actions { justify-content: flex-start; }
+.project-row-actions button { padding: 5px 0; color: var(--blue); background: transparent; font-size: 12px; }
+.folder-warning { padding: 6px 8px; border-left: 2px solid var(--amber); color: var(--amber); background: rgba(243,189,87,.08); font-size: 11px; }
+.analysis-app .content-shell { display: flex; flex-direction: column; overflow: hidden; }
+.analysis-app .log-workbench { flex: 1; min-height: 0; }
+
 .navigation {
   z-index: 10;
   display: flex;
