@@ -119,11 +119,6 @@ async function bootstrap(): Promise<void> {
     })
   })
   const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
-  agent.onUpdate((run) => {
-    BrowserWindow.getAllWindows().forEach((window) => {
-      if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.agentUpdate, run)
-    })
-  })
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),

@@ -78,6 +78,13 @@ export class AgentService {
   onUpdate(listener: (run: AgentRun) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
   get(runId: string): AgentRun | null { return this.public(this.runs.get(runId)) }
 
+  cancelAll(): void {
+    this.runs.forEach((run) => {
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return
+      this.cancelRun(run)
+    })
+  }
+
   async start(input: AgentStartInput): Promise<AgentRun> {
     const project = await this.deps.projects.get(input.projectId)
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
@@ -145,7 +152,14 @@ export class AgentService {
   }
 
   async cancel(input: { runId: string }): Promise<AgentRun> {
-    const run = this.must(input.runId); run.generation += 1; run.controller.abort(); run.state = 'CANCELLED'; run.status = 'cancelled'; run.stage = 'failed'; this.touch(run); return this.public(run)!
+    const run = this.must(input.runId)
+    this.cancelRun(run)
+    return this.public(run)!
+  }
+
+  private cancelRun(run: InternalRun): void {
+    if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return
+    run.generation += 1; run.controller.abort(); run.state = 'CANCELLED'; run.status = 'cancelled'; run.stage = 'failed'; this.touch(run)
   }
 
   private async drive(run: InternalRun): Promise<void> {

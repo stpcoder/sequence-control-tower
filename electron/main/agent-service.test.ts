@@ -128,7 +128,7 @@ describe('AgentService', () => {
       llm: { complete: async () => new Promise((r) => { resolve = r }) }
     })
     void service
-    const started = await slow.start({ projectId: 'p1' }); await new Promise((r) => setTimeout(r, 2)); await slow.cancel({ runId: started.id }); resolve({ content: '{"action":"summary"}', model: 'test' }); await new Promise((r) => setTimeout(r, 2))
+    const started = await slow.start({ projectId: 'p1' }); await new Promise((r) => setTimeout(r, 2)); slow.cancelAll(); resolve({ content: '{"action":"summary"}', model: 'test' }); await new Promise((r) => setTimeout(r, 2))
     expect(slow.get(started.id)?.state).toBe('CANCELLED')
   })
 

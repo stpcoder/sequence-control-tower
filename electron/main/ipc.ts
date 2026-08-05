@@ -38,6 +38,7 @@ import { ProjectStore } from './project-store'
 import { AgentService } from './agent-service'
 import { createHash } from 'node:crypto'
 import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
+import type { WebContents } from 'electron'
 
 interface Services {
   artifacts: ArtifactService
@@ -53,6 +54,12 @@ const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.htm
 const activeArtifactSearches = new Map<number, AbortController>()
 const activeArtifactEvidenceInspections = new Map<number, AbortController>()
 const activeArtifactFolderImports = new Map<string, symbol>()
+const agentOwners = new Map<string, number>()
+const agentRunsBySender = new Map<number, Set<string>>()
+const agentSenders = new Map<number, WebContents>()
+const agentSenderCleanup = new Map<number, () => void>()
+let agentUpdateUnsubscribe: (() => void) | null = null
+let registeredAgent: AgentService | null = null
 const FOLDER_IMPORT_IN_PROGRESS_ERROR =
   '폴더 가져오기가 이미 진행 중입니다. 현재 작업이 끝난 후 다시 시도해 주세요.'
 
@@ -83,6 +90,61 @@ function handle(
 }
 
 export function registerIpc(services: Services): void {
+  registeredAgent = services.agent
+  agentUpdateUnsubscribe?.()
+  agentUpdateUnsubscribe = services.agent.onUpdate((run) => {
+    const senderId = agentOwners.get(run.id)
+    if (senderId === undefined) return
+    const sender = agentSenders.get(senderId)
+    if (!sender || sender.isDestroyed()) return
+    sender.send(IPC_CHANNELS.agentUpdate, run)
+  })
+
+  const removeAgentOwner = (runId: string): void => {
+    const senderId = agentOwners.get(runId)
+    if (senderId === undefined) return
+    agentOwners.delete(runId)
+    const runs = agentRunsBySender.get(senderId)
+    runs?.delete(runId)
+    if (runs?.size) return
+    agentRunsBySender.delete(senderId)
+    const sender = agentSenders.get(senderId)
+    const cleanup = agentSenderCleanup.get(senderId)
+    if (sender && cleanup) sender.removeListener('destroyed', cleanup)
+    agentSenderCleanup.delete(senderId)
+    agentSenders.delete(senderId)
+  }
+
+  const cancelOwnedAgentRuns = (senderId: number): void => {
+    const runIds = [...(agentRunsBySender.get(senderId) ?? [])]
+    runIds.forEach((runId) => removeAgentOwner(runId))
+    runIds.forEach((runId) => {
+      const run = services.agent.get(runId)
+      if (run && run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled') {
+        void services.agent.cancel({ runId })
+      }
+    })
+  }
+
+  const registerAgentOwner = (sender: WebContents, runId: string): void => {
+    const senderId = sender.id
+    agentOwners.set(runId, senderId)
+    let runs = agentRunsBySender.get(senderId)
+    if (!runs) {
+      runs = new Set<string>()
+      agentRunsBySender.set(senderId, runs)
+      agentSenders.set(senderId, sender)
+      const cleanup = (): void => cancelOwnedAgentRuns(senderId)
+      agentSenderCleanup.set(senderId, cleanup)
+      sender.once('destroyed', cleanup)
+    }
+    runs.add(runId)
+  }
+
+  const requireAgentOwner = (event: IpcMainInvokeEvent, runId: string): void => {
+    if (agentOwners.get(runId) !== event.sender.id) throw new Error('agent run을 찾을 수 없습니다.')
+  }
+
   const hydrateProject = async (project: ProjectSnapshot | null): Promise<ProjectLoadResult | null> => {
     if (!project) return null
     const statuses = await services.projects.validateFolders(project.id)
@@ -253,12 +315,41 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.analysisGet, (_event, id) => services.analysis.get(String(id ?? '')))
   handle(IPC_CHANNELS.analysisCancel, (_event, id) => services.analysis.cancel(String(id ?? '')))
 
-  handle(IPC_CHANNELS.agentStart, (_event, input) => services.agent.start(input as never))
-  handle(IPC_CHANNELS.agentGet, (_event, id) => services.agent.get(String(id ?? '')))
-  handle(IPC_CHANNELS.agentAnswer, (_event, input) => services.agent.answer(input as never))
-  handle(IPC_CHANNELS.agentMessage, (_event, input) => services.agent.message(input as never))
-  handle(IPC_CHANNELS.agentConfirm, (_event, input) => services.agent.confirm(input as never))
-  handle(IPC_CHANNELS.agentCancel, (_event, input) => services.agent.cancel(input as never))
+  handle(IPC_CHANNELS.agentStart, async (event, input) => {
+    const run = await services.agent.start(input as never)
+    if (event.sender.isDestroyed()) {
+      void services.agent.cancel({ runId: run.id })
+      return run
+    }
+    registerAgentOwner(event.sender, run.id)
+    event.sender.send(IPC_CHANNELS.agentUpdate, run)
+    return run
+  })
+  handle(IPC_CHANNELS.agentGet, (event, id) => {
+    const runId = String(id ?? '')
+    requireAgentOwner(event, runId)
+    return services.agent.get(runId)
+  })
+  handle(IPC_CHANNELS.agentAnswer, (event, input) => {
+    const value = input as { runId: string }
+    requireAgentOwner(event, value.runId)
+    return services.agent.answer(input as never)
+  })
+  handle(IPC_CHANNELS.agentMessage, (event, input) => {
+    const value = input as { runId: string }
+    requireAgentOwner(event, value.runId)
+    return services.agent.message(input as never)
+  })
+  handle(IPC_CHANNELS.agentConfirm, (event, input) => {
+    const value = input as { runId: string }
+    requireAgentOwner(event, value.runId)
+    return services.agent.confirm(input as never)
+  })
+  handle(IPC_CHANNELS.agentCancel, (event, input) => {
+    const value = input as { runId: string }
+    requireAgentOwner(event, value.runId)
+    return services.agent.cancel(input as never)
+  })
 
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())
   handle(IPC_CHANNELS.settingsSaveLlm, (_event, input) =>
@@ -288,6 +379,17 @@ export function registerIpc(services: Services): void {
 }
 
 export function unregisterIpc(): void {
+  agentUpdateUnsubscribe?.()
+  agentUpdateUnsubscribe = null
+  registeredAgent?.cancelAll()
+  registeredAgent = null
+  agentSenderCleanup.forEach((cleanup, senderId) => {
+    agentSenders.get(senderId)?.removeListener('destroyed', cleanup)
+  })
+  agentSenderCleanup.clear()
+  agentSenders.clear()
+  agentRunsBySender.clear()
+  agentOwners.clear()
   activeArtifactSearches.forEach((controller) => controller.abort())
   activeArtifactSearches.clear()
   activeArtifactEvidenceInspections.forEach((controller) => controller.abort())
