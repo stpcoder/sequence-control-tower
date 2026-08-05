@@ -56,6 +56,25 @@ function stamp(now: () => Date): string { return now().toISOString() }
 function hash(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex') }
 function safeMessage(value: unknown): string { return boundedAgentText(value) ?? '' }
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
+function requestedIds(value: unknown, name: string): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32) throw new Error(`${name}가 올바르지 않습니다.`)
+  const ids = value.map((item) => {
+    if (typeof item !== 'string') throw new Error(`${name}가 올바르지 않습니다.`)
+    const id = item.trim()
+    if (!id || id.length > 300 || /[\u0000-\u001f\u007f]/.test(id)) throw new Error(`${name}가 올바르지 않습니다.`)
+    return id
+  })
+  if (new Set(ids).size !== ids.length) throw new Error(`${name}가 올바르지 않습니다.`)
+  return ids
+}
+function requestedId(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') throw new Error(`${name}가 올바르지 않습니다.`)
+  const id = value.trim()
+  if (!id || id.length > 300 || /[\u0000-\u001f\u007f]/.test(id)) throw new Error(`${name}가 올바르지 않습니다.`)
+  return id
+}
 function actionName(raw: ModelAction): AgentActionName | null {
   const value = typeof raw.action === 'string' ? raw.action : raw.tool
   return ['ask', 'search', 'lineWindow', 'inspect', 'candidate', 'summary', 'stop'].includes(String(value)) ? value as AgentActionName : null
@@ -86,16 +105,30 @@ export class AgentService {
   }
 
   async start(input: AgentStartInput): Promise<AgentRun> {
+    if (!input || typeof input !== 'object') throw new Error('agent 시작 입력이 올바르지 않습니다.')
+    const sourceId = requestedId(input.sourceId, 'sourceId')
+    const sourceIds = requestedIds(input.sourceIds, 'sourceIds')
+    const artifactIds = requestedIds(input.artifactIds, 'artifactIds')
     const project = await this.deps.projects.get(input.projectId)
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
     const all = await this.deps.artifacts.list()
-    const requested = input.artifactIds === undefined ? null : new Set(input.artifactIds)
+    const requested = artifactIds === undefined ? null : new Set(artifactIds)
+    const requestedSourceIds = sourceIds ?? (sourceId ? [sourceId] : undefined)
+    if (sourceId && sourceIds && !sourceIds.includes(sourceId)) {
+      throw new Error('sourceId와 sourceIds가 일치하지 않습니다.')
+    }
+    if (requestedSourceIds && (!requestedSourceIds.length || new Set(requestedSourceIds).size !== requestedSourceIds.length)) {
+      throw new Error('sourceId가 올바르지 않습니다.')
+    }
     const connectedArtifactIds = new Set(project.artifacts.map((source) => source.artifactId))
     if (requested && [...requested].some((artifactId) => !connectedArtifactIds.has(artifactId))) {
       throw new Error('프로젝트에 연결되지 않은 artifact입니다.')
     }
+    if (requestedSourceIds && requestedSourceIds.some((sourceId) => !project.artifacts.some((source) => source.sourceId === sourceId))) {
+      throw new Error('프로젝트에 연결되지 않은 source입니다.')
+    }
     const sources = project.artifacts
-      .filter((source) => !requested || requested.has(source.artifactId))
+      .filter((source) => (!requested || requested.has(source.artifactId)) && (!requestedSourceIds || requestedSourceIds.includes(source.sourceId)))
       .slice(0, 32)
       .map((source) => ({ sourceId: safeMessage(source.sourceId), artifactId: source.artifactId, fileName: safeMessage(basename(source.relativePath) || source.relativePath), relativePath: safeMessage(source.relativePath) }))
     if (!sources.length) throw new Error('선택된 artifact가 없습니다.')

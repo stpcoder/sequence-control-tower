@@ -39,6 +39,7 @@ import type {
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
+import { matchesPersistedSource } from './state/sourceIdentity'
 
 const PROJECT_ID = 'log-workbench'
 
@@ -104,22 +105,13 @@ export function setupAppCommandListener(
   }
 }
 
-export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null): WorkbenchFile[] {
+export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null, projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = []): WorkbenchFile[] {
   if (!snapshot) return [...files]
-  const decisions = new Map(snapshot.decisions.map((decision) => [
-    `${decision.source.sourceId}\u0000${decision.source.artifactId}`,
-    decision,
-  ]))
-  const outcomes = new Map<string, EvaluationProjectSnapshot['batches'][number]['outcomes'][number]>()
-  snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
-    outcomes.set(`${outcome.source.sourceId}\u0000${outcome.source.artifactId}`, outcome)
-  }))
   return files.map((file) => {
     if (!file.artifactId) return file
     const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
-    const key = `${file.id}\u0000${file.artifactId}`
-    const decision = decisions.get(key)
-    const outcome = outcomes.get(key)
+    const decision = [...snapshot.decisions].reverse().find((item) => matchesPersistedSource(file, item.source, projectSources))
+    const outcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => matchesPersistedSource(file, item.source, projectSources))
     return {
       ...base,
       ...(decision ? { decision: decision.result } : {}),
@@ -134,12 +126,12 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
 export function projectMetadataApprovals(
   files: readonly WorkbenchFile[],
   snapshot: EvaluationProjectSnapshot | null,
+  projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = [],
 ): MetadataApprovalsBySource {
   if (!snapshot) return {}
-  const exactArtifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
   const latest = new Map<string, EvaluationProjectSnapshot['metadataApprovals'][number]>()
   snapshot.metadataApprovals.forEach((approval) => {
-    if (exactArtifacts.get(approval.source.sourceId) !== approval.source.artifactId) return
+    if (!files.some((file) => matchesPersistedSource(file, approval.source, projectSources))) return
     latest.set(`${approval.source.sourceId}\u0000${approval.fieldKey}`, approval)
   })
   const bySource: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
@@ -157,17 +149,17 @@ export function projectMetadataApprovals(
 export function projectEvidenceCounts(
   files: readonly WorkbenchFile[],
   snapshot: EvaluationProjectSnapshot | null,
+  projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = [],
 ): Record<string, number> {
   if (!snapshot) return {}
-  const artifacts = new Map(files.flatMap((file) => file.artifactId ? [[file.id, file.artifactId] as const] : []))
   const counts: Record<string, number> = {}
   snapshot.batches.forEach((batch) => batch.outcomes.forEach((outcome) => {
-    if (artifacts.get(outcome.source.sourceId) === outcome.source.artifactId) {
+    if (files.some((file) => matchesPersistedSource(file, outcome.source, projectSources))) {
       counts[outcome.source.sourceId] = outcome.evidenceRefs.length
     }
   }))
   snapshot.decisions.forEach((decision) => {
-    if (artifacts.get(decision.source.sourceId) === decision.source.artifactId) {
+    if (files.some((file) => matchesPersistedSource(file, decision.source, projectSources))) {
       counts[decision.source.sourceId] = decision.evidenceRefs.length
     }
   })
@@ -234,12 +226,12 @@ export default function App() {
     if (!isAppLifecycleActive(lifecycle, generation)) return
     evaluationSnapshotRef.current = snapshot
     setEvaluationSnapshot(snapshot)
-    setFiles((current) => hydrateEvaluation(current, snapshot))
+    setFiles((current) => hydrateEvaluation(current, snapshot, project?.artifacts ?? []))
     if (snapshot.storageNotice && shownStorageNotice.current !== snapshot.storageNotice.backupFileName) {
       shownStorageNotice.current = snapshot.storageNotice.backupFileName
       notify(`손상된 분석 저장소를 ${snapshot.storageNotice.backupFileName}으로 보존하고 복구했습니다.`, 'info', generation)
     }
-  }, [notify])
+  }, [notify, project?.artifacts])
 
   const enqueueEvaluation = useCallback((
     operation: (snapshot: EvaluationProjectSnapshot) => Promise<{ snapshot: EvaluationProjectSnapshot }>,
@@ -277,7 +269,7 @@ export default function App() {
       if (!active || projectGeneration.current !== projectLoadGeneration || !isAppLifecycleActive(lifecycleRef.current, generation)) return
       const next = reconcileListedFiles(filesRef.current, artifacts)
       filesRef.current = next
-      setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+      setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current, project?.artifacts ?? []))
       setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
     }).catch((error) => {
       if (active && isAppLifecycleActive(lifecycleRef.current, generation)) {
@@ -285,7 +277,7 @@ export default function App() {
       }
     })
     return () => { active = false }
-  }, [notify])
+  }, [notify, project?.artifacts])
 
   const projectLoaded = useCallback((result: ProjectLoadResult) => {
     const generation = projectGeneration.current + 1
@@ -324,18 +316,18 @@ export default function App() {
   }, [toast])
 
   const metadataApprovals = useMemo<MetadataApprovalsBySource>(() => {
-    const persisted = projectMetadataApprovals(files, evaluationSnapshot)
+    const persisted = projectMetadataApprovals(files, evaluationSnapshot, project?.artifacts ?? [])
     const merged: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
     for (const [sourceId, fields] of Object.entries(persisted)) merged[sourceId] = { ...fields }
     for (const [sourceId, fields] of Object.entries(previewMetadataApprovals)) {
       merged[sourceId] = { ...(merged[sourceId] ?? {}), ...fields }
     }
     return merged
-  }, [evaluationSnapshot, files, previewMetadataApprovals])
+  }, [evaluationSnapshot, files, previewMetadataApprovals, project?.artifacts])
 
   const persistedEvidenceCounts = useMemo(
-    () => projectEvidenceCounts(files, evaluationSnapshot),
-    [evaluationSnapshot, files],
+    () => projectEvidenceCounts(files, evaluationSnapshot, project?.artifacts ?? []),
+    [evaluationSnapshot, files, project?.artifacts],
   )
 
   const records = useMemo(
@@ -360,9 +352,9 @@ export default function App() {
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
     filesRef.current = next
-    setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current))
+    setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current, project?.artifacts ?? []))
     setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
-  }, [])
+  }, [project?.artifacts])
 
   const updateDecision = useCallback(async (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => {
     if (!file.artifactId || !window.sequenceIntelligence?.evaluations) {

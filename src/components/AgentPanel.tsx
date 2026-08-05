@@ -8,6 +8,7 @@ import type {
   ProjectSnapshot,
 } from '../../electron/shared/contracts'
 import type { WorkbenchFile } from '../views/WorkbenchView'
+import { resolveProjectSource } from '../state/sourceIdentity'
 
 interface AgentPanelProps {
   open: boolean
@@ -26,11 +27,7 @@ export function buildAgentDecisionInput(
   result: EvaluationResultLabel | undefined,
 ): EvaluationSaveDecisionInput | null {
   if (!project || !file?.artifactId || !snapshot || !isEvaluationResultLabel(result) || result === 'UNKNOWN') return null
-  const artifactMatches = project.artifacts.filter((source) => source.artifactId === file.artifactId)
-  const exactMatches = file.rootId && file.relativePath
-    ? artifactMatches.filter((source) => source.rootId === file.rootId && normalizeRelativePath(source.relativePath) === normalizeRelativePath(file.relativePath!))
-    : []
-  const source = exactMatches.length === 1 ? exactMatches[0] : artifactMatches.length === 1 ? artifactMatches[0] : null
+  const source = resolveProjectSource(project, file)
   if (!source) return null
   return {
     projectId: project.id,
@@ -38,16 +35,6 @@ export function buildAgentDecisionInput(
     source: { sourceId: source.sourceId, artifactId: source.artifactId, sourceKey: file.sourceKey ?? file.id },
     result,
   }
-}
-
-function normalizeRelativePath(value: string): string {
-  const segments: string[] = []
-  for (const segment of value.replace(/\\/g, '/').split('/')) {
-    if (!segment || segment === '.') continue
-    if (segment === '..') segments.pop()
-    else segments.push(segment)
-  }
-  return segments.join('/')
 }
 
 export function shouldAcceptAgentRun(run: AgentRun, activeRunId: string | null, projectId: string | undefined): boolean {
@@ -169,7 +156,9 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     if (busy) return
     setBusy(true); setError(''); setRun(null)
     try {
-      const next = await api.agent.start({ projectId: project.id, ...(selectedFile?.artifactId ? { artifactIds: [selectedFile.artifactId] } : {}) })
+      const source = selectedFile ? resolveProjectSource(project, selectedFile) : null
+      if (!source) { setBusy(false); setError('선택한 파일의 프로젝트 source를 정확히 확인할 수 없습니다.'); return }
+      const next = await api.agent.start({ projectId: project.id, artifactIds: [source.artifactId], sourceId: source.sourceId })
       if (projectKeyRef.current !== projectKey) return
       activeRunId.current = next.id
       setRun(next)

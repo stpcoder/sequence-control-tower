@@ -642,7 +642,7 @@ export interface AgentRun {
   queueMessage?: string
 }
 
-export interface AgentStartInput { projectId: string; artifactIds?: string[] }
+export interface AgentStartInput { projectId: string; artifactIds?: string[]; sourceId?: string; sourceIds?: string[] }
 export interface AgentAnswerInput { runId: string; questionId?: string; value: AgentAnswerValue }
 export interface AgentMessageInput { runId: string; content: string }
 export type AgentConfirmKind = 'decision' | 'metadata' | 'recipe'

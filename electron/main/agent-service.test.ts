@@ -45,6 +45,26 @@ describe('AgentService', () => {
     expect(getCalls()).toBe(0)
   })
 
+  it('targets exactly the requested project source when duplicate refs share an artifact', async () => {
+    const duplicateSourceProject = { ...project, artifacts: [
+      project.artifacts[0],
+      { ...project.artifacts[0], sourceId: 's2', rootId: 'r2', relativePath: 'other.log' },
+    ] }
+    const { service } = setup(['{"action":"search","input":{"sourceId":"s1","query":"x","mode":"literal","caseSensitive":false,"observationId":"wrong-source"}}'], 1, duplicateSourceProject)
+    const started = await service.start({ projectId: 'p1', artifactIds: ['a1'], sourceId: 's2' })
+    const run = await until(service, started.id, 'HUMAN_CONFIRM')
+    expect(run?.status).toBe('failed')
+    expect(run?.failureReason).toContain('unknown source')
+    await expect(service.start({ projectId: 'p1', artifactIds: ['a1'], sourceId: 'missing' })).rejects.toThrow('연결되지 않은 source')
+  })
+
+  it('rejects malformed source selectors before loading artifacts', async () => {
+    const { service } = setup(['{"action":"summary"}'])
+    await expect(service.start({ projectId: 'p1', sourceId: '' })).rejects.toThrow('sourceId가 올바르지 않습니다.')
+    await expect(service.start({ projectId: 'p1', sourceIds: ['s1', 's1'] })).rejects.toThrow('sourceIds가 올바르지 않습니다.')
+    await expect(service.start({ projectId: 'p1', sourceIds: ['s1'], sourceId: 's2' })).rejects.toThrow('일치하지 않습니다.')
+  })
+
   it('rejects an empty project before making an LLM call', async () => {
     const emptyProject = { ...project, artifacts: [] }
     const { service, getCalls } = setup(['{"action":"summary"}'], 1, emptyProject, [])

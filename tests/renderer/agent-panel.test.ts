@@ -46,6 +46,15 @@ describe('mini agent domain safety', () => {
     expect(buildAgentDecisionInput(projectWithArtifacts([]), file, snapshot, 'PASS')).toBeNull()
   })
 
+  it('maps duplicate-SHA selected rows by exact root and relative path', () => {
+    const duplicated = projectWithArtifacts([
+      project.artifacts[0],
+      { sourceId: 'project-source-2', rootId: 'root-2', artifactId: 'artifact-1', relativePath: 'logs/sample.log' },
+    ])
+    expect(buildAgentDecisionInput(duplicated, file, snapshot, 'PASS')?.source.sourceId).toBe('project-source-1')
+    expect(buildAgentDecisionInput(duplicated, { ...file, rootId: 'root-3' }, snapshot, 'PASS')).toBeNull()
+  })
+
   it('only treats active tool or LLM work as pending', () => {
     const candidate = { kind: 'result' as const, result: 'PASS' as const, status: 'candidate' as const, observationIds: [] }
     expect(isAgentRunPending(run('queued'))).toBe(true)
