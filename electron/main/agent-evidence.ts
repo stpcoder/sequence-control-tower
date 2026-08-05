@@ -3,7 +3,7 @@ import type {
   Trend
 } from '../shared/contracts'
 import { parseFilenameMetadata, type FilenameMetadata } from '../../src/domain/workbench/filenameMetadata'
-import { AGENT_LIMITS, boundLine, protectFilenameCandidate, redactAgentText } from './agent-policy'
+import { AGENT_LIMITS, authorizeToolAction, boundLine, boundedAgentText, protectFilenameCandidate, redactAgentText, validateCandidateShape } from './agent-policy'
 
 export interface BoundedObservationReference {
   id: string
@@ -39,8 +39,8 @@ function boundedExcerpt(value: string): string {
 export function boundObservation(observation: BoundedObservation): BoundedObservation {
   const lines = (observation.lines ?? []).slice(0, AGENT_LIMITS.maxLinesPerWindow).map((line) => boundLine(redactAgentText(line)))
   return {
-    id: redactAgentText(observation.id).slice(0, 160),
-    sourceId: redactAgentText(observation.sourceId).slice(0, 160),
+    id: boundedAgentText(observation.id) ?? 'observation',
+    sourceId: boundedAgentText(observation.sourceId) ?? 'source',
     kind: observation.kind,
     ...(observation.matched === undefined ? {} : { matched: Boolean(observation.matched) }),
     ...(observation.lineNumber === undefined ? {} : { lineNumber: Math.max(1, Math.floor(observation.lineNumber)) }),
@@ -54,7 +54,14 @@ export function buildAgentEvidence(input: {
   observations: readonly BoundedObservation[]
   candidates?: readonly Candidate[]
 }): AgentEvidence {
-  const observations = input.observations.slice(0, AGENT_LIMITS.maxTools).map(boundObservation)
+  const usedIds = new Set<string>()
+  const observations = input.observations.slice(0, AGENT_LIMITS.maxTools).map(boundObservation).map((observation) => {
+    let id = observation.id
+    let suffix = 1
+    while (usedIds.has(id)) { id = `${observation.id.slice(0, AGENT_LIMITS.maxIdentifierChars - 12)}-${suffix++}` }
+    usedIds.add(id)
+    return { ...observation, id }
+  })
   const fragments = observations.flatMap((observation) => [
     observation.excerpt ?? '',
     ...(observation.lines ?? [])
@@ -62,11 +69,20 @@ export function buildAgentEvidence(input: {
   const aggregateExcerpt = boundedExcerpt(fragments.join('\n'))
   const filenameMetadata = parseFilenameMetadata(input.fileName)
   const references = observations.map((observation) => ({ id: observation.id, sourceId: observation.sourceId }))
-  const candidates = (input.candidates ?? []).map((candidate) =>
-    candidate.kind === 'metadata'
-      ? protectFilenameCandidate(candidate, filenameMetadata)
-      : candidate
-  ).map((candidate) => gateResultCandidate(candidate, references))
+  const candidates = (input.candidates ?? []).filter(validateCandidateShape).map((candidate) => {
+    let boundedCandidate: Candidate = {
+      ...candidate,
+      ...(candidate.value === undefined ? {} : { value: boundedAgentText(candidate.value) ?? '' }),
+      observationIds: candidate.observationIds.map((id) => boundedAgentText(id) ?? '').filter(Boolean)
+    }
+    if (boundedCandidate.kind === 'action') {
+      const action = authorizeToolAction(boundedCandidate.action, 0)
+      if (action.ok) boundedCandidate = { ...boundedCandidate, action: action.value }
+    } else if (boundedCandidate.kind === 'question' && boundedCandidate.question) {
+      boundedCandidate = { ...boundedCandidate, question: { ...boundedCandidate.question, id: boundedAgentText(boundedCandidate.question.id) ?? '', prompt: boundedAgentText(boundedCandidate.question.prompt) ?? '', ...(boundedCandidate.question.choices ? { choices: boundedCandidate.question.choices.map((choice) => boundedAgentText(choice) ?? '') } : {}) } }
+    }
+    return boundedCandidate.kind === 'metadata' ? protectFilenameCandidate(boundedCandidate, filenameMetadata) : boundedCandidate
+  }).map((candidate) => gateResultCandidate(candidate, references))
   return { observations, aggregateExcerpt, filenameMetadata, candidates }
 }
 
