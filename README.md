@@ -84,6 +84,15 @@ Evaluation DB에는 로그 원문, excerpt, 절대경로, secret을 저장하지
 - Windows: Authenticode code-signing certificate
 - macOS: Apple Developer ID Application signing과 notarization
 
+## v0.7.0
+
+- 프로젝트 라이브러리와 초기화 마법사, 프로젝트별 폴더 연결
+- 제한된 Mini Agent의 검색·줄 범위·정보 확인 도구 호출과 느린 LLM 대기/timeout 처리
+- 검색창 `Enter` 포커스 및 첫 결과 이동 수정, 3개 작업 영역 크기 조절
+- N × M 결과 레이아웃 저장, 현재 범위 추세 요약, 사람 확인 후 후보 저장
+
+[v0.7.0 릴리스 노트와 설치 링크](docs/manual/90-v0.7.0-release-notes.md)
+
 ## 개발과 검증
 
 Node.js 22 LTS와 npm 10 이상이 필요합니다.
@@ -115,8 +124,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.
