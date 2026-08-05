@@ -6,6 +6,8 @@ import {
   MAX_LLM_PROMPT_CHARS,
   redactSensitiveText
 } from './llm-evidence'
+import type { MinimalLlmEvidence } from './llm-evidence'
+import { parseSequence } from './sequence-parser'
 
 const request: StartAnalysisInput = {
   artifactId: 'a'.repeat(64),
@@ -101,6 +103,29 @@ describe('minimal LLM evidence', () => {
     expect(serialized).not.toContain('test.user@example.com')
     expect(serialized).not.toContain('0x1234567890abcdef')
     expect(serialized).not.toContain('not-sent-to-llm')
+    expect(evidence.filenameMetadata.fields.temperature).toMatchObject({
+      value: '105',
+      state: 'extracted'
+    })
+    expect(evidence.filenameMetadata.fields.sample.state).toBe('unknown')
+  })
+
+  it('keeps a 6,500-line source out of the prompt and under the hard ceiling', () => {
+    const raw = Array.from({ length: 6_500 }, (_item, index) =>
+      `COMMAND_${index}=secret raw line ${index} /Users/customer/private/${index}.log`
+    ).join('\n')
+    const evidence = buildMinimalLlmEvidence({
+      request,
+      fileName: 'SAMPLE=QBR-090_TEMP=105C_MODE=TEST_GRID=2x4.seq',
+      fingerprint: parseSequence(raw, 'SAMPLE=QBR-090_TEMP=105C_MODE=TEST_GRID=2x4.seq'),
+      changes: []
+    })
+    const prompt = buildMinimalLlmPrompt(evidence)
+
+    expect(prompt.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS)
+    expect(prompt).not.toContain('raw line 6499')
+    expect(prompt).not.toContain('/Users/customer/private/6499.log')
+    expect(prompt).toContain('filenameMetadata')
   })
 
   it('does not put arbitrary raw sequence text into the prompt', () => {
@@ -205,5 +230,29 @@ describe('minimal LLM evidence', () => {
     expect(firstPrompt).not.toContain('must-not-be-sent')
     expect(firstPrompt).toContain('<SECRET>')
     expect(firstPrompt).toContain('<ABS_PATH>')
+  })
+
+  it('bounds and redacts hand-built filename metadata at the prompt boundary', () => {
+    const huge = 'C:\\\\Customer\\\\private\\\\' + 'x'.repeat(20_000)
+    const evidence = buildMinimalLlmEvidence({ request, fileName: 'SAMP-A.seq', fingerprint, changes: [] })
+    const handBuilt = {
+      ...evidence,
+      filenameMetadata: {
+        basename: huge,
+        fields: Object.fromEntries(['sample', 'temperature', 'mode', 'grid'].map((key) => [key, {
+          value: huge,
+          state: 'conflict' as const,
+          confidence: 99,
+          candidates: Array.from({ length: 100 }, () => huge),
+          provenance: Array.from({ length: 100 }, () => ({ token: huge, rule: huge }))
+        }])) as MinimalLlmEvidence['filenameMetadata']['fields']
+      }
+    }
+    const prompt = buildMinimalLlmPrompt(handBuilt)
+
+    expect(prompt.length).toBeLessThanOrEqual(MAX_LLM_PROMPT_CHARS)
+    expect(prompt).not.toContain('Customer')
+    expect(prompt).not.toContain('x'.repeat(1_000))
+    expect(prompt).toContain('filenameMetadata')
   })
 })
