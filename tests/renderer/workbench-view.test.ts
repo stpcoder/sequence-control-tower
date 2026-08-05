@@ -515,6 +515,16 @@ describe('Log Workbench UI data hardening', () => {
     expect(nextSearchHitIndex(0, 3, -1, true)).toBe(2)
   })
 
+  it('resets the undisclosed-first-hit contract before input and async result transitions', () => {
+    expect(workbenchSource).toContain('const resetSearchNavigation = useCallback(() => {')
+    expect(workbenchSource).toContain('resetSearchNavigation()\n    scheduleAnimationFrame(() => searchInputRef.current?.select())')
+    expect(workbenchSource).toContain("onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }}")
+    expect(workbenchSource).toContain("onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }}")
+    expect(workbenchSource).toContain('// Reset synchronously with result invalidation so an Enter pressed before')
+    expect(workbenchSource).toContain('resetSearchNavigation()\n    setBackendHits([])')
+    expect(workbenchSource).toContain('if (event.key === \'Enter\') {\n      event.preventDefault()\n      moveToHit(event.shiftKey ? -1 : 1)')
+  })
+
   it('bounds persisted pane widths and keeps fallback messages short', () => {
     expect(clampWorkbenchPaneWidth('sidebar', 10)).toBe(180)
     expect(clampWorkbenchPaneWidth('inspector', 9999)).toBe(440)

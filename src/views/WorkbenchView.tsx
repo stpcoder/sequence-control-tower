@@ -1048,6 +1048,12 @@ export function WorkbenchView({
   const importInFlightRef = useRef(false)
   const patternReviewGeneration = useRef(0)
   const patternReviewJobIdRef = useRef('')
+
+  const resetSearchNavigation = useCallback(() => {
+    setCurrentHit(0)
+    searchHasNavigatedRef.current = false
+    authorizedHitKeyRef.current = ''
+  }, [])
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
   const recipeEvidenceGeneration = useRef(0)
@@ -1517,11 +1523,11 @@ export function WorkbenchView({
       setPatternReview({ status: 'idle' })
     }
     if (resetSearch) {
-      setCurrentHit(0)
+      resetSearchNavigation()
       setRevealedLine(null)
     }
     onSelectedFileChange?.(fileId)
-  }, [bestEffortCancelPatternReview, onSelectedFileChange])
+  }, [bestEffortCancelPatternReview, onSelectedFileChange, resetSearchNavigation])
 
   const navigateToSearchHit = useCallback((index: number) => {
     const hit = hits[index]
@@ -1772,10 +1778,9 @@ export function WorkbenchView({
     setSearchOpen(true)
     setReplaceMode(nextReplaceMode)
     setSideMode(scope === 'file' ? 'files' : 'search')
-    setCurrentHit(0)
-    authorizedHitKeyRef.current = ''
+    resetSearchNavigation()
     scheduleAnimationFrame(() => searchInputRef.current?.select())
-  }, [replaceMode, scheduleAnimationFrame])
+  }, [replaceMode, resetSearchNavigation, scheduleAnimationFrame])
 
   const replaceCurrent = useCallback(() => {
     setDraftError('')
@@ -2003,14 +2008,12 @@ export function WorkbenchView({
 
   useEffect(() => {
     setInvalidPattern(Boolean(query && !createSearchPattern(query, options)))
-    setCurrentHit(0)
-    searchHasNavigatedRef.current = false
-  }, [options, query])
+    resetSearchNavigation()
+  }, [options, query, resetSearchNavigation])
 
   useEffect(() => {
-    setCurrentHit(0)
-    searchHasNavigatedRef.current = false
-  }, [searchFileIdsKey])
+    resetSearchNavigation()
+  }, [resetSearchNavigation, searchFileIdsKey])
 
   useEffect(() => {
     setCurrentHit((index) => clampSearchHitIndex(index, hits.length))
@@ -2021,6 +2024,9 @@ export function WorkbenchView({
     const artifactIds = [...new Set(searchFiles.flatMap((file) => file.artifactId ? [file.artifactId] : []))]
     const requestId = advanceSearchRequestGeneration(searchRequest.current)
     searchRequest.current = requestId
+    // Reset synchronously with result invalidation so an Enter pressed before
+    // the next effect flush still focuses the displayed first hit.
+    resetSearchNavigation()
     setBackendHits([])
     setBackendCounts({})
     setBackendTotal(0)
@@ -2074,7 +2080,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [invalidPattern, options, query, searchFiles])
+  }, [invalidPattern, options, query, resetSearchNavigation, searchFiles])
 
   useEffect(() => {
     if (!query.trim() || invalidPattern || !activeFile || searching) return undefined
@@ -2660,7 +2666,7 @@ export function WorkbenchView({
               <option value="open">열린 탭</option>
               <option value="workspace">전체 로그</option>
             </select>
-            <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
+            <input ref={searchInputRef} value={query} onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
             <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
             <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
             <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
@@ -2676,7 +2682,7 @@ export function WorkbenchView({
             {searchOptionsOpen ? <div className="search-options-popover" aria-label="검색 옵션">
               {(Object.keys(options) as Array<keyof SearchOptions>).map((option) => {
                 const Icon = option === 'caseSensitive' ? CaseSensitive : option === 'wholeWord' ? WholeWord : Regex
-                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} onClick={() => setOptions((current) => ({ ...current, [option]: !current[option] }))} key={option}><Icon size={16} /><span>{optionLabel(option)}</span>{options[option] ? <Check size={15} /> : null}</button>
+                return <button className={options[option] ? 'active' : ''} aria-pressed={options[option]} onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }} key={option}><Icon size={16} /><span>{optionLabel(option)}</span>{options[option] ? <Check size={15} /> : null}</button>
               })}
             </div> : null}
           </div>
