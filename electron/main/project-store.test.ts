@@ -59,14 +59,16 @@ describe('ProjectStore', () => {
     const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'LPDDR6' })
     const attached = await store.attachFolder(project.id, project.revision, folder)
     const connected = await store.connectArtifacts({ projectId: project.id, expectedRevision: attached.revision, artifacts: [{ sourceId: 'log-vperi', rootId: attached.folders[0].rootId, artifactId: 'artifact-vperi', relativePath: 'vperi.log' }] })
+    const reconnected = await store.connectArtifacts({ projectId: project.id, expectedRevision: connected.revision, artifacts: [{ sourceId: 'log-vperi', rootId: attached.folders[0].rootId, artifactId: 'artifact-vperi', relativePath: 'vperi.log' }] })
+    expect(reconnected.revision).toBe(connected.revision)
     const payload = {
-      projectId: project.id, expectedRevision: connected.revision,
+      projectId: project.id, expectedRevision: reconnected.revision,
       lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'H9L6', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
       equipmentProfiles: [{ alias: 'SM-8975 실장기', profileId: 'qualcomm-default', vendor: 'qualcomm' as const, socModels: ['SM-8975'], filenameAliases: ['SM8975'], updatedAt: '2026-08-10T00:00:00.000Z' }],
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [
-        { id: 'base', name: 'baseline', dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
-        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9 RT', dimensions: { dq: 9, testMode: 'VPERI' }, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
+        { id: 'base', name: 'baseline', purpose: 'screening' as const, dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
+        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9 RT', purpose: 'reproduction' as const, dimensions: { dq: 9, testMode: 'VPERI' }, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
       ],
       evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
     }

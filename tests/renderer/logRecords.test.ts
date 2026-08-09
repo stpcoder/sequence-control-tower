@@ -338,9 +338,9 @@ describe('renderer log result projection', () => {
     const tsv = serializeLogRecordsTsv(projectLogRecords(duplicateNameFiles))
 
     expect(tsv).toBe([
-      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tgrid_value\tgrid_state\tresult\tresult_source\treview',
-      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review',
-      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review',
+      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tgrid_value\tgrid_state\tresult\tresult_source\treview\tstage_results',
+      'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review\tTest:PASS',
+      'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review\t',
     ].join('\r\n'))
   })
 
@@ -384,6 +384,55 @@ describe('renderer log result projection', () => {
     expect(lines[2].split('\t').slice(7, 13)).toEqual(['02', 'candidate', '85', 'rejected', 'DIAG', 'candidate'])
     expect(lines[3].split('\t').slice(7, 13)).toEqual(['', 'missing', '', 'missing', '', 'missing'])
     expect(lines[4].split('\t').slice(7, 13)).toEqual(['', 'malformed', '', 'malformed', '', 'malformed'])
+  })
+
+  it('undoes a metadata approval back to the current extractor candidate', () => {
+    const [row] = projectLogRecords([{ id: 'reset', name: 'LOT_S07_85C_DIAG.log', text: '@PASS' }], {}, {
+      reset: { temperature: { approval: 'reset' } },
+    })
+    expect(row.temperature).toEqual({ value: '85', state: 'candidate' })
+  })
+
+  it('keeps explicit boot, training, HDiag and test checkpoints in one log', () => {
+    const [row] = projectLogRecords([{ id: 'stages', name: 'stages.log', text: 'POWER_ON\nSYN_UEFI_ENTER\nSYN_UEFI_EXIT\nBOOT COMPLETE\nTRAINING PASS\nHIDAG @FAIL\n@FAIL' }])
+    expect(row.stageResults).toEqual([
+      { stage: 'power', status: 'reached', evidenceCount: 1 },
+      { stage: 'uefi', status: 'pass', evidenceCount: 1 },
+      { stage: 'boot', status: 'pass', evidenceCount: 1 },
+      { stage: 'training', status: 'pass', evidenceCount: 1 },
+      { stage: 'hdiag', status: 'fail', evidenceCount: 1 },
+      { stage: 'test', status: 'fail', evidenceCount: 2 },
+    ])
+    expect(serializeLogRecordsTsv([row], ['stage_results'])).toContain('Power:REACHED | UEFI:PASS | Boot:PASS | Training:PASS | HDiag:FAIL | Test:FAIL')
+  })
+
+  it('uses bounded native stage inspection when artifact text stays outside the renderer', () => {
+    const [row] = projectLogRecords(
+      [{ id: 'native', artifactId: 'a'.repeat(64), name: 'native.log', text: undefined }],
+      {},
+      {},
+      { native: [{ stage: 'boot', status: 'pass', evidenceCount: 1 }, { stage: 'hdiag', status: 'fail', evidenceCount: 2 }] },
+    )
+    expect(row.stageResults).toEqual([
+      { stage: 'boot', status: 'pass', evidenceCount: 1 },
+      { stage: 'hdiag', status: 'fail', evidenceCount: 2 },
+    ])
+  })
+
+  it('recognizes Qualcomm-style colon prompts as reached and completed stages', () => {
+    const [row] = projectLogRecords([{ id: 'qualcomm', name: 'qualcomm.log', text: [
+      'POWER_ON', 'PBL: boot start', 'XBL: DDR init', 'UEFI: memory training start',
+      'UEFI: memory training complete', 'UEFI: ExitBootServices', 'OS: Linux boot complete', 'HIDAG DIAG START',
+    ].join('\n') }])
+    expect(row.stageResults).toEqual(expect.arrayContaining([
+      { stage: 'power', status: 'reached', evidenceCount: 1 },
+      { stage: 'pbl', status: 'reached', evidenceCount: 1 },
+      { stage: 'xbl', status: 'reached', evidenceCount: 1 },
+      { stage: 'uefi', status: 'pass', evidenceCount: 1 },
+      { stage: 'training', status: 'pass', evidenceCount: 1 },
+      { stage: 'hdiag', status: 'reached', evidenceCount: 1 },
+      { stage: 'os', status: 'reached', evidenceCount: 2 },
+    ]))
   })
 
   it('does not export absolute paths or raw excerpts and preserves CSV quoting', () => {
@@ -440,7 +489,7 @@ describe('renderer log result projection', () => {
     const lines = tsv.split('\r\n')
     const sourceKeyColumn = 2
 
-    expect(lines[0].split('\t')).toHaveLength(18)
+    expect(lines[0].split('\t')).toHaveLength(19)
     expect(lines.slice(1).map((line) => line.split('\t')[sourceKeyColumn])).toEqual([
       'root:opaque-posix\u001fposix.log',
       'root:opaque-windows\u001fwindows.log',

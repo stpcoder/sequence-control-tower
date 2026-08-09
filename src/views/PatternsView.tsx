@@ -7,11 +7,15 @@ import {
   filterLogRecords,
   isPivotSelectionValid,
   RESULT_LABEL_KO,
+  STAGE_LABEL_KO,
   type LogResultRecord,
   type LogRecordFilters,
   type PivotAggregation,
   type PivotDimension,
   type AggregateTrend,
+  type EvaluationStage,
+  type EvaluationStageStatus,
+  type PatternAxis,
 } from '../state/logRecords'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
@@ -131,6 +135,19 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
+  const stageSummary = useMemo(() => (Object.keys(STAGE_LABEL_KO) as EvaluationStage[]).map((stage) => {
+    const counts: Record<EvaluationStageStatus, number> = { pass: 0, fail: 0, reached: 0 }
+    for (const row of scopedRecords) {
+      const checkpoint = row.stageResults.find((item) => item.stage === stage)
+      if (checkpoint) counts[checkpoint.status] += 1
+    }
+    return { stage, counts, total: counts.pass + counts.fail + counts.reached }
+  }).filter((item) => item.total > 0), [scopedRecords])
+  const selectedDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
+  const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => ['sample', 'temperature', 'mode', 'grid', 'run'].includes(dimension)
+    && scopedRecords.every((row) => dimension === 'run' ? !row.run : !row[dimension as PatternAxis].value))
+  const allSelectedMetadataUnconfirmed = !allSelectedMetadataUnknown && selectedDimensions.some((dimension) => ['sample', 'temperature', 'mode', 'grid'].includes(dimension)
+    && scopedRecords.every((row) => row[dimension as PatternAxis].state !== 'approved'))
   const clearSelection = () => {
     setSelectedSourceIds(null)
     setSelectedCellKey(null)
@@ -169,6 +186,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
+      {stageSummary.length ? <section className="stage-summary" aria-label="단계별 결과"><span>단계별 결과</span>{stageSummary.map((item) => <div key={item.stage}><b>{STAGE_LABEL_KO[item.stage]}</b>{item.counts.pass ? <em className="pass">PASS {item.counts.pass}</em> : null}{item.counts.fail ? <em className="fail">FAIL {item.counts.fail}</em> : null}{item.counts.reached ? <em className="reached">도달 {item.counts.reached}</em> : null}</div>)}</section> : null}
 
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
@@ -182,6 +200,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{dimensionOptions(activeDimensions, rowAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, rowAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
           <div><span>가로</span><SelectControl label="1" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{dimensionOptions(activeDimensions, columnAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, columnAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
         </div>
+        {allSelectedMetadataUnknown ? <p className="pivot-guidance">선택한 축 값이 모두 미확인입니다. 다른 축을 선택하거나 결과 화면에서 값을 입력하세요.</p> : allSelectedMetadataUnconfirmed ? <p className="pivot-guidance is-preview">미승인 후보로 계산한 미리보기입니다. 결과 화면에서 값을 검토하면 확정 표로 바뀝니다.</p> : null}
         <div className="pivot-scroll"><table className="pivot-table"><thead><tr><th>{rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ')}</th>{grid.columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}><th scope="row">{row.label}</th>{grid.columns.map((column, columnIndex) => { const cell = grid.cells[rowIndex][columnIndex]; const cellKey = `${row.key}-${column.key}`; const active = selectedCellKey === cellKey; const selectable = cell.sourceIds.length > 0; const noSourcesLabel = '관련 로그가 없어 선택할 수 없는 셀'; return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} disabled={!selectable} title={selectable ? undefined : noSourcesLabel} aria-label={selectable ? `${cell.value}개 로그 선택` : `${cell.value} ${noSourcesLabel}`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{cell.value}</button></td> })}</tr>)}</tbody></table></div>
       </section>
 

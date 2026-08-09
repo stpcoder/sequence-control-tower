@@ -440,4 +440,41 @@ describe('ArtifactService log workbench', () => {
     expect(search.matches[0]).toMatchObject({ lineNumber: 3, lineTruncated: true })
     expect(search.matches[0].lineText.length).toBeLessThanOrEqual(4_002)
   })
+
+  it('inspects stage checkpoints from the complete artifact without returning raw log text', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    await writeFile(join(source, 'multi-stage.log'), [
+      'POWER_ON',
+      'SYN_UEFI_ENTER',
+      'SYN_UEFI_EXIT',
+      'BOOT COMPLETE',
+      'TRAINING_PASS',
+      'HIDAG @PASS',
+      'HIDAG @FAIL code=DQ9',
+      'OS_READY',
+    ].join('\n'), 'utf8')
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+    const artifact = imported.artifacts[0]
+    const location = artifact.sources![0]
+
+    const result = await service.inspectStages({
+      sources: [{ sourceId: 'source-1', artifactId: artifact.id, rootId: location.rootId, relativePath: location.relativePath }],
+    })
+
+    expect(result.sources[0].stages).toEqual(expect.arrayContaining([
+      { stage: 'power', status: 'reached', evidenceCount: 1 },
+      { stage: 'uefi', status: 'pass', evidenceCount: 1 },
+      { stage: 'boot', status: 'pass', evidenceCount: 1 },
+      { stage: 'training', status: 'pass', evidenceCount: 1 },
+      { stage: 'hdiag', status: 'fail', evidenceCount: 1 },
+      { stage: 'test', status: 'fail', evidenceCount: 1 },
+      { stage: 'os', status: 'reached', evidenceCount: 1 },
+    ]))
+    expect(JSON.stringify(result)).not.toContain('code=DQ9')
+    expect(JSON.stringify(result)).not.toContain(root)
+  })
 })

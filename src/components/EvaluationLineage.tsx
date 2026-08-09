@@ -1,12 +1,14 @@
 import { useMemo } from 'react'
 import type { CSSProperties } from 'react'
-import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationStatus } from '../domain/evaluation-memory'
+import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationPurpose, EvaluationStatus } from '../domain/evaluation-memory'
 import './evaluation-lineage.css'
 
 type EvaluationLineageConfidence = 'confirmed' | 'proposed'
 
 interface DisplayNode {
   node: EvaluationNode
+  purpose?: EvaluationPurpose
+  purposeInferred: boolean
   lane: string
   state: EvaluationStatus
   confidence: EvaluationLineageConfidence
@@ -31,6 +33,21 @@ export interface EvaluationLineageProps {
 
 const stateLabel: Record<EvaluationStatus, string> = {
   pass: 'PASS', fail: 'FAIL', inconclusive: 'INCONCLUSIVE', running: 'RUNNING',
+}
+export const evaluationPurposeLabel: Record<EvaluationPurpose, string> = {
+  screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현', characterization: '불량 경향 파악', verification: '개선 효과 검증',
+}
+
+/** Gives old saved evaluations a visible candidate purpose without rewriting them. */
+export function displayEvaluationPurpose(node: Pick<EvaluationNode, 'name' | 'purpose'>): { purpose?: EvaluationPurpose; inferred: boolean } {
+  if (node.purpose) return { purpose: node.purpose, inferred: false }
+  const name = node.name.toLocaleLowerCase('ko-KR')
+  if (/가속|스크린|screen/.test(name)) return { purpose: 'screening', inferred: true }
+  if (/개선.*검증|효과.*확인|verify/.test(name)) return { purpose: 'verification', inferred: true }
+  if (/개선|완화|마진/.test(name)) return { purpose: 'improvement', inferred: true }
+  if (/\brt\d*\b|재현|retest|retry/.test(name)) return { purpose: 'reproduction', inferred: true }
+  if (/경향|특성|분포|character|retention/.test(name)) return { purpose: 'characterization', inferred: true }
+  return { inferred: false }
 }
 
 function toneFor(state: EvaluationStatus): 'pass' | 'fail' | 'warning' | 'active' {
@@ -74,8 +91,8 @@ export function EvaluationLineage({
   selectedNodeId,
   onSelectNode,
   className = '',
-  emptyMessage = '표시할 평가 계보가 없습니다.',
-  ariaLabel = '평가 계보',
+  emptyMessage = '저장된 평가가 없습니다.',
+  ariaLabel = '평가 이력',
 }: EvaluationLineageProps) {
   const nodes = useMemo(() => {
     const nodeById = new Map(memory.nodes.map((node) => [node.id, node]))
@@ -87,8 +104,9 @@ export function EvaluationLineage({
       const dimensions = evidence.map((record) => resolvedDimensions(node, record.dimensions, nodeById))
       const failures = evidence.filter((record) => record.status === 'fail').length
       const latest = evidence.find((record) => record.status === 'running')?.status ?? node.status ?? evidence.at(-1)?.status ?? 'inconclusive'
+      const displayedPurpose = displayEvaluationPurpose(node)
       return {
-        node, lane: node.branchId || 'main', state: latest, origin,
+        node, purpose: displayedPurpose.purpose, purposeInferred: displayedPurpose.inferred, lane: node.branchId || 'main', state: latest, origin,
         confidence: origin === 'engineer-confirmed' ? 'confirmed' : 'proposed', hypothesisTitle: hypothesis?.title,
         evidenceCount: evidence.length, failureRate: evidence.length ? failures / evidence.length : undefined,
         dominantDq: mode(dimensions.map((item) => value(item.dq))), dominantPattern: mode(dimensions.map((item) => value(item.pattern))),
@@ -103,7 +121,7 @@ export function EvaluationLineage({
   const laneIndex = useMemo(() => new Map(lanes.map((lane, index) => [lane, index])), [lanes])
   const nodeIndex = useMemo(() => new Map(nodes.map((item, index) => [item.node.id, index])), [nodes])
   const selected = nodes.find((item) => item.node.id === selectedNodeId) ?? nodes[0]
-  const graphHeight = Math.max(136, nodes.length * 54 + 28)
+  const graphHeight = Math.max(148, nodes.length * 62 + 30)
   const graphWidth = Math.max(1, lanes.length) * 100
 
   if (!nodes.length) {
@@ -126,8 +144,8 @@ export function EvaluationLineage({
                 const parent = nodes[parentIndex]
                 const x1 = ((laneIndex.get(parent.lane) ?? 0) + 0.5) * 100
                 const x2 = ((laneIndex.get(item.lane) ?? 0) + 0.5) * 100
-                const y1 = parentIndex * 54 + 28
-                const y2 = index * 54 + 28
+                const y1 = parentIndex * 62 + 30
+                const y2 = index * 62 + 30
                 const midY = y1 + (y2 - y1) / 2
                 return <path key={`${item.node.id}-${parentId}`} d={`M ${x1} ${y1} V ${midY} H ${x2} V ${y2}`} className={item.confidence === 'proposed' ? 'evaluation-lineage__edge evaluation-lineage__edge--proposed' : 'evaluation-lineage__edge'} />
               }))}
@@ -137,7 +155,7 @@ export function EvaluationLineage({
                 const lane = laneIndex.get(item.lane) ?? 0
                 const active = item.node.id === selected?.node.id
                 return (
-                  <li key={item.node.id} style={{ '--node-x': `${((lane + 0.5) / lanes.length) * 100}%`, '--node-y': `${index * 54 + 28}px` } as CSSProperties}>
+                  <li key={item.node.id} style={{ '--node-x': `${((lane + 0.5) / lanes.length) * 100}%`, '--node-y': `${index * 62 + 30}px` } as CSSProperties}>
                     <button
                       type="button"
                       className={`evaluation-lineage__node evaluation-lineage__node--${toneFor(item.state)} evaluation-lineage__node--${item.confidence}${active ? ' is-selected' : ''}`}
@@ -146,7 +164,7 @@ export function EvaluationLineage({
                       onClick={() => onSelectNode?.(item.node)}
                     >
                       <span className="evaluation-lineage__point"><i /></span>
-                      <span className="evaluation-lineage__node-copy"><b>{item.node.name}</b></span>
+                      <span className="evaluation-lineage__node-copy"><small>{item.purpose ? `${evaluationPurposeLabel[item.purpose]}${item.purposeInferred ? ' · 후보' : ''}` : '목적 확인 필요'}</small><b>{item.node.name}</b></span>
                     </button>
                   </li>
                 )
@@ -162,6 +180,7 @@ export function EvaluationLineage({
           </div>
           <strong>{selected.node.name}</strong>
           <dl>
+            <div><dt>목적</dt><dd>{selected.purpose ? `${evaluationPurposeLabel[selected.purpose]}${selected.purposeInferred ? ' (후보)' : ''}` : '확인 필요'}</dd></div>
             <div><dt>근거</dt><dd>{selected.evidenceCount}건</dd></div>
             <div><dt>실패율</dt><dd>{rateLabel(selected.failureRate)}</dd></div>
             <div><dt>조건</dt><dd>{selected.dominantCondition || '—'}</dd></div>

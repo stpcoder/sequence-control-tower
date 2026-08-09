@@ -88,15 +88,16 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 
 ## 메타데이터와 결과 내보내기
 
-`결과표`에는 `파일명`, `폴더`, `Sample`, `온도`, `Mode`, `Grid`, `결과`, `판정 검토`, `근거`가 표시됩니다. 파일명에서 네 필드를 추출합니다. 값 하나는 `후보`로 검토하고, 값이 없거나 서로 다른 후보가 충돌하면 내부 상태와 관계없이 결과표의 값 셀은 비어 있으며 `미확인`으로 표시됩니다. 파일명에 값이 없으면 로그 본문을 검사합니다.
+`결과`에는 `파일명`, `폴더`, `Sample`, `온도`, `Mode`, `Grid`, `단계별 결과`, `결과`, `판정 검토`, `근거`가 표시됩니다. 파일명에서 네 필드를 추출합니다. 값 하나는 `후보`로 검토하고, 값이 없거나 서로 다른 후보가 충돌하면 `미확인`으로 표시됩니다. 파일명에 값이 없으면 로그 본문을 검사합니다.
 
 1. 원문의 sample, temperature, mode marker와 후보를 대조합니다.
-2. 값이 일치할 때 후보를 눌러 `승인` 상태로 저장합니다.
-3. 파일명과 원문이 다르면 후보를 승인하지 않습니다. `Sample`/온도/`Mode`/`Grid` 셀을 클릭하고 값을 입력한 뒤 `저장`합니다. 입력 값은 메타데이터 승인 revision으로 저장됩니다.
-4. 필요한 필터를 적용합니다.
-5. Excel에 붙여넣을 때 `TSV 복사`, 파일로 전달할 때 `CSV`를 누릅니다.
+2. 후보를 누르면 검토 창이 열립니다. 값이 일치하면 `후보 승인`을 누릅니다.
+3. 값이 다르면 검토 창에서 수정하고 `수정 후 승인`을 누릅니다.
+4. 잘못 승인한 값은 다시 누른 뒤 `승인 취소`를 누릅니다. 원래 추출 후보로 되돌아가며 취소 이력도 revision으로 남습니다.
+5. 필요한 필터를 적용합니다.
+6. Excel에 붙여넣을 때 `TSV 복사`, 파일로 전달할 때 `CSV`를 누릅니다.
 
-`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `grid_value`, `grid_state`, `result`, `result_source`, `review`입니다. 화면의 열 이름은 각각 `Sample 값`, `Sample 상태`, `온도 값`, `온도 상태`, `Mode 값`, `Mode 상태`, `Grid 값`, `Grid 상태`, `결과`, `결과 출처`, `검토`입니다.
+`열 선택`의 기본 내보내기 열은 `source_id`, `artifact_id`, `source_key`, `relative_path`, `run`, `filename`, `folder`, `sample_value`, `sample_state`, `temperature_value`, `temperature_state`, `mode_value`, `mode_state`, `grid_value`, `grid_state`, `result`, `result_source`, `review`, `stage_results`입니다. `stage_results`에는 Power, PBL, XBL, ABL, UEFI, LK, LK2, Boot, Training, Diag, HDiag, Test, OS 단계에서 확인된 PASS, FAIL, 도달 상태가 함께 기록됩니다. 로그 전체는 화면이나 LLM에 전달하지 않고 로컬에서 한 번 순차 검사합니다.
 
 `열 선택`에서 `근거`를 선택하면 `evidence_count`와 `selected_evidence_count`가 추가됩니다. `Sample 상태`, `온도 상태`, `Mode 상태`, `Grid 상태`에는 각 값의 현재 상태가 기록되며, 값이 없으면 빈 값과 `missing` 또는 `malformed` 상태가 기록됩니다. 후보를 승인하면 해당 값과 상태가 내보내기에 반영됩니다.
 
@@ -104,7 +105,7 @@ PASS, DIAG_FAIL, SYSTEM_HALT, 조건 불일치와 같은 실제 작업은 [SoC �
 
 ## 결과 정리 확인
 
-`결과 정리`의 `N × M 패턴 그리드`에서 `로그 수`, `Fail 수`, `Evidence 수`를 선택합니다. `행축`과 보조 행축, `열축`과 보조 열축에 `Sample`, `온도`, `Mode`, `Grid`, `결과`, `검토`, `폴더`, `Run`을 선택합니다. `결과`, `폴더`, `FAIL만`, `미확인 metadata만` 필터를 적용합니다. `Fail`은 Diag fail·Test fail·Training fail의 합계이며 Reboot·Halt와 따로 셉니다. 현재 범위에 표본이 충분하고 차이가 뚜렷한 경우에만 이 결과들의 건수와 비율을 요약합니다. 결과 셀을 누르면 아래 `셀의 원본 로그`에 원본 목록이 표시되고 행을 누르면 `로그` 화면에서 원문이 열립니다.
+`결과 정리`의 `분석 표`에서 `로그 수`, `Fail 수`, `Evidence 수`를 선택합니다. `세로`와 `가로`에 `Sample`, `온도`, `Mode`, `Grid`, `결과`, `검토`, `폴더`, `Run`을 선택합니다. 표 위 `단계별 결과`에는 각 부팅·평가 단계의 PASS·FAIL 건수가 표시됩니다. 축 값이 모두 미확인이면 축 변경 또는 값 검토 안내가 표시됩니다. 후보만 있으면 미승인 후보 기반 미리보기로 표시됩니다. 결과 셀을 누르면 아래 원본 로그 목록이 필터링됩니다.
 
 ![결과 분포와 조건별 결과를 확인하는 패턴 화면](../images/manual-lw-06-patterns.png)
 

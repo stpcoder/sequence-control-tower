@@ -11,6 +11,7 @@ import type {
   ArtifactImportOptions,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
+  ArtifactStageScanInput,
   EvaluationApproveMetadataInput,
   EvaluationArchiveRecipeInput,
   EvaluationProjectRequest,
@@ -65,6 +66,8 @@ const api: SequenceIntelligenceApi = {
       ipcRenderer.invoke(IPC_CHANNELS.artifactSearch, input),
     inspectEvidence: (input: ArtifactEvidenceInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactInspectEvidence, input),
+    inspectStages: (input: ArtifactStageScanInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.artifactInspectStages, input),
     getLineWindow: (input: ArtifactLineWindowInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactLineWindow, input),
     findSimilar: (artifactId: string, limit?: number) =>

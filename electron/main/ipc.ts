@@ -75,6 +75,7 @@ interface Services {
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
 const activeArtifactSearches = new Map<number, AbortController>()
 const activeArtifactEvidenceInspections = new Map<number, AbortController>()
+const activeArtifactStageInspections = new Map<number, AbortController>()
 const activeArtifactFolderImports = new Map<string, symbol>()
 const agentOwners = new Map<string, number>()
 const agentRunsBySender = new Map<number, Set<string>>()
@@ -370,6 +371,17 @@ export function registerIpc(services: Services): void {
       }
     }
   })
+  handle(IPC_CHANNELS.artifactInspectStages, async (event, input) => {
+    const senderId = event.sender.id
+    activeArtifactStageInspections.get(senderId)?.abort()
+    const controller = new AbortController()
+    activeArtifactStageInspections.set(senderId, controller)
+    try {
+      return await services.artifacts.inspectStages(input as import('../shared/contracts').ArtifactStageScanInput, controller.signal)
+    } finally {
+      if (activeArtifactStageInspections.get(senderId) === controller) activeArtifactStageInspections.delete(senderId)
+    }
+  })
   handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
     services.artifacts.lineWindow(input as ArtifactLineWindowInput)
   )
@@ -563,6 +575,8 @@ export function unregisterIpc(): void {
   activeArtifactSearches.clear()
   activeArtifactEvidenceInspections.forEach((controller) => controller.abort())
   activeArtifactEvidenceInspections.clear()
+  activeArtifactStageInspections.forEach((controller) => controller.abort())
+  activeArtifactStageInspections.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
     if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.agentUpdate && channel !== IPC_CHANNELS.nativeAgentUpdate && channel !== IPC_CHANNELS.appCommand) {
       ipcMain.removeHandler(channel)

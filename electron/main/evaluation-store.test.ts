@@ -235,12 +235,24 @@ describe('EvaluationStore', () => {
       supersedesId: metadataV1.metadataApproval.id,
       approvedBy: 'engineer'
     })
+    const metadataReset = await store.approveMetadata({
+      projectId: PROJECT,
+      expectedRevision: 5,
+      source: source(),
+      fieldKey: 'temperature',
+      approval: 'reset'
+    })
+    expect(metadataReset.metadataApproval).toMatchObject({
+      revision: 3,
+      supersedesId: metadataV2.metadataApproval.id,
+      approval: 'reset'
+    })
 
     const restarted = await new EvaluationStore(root).snapshot(PROJECT)
-    expect(restarted).toMatchObject({ revision: 5 })
+    expect(restarted).toMatchObject({ revision: 6 })
     expect(restarted.recipes).toHaveLength(2)
     expect(restarted.batches[0].outcomes).toHaveLength(2)
-    expect(restarted.metadataApprovals).toHaveLength(2)
+    expect(restarted.metadataApprovals).toHaveLength(3)
   })
 
   it('archives the latest recipe as an immutable empty-rule revision and excludes it from active recipes', async () => {

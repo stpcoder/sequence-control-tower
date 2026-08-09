@@ -471,7 +471,8 @@
   color: #8ab4ff !important;
 }
 
-.candidate-value.approved small { color: #9aad72; }
+.candidate-value.approved { color: #dce8ff !important; }
+.candidate-value.approved small { color: #79a7ff; }
 .candidate-value.rejected { color: #e19a91; text-decoration: line-through; }
 
 .candidate-value small,
@@ -491,6 +492,14 @@
   display: block;
   margin-top: 2px;
 }
+
+.stage-results { display: flex; min-width: 150px; flex-wrap: wrap; gap: 3px 9px; }
+.stage-result { color: #aeb6c1; font-size: 11px; white-space: nowrap; }
+.stage-result b { margin-left: 3px; color: #ccd2da; font-size: 10px; font-weight: 680; }
+.stage-result.pass b { color: #9eb88a; }
+.stage-result.fail b { color: #ef888e; }
+.stage-result.reached b { color: #8fb7ff; }
+.stage-result.unknown { color: #7e8793; }
 
 .result-label,
 .review-label {
@@ -646,6 +655,27 @@
   font-weight: 650;
 }
 
+.stage-summary {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 7px 22px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--data-line-soft);
+  background: #111419;
+  white-space: nowrap;
+}
+.stage-summary > span { color: var(--data-dim); font-size: 11px; font-weight: 680; }
+.stage-summary > div { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11px; }
+.stage-summary b { color: #d8dde5; font-size: 12px; }
+.stage-summary em { color: #89929f; font-style: normal; }
+.stage-summary em.pass { color: #9eb88a; }
+.stage-summary em.fail { color: #ef888e; }
+.stage-summary em.reached { color: #8fb7ff; }
+.pivot-guidance { margin: 10px 0 0; color: #e2b674; font-size: 12px; }
+.pivot-guidance.is-preview { color: #8fb7ff; }
+
 .pattern-section {
   padding: 18px 22px 22px;
   border-bottom: 1px solid var(--data-line);
@@ -772,49 +802,6 @@
 }
 
 
-.metadata-inline-editor {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.metadata-inline-editor input {
-  min-width: 0;
-  width: 100%;
-  height: 32px;
-  padding: 0 8px;
-  border: 1px solid #4a5566;
-  border-radius: 8px;
-  color: #f2f4f8;
-  background: #11151b;
-  outline: 0;
-  font-size: 12px;
-}
-
-.metadata-inline-editor input:focus {
-  border-color: #75a7ff;
-  box-shadow: 0 0 0 3px rgba(117, 167, 255, .12);
-}
-
-.metadata-inline-editor button {
-  min-height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  color: #bcd3ff;
-  background: #202b3b;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.metadata-inline-editor button:last-child {
-  display: grid;
-  width: 30px;
-  padding: 0;
-  place-items: center;
-  color: var(--data-muted);
-  background: transparent;
-}
-
 .export-preview-modal {
   position: fixed;
   z-index: 30;
@@ -861,6 +848,28 @@
 .export-preview-dialog > footer button { min-height: 36px; padding: 0 13px; border-radius: 9px; color: var(--data-muted); background: #20252d; font-size: 12px; }
 .export-preview-dialog > footer button:last-child { color: #eaf2ff; background: #31547f; }
 .export-preview-dialog > footer button:hover { filter: brightness(1.12); }
+
+.metadata-review-dialog { width: min(480px, 100%); }
+.metadata-review-body { padding: 18px; }
+.metadata-review-body label { display: grid; gap: 7px; color: var(--data-dim); font-size: 11px; }
+.metadata-review-body input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #424a56;
+  border-radius: 6px;
+  color: #eef1f5;
+  background: #101318;
+  outline: 0;
+  font-size: 13px;
+}
+.metadata-review-body input:focus { border-color: #75a7ff; box-shadow: 0 0 0 2px rgba(117, 167, 255, .12); }
+.metadata-review-body p { margin: 9px 0 0; color: var(--data-dim); font-size: 11px; }
+.metadata-review-dialog > footer { justify-content: space-between; }
+.metadata-review-dialog > footer > div { display: flex; gap: 7px; }
+.metadata-review-dialog > footer button { display: inline-flex; align-items: center; gap: 6px; }
+.metadata-review-dialog > footer button.is-primary { color: #f1f6ff; background: #31547f; }
+.metadata-review-dialog > footer button.metadata-reset { color: #d7b0ad; background: transparent; }
 
 .distribution-list {
   display: grid;

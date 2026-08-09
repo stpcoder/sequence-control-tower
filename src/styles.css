@@ -95,7 +95,7 @@ button:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #303832;
+  background: #333842;
   border: 3px solid transparent;
   border-radius: 10px;
   background-clip: padding-box;
@@ -926,18 +926,18 @@ button:disabled {
   gap: 8px;
   max-width: 520px;
   padding: 10px 11px;
-  border: 1px solid #4b594e;
+  border: 1px solid #414854;
   border-radius: 8px;
-  color: #dce3dd;
-  font-size: 10.5px;
-  background: #1a211c;
+  color: #e2e6ec;
+  font-size: 12px;
+  background: #1b2028;
   box-shadow: 0 14px 40px rgba(0,0,0,.35);
   transform: translateX(-50%);
   animation: toast-in 220ms ease both;
 }
 
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
-.toast svg { color: var(--lime); }
+.toast svg { color: var(--blue); }
 .toast.info { border-color: #3f526f; background: #171e28; }
 .toast.info svg { color: var(--blue); }
 .toast.error { border-color: #6b4039; background: #241714; }

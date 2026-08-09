@@ -519,8 +519,8 @@ describe("Luna engineer workflow pipeline", () => {
       expect(exportColumnCounts(tsv, "\t")).toHaveLength(49);
       expect(exportColumnCounts(csv, ",").every((columns) => columns === DEFAULT_EXPORT_COLUMNS.length)).toBe(true);
       expect(exportColumnCounts(tsv, "\t").every((columns) => columns === DEFAULT_EXPORT_COLUMNS.length)).toBe(true);
-      expect(exportColumnCounts(evidenceCsv, ",").every((columns) => columns === 20)).toBe(true);
-      expect(exportColumnCounts(evidenceTsv, "\t").every((columns) => columns === 20)).toBe(true);
+      expect(exportColumnCounts(evidenceCsv, ",").every((columns) => columns === evidenceExportColumns.length)).toBe(true);
+      expect(exportColumnCounts(evidenceTsv, "\t").every((columns) => columns === evidenceExportColumns.length)).toBe(true);
       expect(csv).not.toContain(root);
       expect(tsv).not.toContain(root);
       expect(csv).not.toContain("EXPECTED_RESULT=");

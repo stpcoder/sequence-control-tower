@@ -193,6 +193,22 @@ export interface ArtifactEvidenceResult {
   sources: ArtifactEvidenceSourceResult[]
 }
 
+export type ArtifactEvaluationStage = 'power' | 'pbl' | 'xbl' | 'abl' | 'uefi' | 'lk' | 'lk2' | 'boot' | 'training' | 'diag' | 'hdiag' | 'test' | 'os'
+export type ArtifactEvaluationStageStatus = 'pass' | 'fail' | 'reached'
+export interface ArtifactStageResult {
+  stage: ArtifactEvaluationStage
+  status: ArtifactEvaluationStageStatus
+  evidenceCount: number
+}
+export interface ArtifactStageScanInput { sources: ArtifactEvidenceSource[] }
+export interface ArtifactStageScanSourceResult {
+  sourceId: string
+  artifactId: string
+  stages: ArtifactStageResult[]
+  error?: string
+}
+export interface ArtifactStageScanResult { sources: ArtifactStageScanSourceResult[] }
+
 export interface ArtifactLineWindowInput {
   artifactId: string
   /** One-based first line. */
@@ -514,7 +530,8 @@ export interface EvaluationMetadataApprovalRevision {
   candidateValue?: string
   approvedValue?: string
   extractorId?: string
-  approval: 'approved' | 'rejected'
+  /** `reset` is an auditable undo that restores the extractor candidate. */
+  approval: 'approved' | 'rejected' | 'reset'
   approvedBy: 'engineer'
   createdAt: string
   supersedesId?: string
@@ -582,7 +599,7 @@ export interface EvaluationApproveMetadataInput extends EvaluationProjectRequest
   candidateValue?: string
   approvedValue?: string
   extractorId?: string
-  approval: 'approved' | 'rejected'
+  approval: 'approved' | 'rejected' | 'reset'
 }
 
 export interface EvaluationDecisionSaveResult {
@@ -786,6 +803,7 @@ export interface ProjectFailureHypothesis {
 }
 export interface ProjectEvaluationNode {
   id: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string
+  purpose?: 'screening' | 'improvement' | 'reproduction' | 'characterization' | 'verification'
   dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
   sequenceSignature?: string; attemptNo?: number; retestOf?: string
 }
@@ -948,7 +966,7 @@ export interface EvaluationAgentDimensions { sku?: string; lot?: string; materia
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
-export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[] }
+export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[] }
 export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string }
 export interface EvaluationAgentSessionView {
   schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number
@@ -959,7 +977,7 @@ export interface EvaluationAgentSessionView {
 export interface EvaluationAgentMemoryPayloadRequest { sessionId: string; projectId: string; hypothesisId: string; nodeId: string; evidenceIdPrefix: string }
 export interface EvaluationAgentMemoryPayloadView {
   hypothesis: { id: string; projectId: string; title: string; description?: string; origin: 'ai-proposed' | 'engineer-confirmed'; evaluationNodeIds?: string[] }
-  node: { id: string; projectId: string; hypothesisId?: string; name: string; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running' }
+  node: { id: string; projectId: string; hypothesisId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running' }
   evidence: Array<{ id: string; projectId: string; evaluationNodeId: string; status: 'pass' | 'fail' | 'inconclusive' | 'running'; result?: string; dimensions?: Partial<EvaluationAgentDimensions>; sourceIds: string[]; summary?: string; origin?: 'ai-proposed' | 'engineer-confirmed' }>
 }
 
@@ -976,6 +994,7 @@ export interface SequenceIntelligenceApi {
     getTextPreview(artifactId: string, maxChars?: number): Promise<ArtifactTextPreview>
     search(input: ArtifactSearchInput): Promise<ArtifactSearchResult>
     inspectEvidence(input: ArtifactEvidenceInput): Promise<ArtifactEvidenceResult>
+    inspectStages(input: ArtifactStageScanInput): Promise<ArtifactStageScanResult>
     getLineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow>
     findSimilar(artifactId: string, limit?: number): Promise<SimilarArtifact[]>
   }
@@ -1033,6 +1052,7 @@ export const IPC_CHANNELS = {
   artifactPreview: 'artifact:preview',
   artifactSearch: 'artifact:search',
   artifactInspectEvidence: 'artifact:inspect-evidence',
+  artifactInspectStages: 'artifact:inspect-stages',
   artifactLineWindow: 'artifact:line-window',
   artifactSimilar: 'artifact:similar',
   analysisStart: 'analysis:start',

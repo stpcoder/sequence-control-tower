@@ -40,6 +40,8 @@ import type {
   ArtifactSearchInput,
   ArtifactSearchMatch,
   ArtifactSearchResult,
+  ArtifactStageScanInput,
+  ArtifactStageScanResult,
   ArtifactSourceLocation,
   ArtifactTextPreview,
   SimilarArtifact,
@@ -89,6 +91,42 @@ const UNSAFE_REGEX_ERROR = '반복이 중첩된 정규식은 성능 보호를 �
 const SYMLINK_ROOT_ERROR = '심볼릭 링크 폴더는 가져올 수 없습니다.'
 const NOT_DIRECTORY_ERROR = '폴더만 가져올 수 있습니다.'
 const ROOT_CHANGED_ERROR = '가져오는 동안 선택한 폴더가 변경되었습니다.'
+
+const STAGE_EVIDENCE_SPECS = [
+  { id: 'power:reached', query: '\\b(?:(?:SYN_)?POWER[_ ]?ON|PWR[_ ]?ON)\\b' },
+  { id: 'pbl:reached', query: '(?:\\b(?:SYN_)?PBL[_ ]?(?:ENTER|START)\\b|\\bPBL\\s*:)' },
+  { id: 'pbl:pass', query: '\\b(?:SYN_)?PBL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b' },
+  { id: 'pbl:fail', query: '\\b(?:SYN_)?PBL[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'xbl:reached', query: '(?:\\b(?:SYN_)?XBL[_ ]?(?:ENTER|START)\\b|\\bXBL\\s*:)' },
+  { id: 'xbl:pass', query: '\\b(?:SYN_)?XBL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b' },
+  { id: 'xbl:fail', query: '\\b(?:SYN_)?XBL[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'abl:reached', query: '(?:\\b(?:SYN_)?ABL[_ ]?(?:ENTER|START)\\b|\\bABL\\s*:)' },
+  { id: 'abl:pass', query: '\\b(?:SYN_)?ABL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b' },
+  { id: 'abl:fail', query: '\\b(?:SYN_)?ABL[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'uefi:reached', query: '(?:\\b(?:SYN_)?UEFI[_ ]?(?:ENTER|START)\\b|\\bUEFI\\s*:)' },
+  { id: 'uefi:pass', query: '(?:\\b(?:SYN_)?UEFI[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b|\\bUEFI[^\\n]*ExitBootServices\\b)' },
+  { id: 'uefi:fail', query: '\\b(?:SYN_)?UEFI[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'lk:reached', query: '(?:\\b(?:SYN_)?LK[_ ]?(?:ENTER|START)\\b|\\bLK\\s*:)' },
+  { id: 'lk:pass', query: '\\b(?:SYN_)?LK[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b' },
+  { id: 'lk:fail', query: '\\b(?:SYN_)?LK[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'lk2:reached', query: '(?:\\b(?:SYN_)?LK2[_ ]?(?:ENTER|START)\\b|\\bLK2\\s*:)' },
+  { id: 'lk2:pass', query: '\\b(?:SYN_)?LK2[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\\b' },
+  { id: 'lk2:fail', query: '\\b(?:SYN_)?LK2[_ ]?(?:FAIL|ERROR|TIMEOUT)\\b' },
+  { id: 'boot:pass', query: '\\b(?:BOOT[_ ]?PASS|BOOT\\s+(?:COMPLETE|SUCCESS))\\b' },
+  { id: 'boot:fail', query: '\\b(?:BOOT[_ ]?FAIL|BOOT\\s+(?:ERROR|TIMEOUT))\\b' },
+  { id: 'training:reached', query: '\\bTRAINING[^\\n]*(?:START|BEGIN)\\b' },
+  { id: 'training:pass', query: '\\b(?:TRAINING[_ ]?PASS|TRAINING\\s+(?:COMPLETE|SUCCESS))\\b' },
+  { id: 'training:fail', query: '\\b(?:TRAINING[_ ]?FAIL|TRAINING\\s+[^\\n]*(?:ERROR|TIMEOUT))\\b' },
+  { id: 'hdiag:reached', query: '\\b(?:HIDAG|HDIAG)[^\\n]*(?:START|BEGIN)\\b' },
+  { id: 'hdiag:pass', query: '\\b(?:HIDAG|HDIAG)[^\\n]*(?:@?PASS|SUCCESS)\\b' },
+  { id: 'hdiag:fail', query: '\\b(?:HIDAG|HDIAG)[^\\n]*(?:@?FAIL|ERROR)\\b' },
+  { id: 'diag:reached', query: '\\bDIAG(?:NOSTIC)?[^\\n]*(?:START|BEGIN)\\b' },
+  { id: 'diag:pass', query: '\\bDIAG(?:NOSTIC)?[^\\n]*(?:@?PASS|SUCCESS)\\b' },
+  { id: 'diag:fail', query: '\\bDIAG(?:NOSTIC)?[^\\n]*(?:@?FAIL|ERROR)\\b' },
+  { id: 'test:pass', query: '(?:\\bTEST[_ ]?PASS\\b|\\bSTRESSAPP[^\\n]*(?:@?PASS|SUCCESS)\\b|\\bTERMINAL_RESULT=PASS\\b|@PASS\\b)' },
+  { id: 'test:fail', query: '(?:\\bTEST[_ ]?FAIL\\b|\\bSTRESSAPP[^\\n]*(?:@?FAIL|ERROR)\\b|@FAIL\\b)' },
+  { id: 'os:reached', query: '(?:\\b(?:SYN_)?OS[_ ]?(?:READY|BOOTED|BOOT_START)\\b|Linux\\s+boot\\s+complete|Linux\\s+complete|\\bExitBootServices\\b)' },
+] as const
 
 interface ImportCandidate {
   filePath: string
@@ -955,6 +993,41 @@ export class ArtifactService {
     }
 
     return { sources: results }
+  }
+
+  /**
+   * Reads each unique artifact once and returns only explicit evaluation-stage
+   * markers. Raw log text stays in the main process and FAIL takes precedence
+   * when the same stage contains both PASS and FAIL markers.
+   */
+  async inspectStages(input: ArtifactStageScanInput, signal?: AbortSignal): Promise<ArtifactStageScanResult> {
+    const inspected = await this.inspectEvidence({
+      sources: input?.sources ?? [],
+      specs: STAGE_EVIDENCE_SPECS.map((spec) => ({ ...spec, mode: 'regex' as const, caseSensitive: false })),
+    }, signal)
+    return {
+      sources: inspected.sources.map((source) => {
+        const stages = new Map<ArtifactStageScanResult['sources'][number]['stages'][number]['stage'], ArtifactStageScanResult['sources'][number]['stages'][number]>()
+        for (const evidence of source.evidence) {
+          const count = evidence.occurrenceCount ?? 0
+          if (count < 1 || evidence.error) continue
+          const [stage, status] = evidence.specId.split(':') as [
+            ArtifactStageScanResult['sources'][number]['stages'][number]['stage'],
+            ArtifactStageScanResult['sources'][number]['stages'][number]['status'],
+          ]
+          const previous = stages.get(stage)
+          if (!previous || status === 'fail' || previous.status !== 'fail') {
+            stages.set(stage, { stage, status, evidenceCount: count })
+          }
+        }
+        return {
+          sourceId: source.sourceId,
+          artifactId: source.artifactId,
+          stages: [...stages.values()],
+          ...(source.error ? { error: source.error } : {}),
+        }
+      }),
+    }
   }
 
   async lineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow> {
