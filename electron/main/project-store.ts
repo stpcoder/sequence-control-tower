@@ -157,7 +157,7 @@ export class ProjectStore {
 
   async connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot> {
     return this.mutate(input.projectId, input.expectedRevision, (p) => {
-      const validRoots = new Set(p.folders.map((folder) => folder.rootId)); const next = input.artifacts.map((a): ProjectArtifactSourceRef => ({ sourceId: id(a.sourceId, 'sourceId'), rootId: id(a.rootId, 'rootId'), artifactId: id(a.artifactId, 'artifactId'), relativePath: text(a.relativePath, 'relativePath', 2_000) }))
+      const validRoots = new Set(p.folders.map((folder) => folder.rootId)); const next = input.artifacts.map((a): ProjectArtifactSourceRef => ({ sourceId: id(a.sourceId, 'sourceId'), rootId: id(a.rootId, 'rootId'), ...(a.artifactRootId ? { artifactRootId: id(a.artifactRootId, 'artifactRootId') } : {}), artifactId: id(a.artifactId, 'artifactId'), relativePath: text(a.relativePath, 'relativePath', 2_000) }))
       if (next.some((a) => !validRoots.has(a.rootId) || a.relativePath.startsWith('/') || a.relativePath.includes('..'))) throw new Error('연결할 artifact source가 프로젝트 폴더에 속하지 않습니다.')
       p.artifacts = [...p.artifacts.filter((a) => !next.some((n) => n.sourceId === a.sourceId)), ...next]
     })
@@ -214,7 +214,7 @@ export class ProjectStore {
   private dimensions(value: unknown): ProjectEvaluationDimensions {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('평가 조건이 올바르지 않습니다.')
     const v = value as Record<string, unknown>
-    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), sample: optionalText(v.sample, 'sample', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
+    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), material: optionalText(v.material, 'material', 120), sample: optionalText(v.sample, 'sample', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
   }
   private memory(hypothesesValue: unknown, nodesValue: unknown, evidenceValue: unknown, artifacts: ProjectArtifactSourceRef[]): { hypotheses: ProjectFailureHypothesis[]; nodes: ProjectEvaluationNode[]; evidence: ProjectEvidenceRecord[] } {
     if (!Array.isArray(hypothesesValue) || !Array.isArray(nodesValue) || !Array.isArray(evidenceValue) || hypothesesValue.length > 200 || nodesValue.length > 1_000 || evidenceValue.length > 5_000) throw new Error('평가 메모리 크기가 올바르지 않습니다.')

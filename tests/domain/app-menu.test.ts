@@ -34,16 +34,19 @@ describe('macOS application menu', () => {
     const findMenu = submenu(template[2]).find((item) => item.label === 'Find')!
     const find = submenu(findMenu).find((item) => item.accelerator === 'CmdOrCtrl+F')
     const findWorkspace = submenu(findMenu).find((item) => item.accelerator === 'CmdOrCtrl+Shift+F')
+    const agent = submenu(template[3]).find((item) => item.accelerator === 'CmdOrCtrl+J')
 
     expect(settings).toBeDefined()
     expect(open).toBeDefined()
     expect(find).toBeDefined()
     expect(findWorkspace).toBeDefined()
+    expect(agent).toBeDefined()
     invoke(settings!)
     invoke(open!)
     invoke(find!)
     invoke(findWorkspace!)
-    expect(commands).toEqual(['preferences', 'open-logs', 'find', 'find-workspace'])
+    invoke(agent!)
+    expect(commands).toEqual(['preferences', 'open-logs', 'find', 'find-workspace', 'toggle-agent'])
 
     expect(submenu(template[0]).map((item) => item.role).filter(Boolean)).toEqual(
       expect.arrayContaining(['about', 'services', 'hide', 'hideOthers', 'unhide', 'quit'])
@@ -78,10 +81,11 @@ describe('Windows desktop shortcuts', () => {
       ...options
     })
 
-  it('routes Ctrl+O/F/Shift+F/comma without depending on a hidden native menu', () => {
+  it('routes Ctrl+O/F/Shift+F/J/comma without depending on a hidden native menu', () => {
     expect(key('o')).toBe('open-logs')
     expect(key('F')).toBe('find')
     expect(key('f', { shift: true })).toBe('find-workspace')
+    expect(key('j')).toBe('toggle-agent')
     expect(key(',')).toBe('preferences')
   })
 

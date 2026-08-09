@@ -741,7 +741,7 @@ export interface ConversationMessage {
 export type ProjectFolderStatus = 'available' | 'missing' | 'permission-denied'
 /** Renderer-safe project folder identity. The canonical path is main-process only. */
 export interface ProjectFolderRef { rootId: string; displayLabel: string; status: ProjectFolderStatus; connectedAt: string }
-export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactId: string; relativePath: string }
+export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactRootId?: string; artifactId: string; relativePath: string }
 export interface ProjectEquipmentProfile { alias: string; profileId: string; updatedAt: string }
 export interface ProjectTemplatePin { templateId: string; revision: number; pinnedAt: string }
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
@@ -763,7 +763,7 @@ export interface ProjectLpddrDevelopmentContext {
   densityGb?: number; nominalVoltage?: number
 }
 export interface ProjectEvaluationDimensions {
-  sku?: string; lot?: string; sample?: string; bl?: string | number; dq?: string | number
+  sku?: string; lot?: string; material?: string; sample?: string; bl?: string | number; dq?: string | number
   channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number
   frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string
 }
@@ -794,7 +794,7 @@ export interface ProjectSaveInput extends ProjectRequest { expectedRevision: num
 export interface ProjectArchiveInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectFolderInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectDetachFolderInput extends ProjectFolderInput { rootId: string }
-export interface ProjectConnectArtifactsInput extends ProjectFolderInput { artifacts: Array<{ sourceId: string; rootId: string; artifactId: string; relativePath: string }> }
+export interface ProjectConnectArtifactsInput extends ProjectFolderInput { artifacts: Array<{ sourceId: string; rootId: string; artifactRootId?: string; artifactId: string; relativePath: string }> }
 export interface ProjectValidateFoldersInput extends ProjectRequest { rootIds?: string[] }
 export interface ProjectSaveExportPresetInput extends ProjectRequest { expectedRevision: number; preset: Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } }
 export interface ProjectArchiveExportPresetInput extends ProjectRequest { expectedRevision: number; presetId: string }
@@ -812,15 +812,63 @@ export interface SequenceIntelligenceProjectsApi {
   connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot>
   saveExportPreset(input: ProjectSaveExportPresetInput): Promise<ProjectSnapshot>
   archiveExportPreset(input: ProjectArchiveExportPresetInput): Promise<ProjectSnapshot>
+  createSample(): Promise<ProjectLoadResult>
 }
 
-export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences'
+/** Persistent, renderer-safe native agent workspace. Raw paths, secrets and
+ * unbounded log excerpts are deliberately excluded from these contracts. */
+export type NativeAgentBackend = 'opencode' | 'internal'
+export type NativeAgentSessionStatus = 'idle' | 'queued' | 'running' | 'paused' | 'failed'
+export type NativeAgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
+export interface NativeAgentToolTraceView {
+  id: string; name: string; label: string; state: 'running' | 'completed' | 'failed'
+  startedAt: string; completedAt?: string; summary?: string; evidenceSourceIds?: string[]
+}
+export interface NativeAgentMessageView {
+  id: string; role: NativeAgentMessageRole; content: string; createdAt: string
+  toolTraceId?: string; evidenceSourceIds?: string[]
+}
+export interface NativeAgentSessionSummary {
+  id: string; projectId: string; title: string; backend: NativeAgentBackend
+  status: NativeAgentSessionStatus; createdAt: string; updatedAt: string
+  lastMessage?: string; failure?: string
+}
+export interface NativeAgentSessionView extends NativeAgentSessionSummary {
+  messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]
+}
+export interface NativeAgentBackendStatusView {
+  preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
+  detail: string
+}
+export interface NativeAgentCreateRequest { projectId: string; title?: string }
+export interface NativeAgentListRequest { projectId: string }
+export interface NativeAgentGetRequest { sessionId: string }
+export interface NativeAgentSendRequest { sessionId: string; content: string; sourceIds?: string[] }
+export interface NativeAgentRetryRequest { sessionId: string }
+export interface NativeAgentCancelRequest { sessionId: string }
+export interface NativeAgentSearchEventInput {
+  projectId: string; sourceIds: string[]; query: string; mode: ArtifactSearchMode
+  caseSensitive: boolean; scope: 'current' | 'open' | 'project'; matchCount: number
+}
+export interface NativeAgentWorkspaceApi {
+  backendStatus(): Promise<NativeAgentBackendStatusView>
+  create(input: NativeAgentCreateRequest): Promise<NativeAgentSessionView>
+  list(input: NativeAgentListRequest): Promise<NativeAgentSessionSummary[]>
+  get(input: NativeAgentGetRequest): Promise<NativeAgentSessionView | null>
+  send(input: NativeAgentSendRequest): Promise<NativeAgentSessionView>
+  retry(input: NativeAgentRetryRequest): Promise<NativeAgentSessionView>
+  cancel(input: NativeAgentCancelRequest): Promise<NativeAgentSessionView>
+  recordSearch(input: NativeAgentSearchEventInput): Promise<void>
+  onUpdate(listener: (session: NativeAgentSessionView) => void): () => void
+}
+
+export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences' | 'toggle-agent'
 
 /** Renderer-safe, bounded projection of the native evaluation-agent session. */
 export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
 export type EvaluationAgentPublicOutcome = 'PASS' | 'FAIL' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
-export interface EvaluationAgentDimensions { sample?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
+export interface EvaluationAgentDimensions { sku?: string; lot?: string; material?: string; sample?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
@@ -876,6 +924,7 @@ export interface SequenceIntelligenceApi {
     resume(input: EvaluationAgentResumeRequest): Promise<EvaluationAgentSessionView>
     memorySavePayload(input: EvaluationAgentMemoryPayloadRequest): Promise<EvaluationAgentMemoryPayloadView | null>
   }
+  nativeAgent: NativeAgentWorkspaceApi
   settings: {
     getLlm(): Promise<LlmConfigSummary>
     saveLlm(input: LlmConfigInput): Promise<LlmConfigSummary>
@@ -936,5 +985,9 @@ export const IPC_CHANNELS = {
   projectArchive: 'project:archive', projectLoad: 'project:load', projectAttachFolder: 'project:attach-folder',
   projectDetachFolder: 'project:detach-folder', projectValidateFolders: 'project:validate-folders',
   projectConnectArtifacts: 'project:connect-artifacts', projectSaveExportPreset: 'project:save-export-preset',
-  projectArchiveExportPreset: 'project:archive-export-preset'
+  projectArchiveExportPreset: 'project:archive-export-preset', projectCreateSample: 'project:create-sample',
+  nativeAgentBackendStatus: 'native-agent:backend-status', nativeAgentCreate: 'native-agent:create',
+  nativeAgentList: 'native-agent:list', nativeAgentGet: 'native-agent:get', nativeAgentSend: 'native-agent:send',
+  nativeAgentRetry: 'native-agent:retry', nativeAgentCancel: 'native-agent:cancel', nativeAgentRecordSearch: 'native-agent:record-search',
+  nativeAgentUpdate: 'native-agent:update'
 } as const

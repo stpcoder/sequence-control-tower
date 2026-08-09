@@ -23,6 +23,14 @@ import type {
   EvaluationAgentMemoryPayloadRequest,
   LlmConfigInput,
   LlmModelDiscoveryInput,
+  NativeAgentCancelRequest,
+  NativeAgentCreateRequest,
+  NativeAgentGetRequest,
+  NativeAgentListRequest,
+  NativeAgentRetryRequest,
+  NativeAgentSearchEventInput,
+  NativeAgentSendRequest,
+  NativeAgentSessionView,
   RendererCommand,
   SequenceIntelligenceApi,
   StartAnalysisInput,
@@ -87,6 +95,21 @@ const api: SequenceIntelligenceApi = {
     resume: (input: EvaluationAgentResumeRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentResume, input),
     memorySavePayload: (input: EvaluationAgentMemoryPayloadRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentMemorySavePayload, input)
   },
+  nativeAgent: {
+    backendStatus: () => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentBackendStatus),
+    create: (input: NativeAgentCreateRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentCreate, input),
+    list: (input: NativeAgentListRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentList, input),
+    get: (input: NativeAgentGetRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentGet, input),
+    send: (input: NativeAgentSendRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentSend, input),
+    retry: (input: NativeAgentRetryRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentRetry, input),
+    cancel: (input: NativeAgentCancelRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentCancel, input),
+    recordSearch: (input: NativeAgentSearchEventInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentRecordSearch, input),
+    onUpdate: (listener: (session: NativeAgentSessionView) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, session: NativeAgentSessionView): void => listener(session)
+      ipcRenderer.on(IPC_CHANNELS.nativeAgentUpdate, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.nativeAgentUpdate, handler)
+    }
+  },
   settings: {
     getLlm: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGetLlm),
     saveLlm: (input: LlmConfigInput) => ipcRenderer.invoke(IPC_CHANNELS.settingsSaveLlm, input),
@@ -120,7 +143,8 @@ const api: SequenceIntelligenceApi = {
     validateFolders: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectValidateFolders, input),
     connectArtifacts: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectConnectArtifacts, input),
     saveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSaveExportPreset, input),
-    archiveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchiveExportPreset, input)
+    archiveExportPreset: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectArchiveExportPreset, input),
+    createSample: () => ipcRenderer.invoke(IPC_CHANNELS.projectCreateSample)
   }
 }
 

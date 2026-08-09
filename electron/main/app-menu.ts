@@ -22,6 +22,7 @@ export function rendererCommandForDesktopShortcut(input: DesktopShortcutInput): 
   const key = input.key.toLocaleLowerCase()
   if (key === 'o' && !input.shift) return 'open-logs'
   if (key === 'f') return input.shift ? 'find-workspace' : 'find'
+  if (key === 'j' && !input.shift) return 'toggle-agent'
   if (key === ',' && !input.shift) return 'preferences'
   return null
 }
@@ -86,6 +87,8 @@ export function buildMacMenuTemplate({
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
+        { type: 'separator' },
+        { label: 'Toggle Agent', accelerator: 'CmdOrCtrl+J', click: command('toggle-agent') },
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]

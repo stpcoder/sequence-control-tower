@@ -29,12 +29,19 @@ import type {
   EvaluationAgentSessionView,
   LlmConfigInput,
   LlmModelDiscoveryInput,
+  NativeAgentCancelRequest,
+  NativeAgentCreateRequest,
+  NativeAgentGetRequest,
+  NativeAgentListRequest,
+  NativeAgentRetryRequest,
+  NativeAgentSearchEventInput,
+  NativeAgentSendRequest,
   StartAnalysisInput,
   WikiEntryInput
 } from '../shared/contracts'
 import { IPC_CHANNELS } from '../shared/contracts'
 import { AnalysisService } from './analysis-service'
-import { ArtifactService } from './artifact-service'
+import { ArtifactService, artifactRootIdForPath } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
 import { LlmConfigService } from './llm-service'
 import { isSameRendererDocument } from './renderer-document'
@@ -42,6 +49,8 @@ import { WikiService } from './wiki-service'
 import { ProjectStore } from './project-store'
 import { AgentService } from './agent-service'
 import { EvaluationAgentService } from './evaluation-agent-service'
+import { NativeAgentService } from './native-agent-service'
+import { SampleProjectService } from './sample-project-service'
 import { createHash } from 'node:crypto'
 import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
 import type { WebContents } from 'electron'
@@ -55,6 +64,8 @@ interface Services {
   projects: ProjectStore
   agent: AgentService
   evaluationAgent?: EvaluationAgentService
+  nativeAgent?: NativeAgentService
+  samples?: SampleProjectService
 }
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -71,6 +82,7 @@ const evaluationAgentSenders = new Map<number, WebContents>()
 const evaluationAgentSenderCleanup = new Map<number, () => void>()
 let agentUpdateUnsubscribe: (() => void) | null = null
 let registeredAgent: AgentService | null = null
+let nativeAgentUpdateUnsubscribe: (() => void) | null = null
 const FOLDER_IMPORT_IN_PROGRESS_ERROR =
   '폴더 가져오기가 이미 진행 중입니다. 현재 작업이 끝난 후 다시 시도해 주세요.'
 
@@ -138,6 +150,12 @@ export function registerIpc(services: Services): void {
     if (!sender || sender.isDestroyed()) return
     sender.send(IPC_CHANNELS.agentUpdate, run)
   })
+  nativeAgentUpdateUnsubscribe?.()
+  nativeAgentUpdateUnsubscribe = services.nativeAgent?.onUpdate((session) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.nativeAgentUpdate, session)
+    })
+  }) ?? null
 
   const removeAgentOwner = (runId: string): void => {
     const senderId = agentOwners.get(runId)
@@ -216,13 +234,16 @@ export function registerIpc(services: Services): void {
     if (!refreshed) return null
     const available = await services.projects.availableFolderPaths(project.id)
     const imported = available.length ? await services.artifacts.importFolders(available.map((item) => item.path), { maxFiles: 10000 }) : { artifacts: [], failures: [], skippedCount: 0 }
-    const rootIds = new Set(available.map((item) => item.rootId))
-    const sources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).filter((source) => rootIds.has(source.rootId)).map((source) => ({
-      sourceId: createHash('sha256').update(`${refreshed.id}\0${source.rootId}\0${source.relativePath}`).digest('hex').slice(0, 40),
-      rootId: source.rootId,
+    const rootsByArtifactId = new Map(available.map((item) => [artifactRootIdForPath(item.path), item]))
+    const sources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).flatMap((source) => {
+      const projectRoot = rootsByArtifactId.get(source.rootId)
+      return projectRoot ? [{
+      sourceId: createHash('sha256').update(`${refreshed.id}\0${projectRoot.rootId}\0${source.relativePath}`).digest('hex').slice(0, 40),
+      rootId: projectRoot.rootId,
+      artifactRootId: source.rootId,
       artifactId: artifact.id,
       relativePath: source.relativePath,
-    })))
+    }] : [] }))
     const connected = sources.length ? await services.projects.connectArtifacts({ projectId: refreshed.id, expectedRevision: refreshed.revision, artifacts: sources }) : refreshed
     return { project: { ...connected, folders: connected.folders.map((folder) => statuses.find((item) => item.rootId === folder.rootId) ?? folder) }, artifacts: imported.artifacts, failures: imported.failures, skippedCount: imported.skippedCount }
   }
@@ -261,6 +282,10 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.projectConnectArtifacts, (_event, input) => services.projects.connectArtifacts(input as never))
   handle(IPC_CHANNELS.projectSaveExportPreset, (_event, input) => services.projects.saveExportPreset(input as never))
   handle(IPC_CHANNELS.projectArchiveExportPreset, (_event, input) => services.projects.archiveExportPreset(input as never))
+  handle(IPC_CHANNELS.projectCreateSample, () => {
+    if (!services.samples) throw new Error('샘플 프로젝트 서비스를 사용할 수 없습니다.')
+    return services.samples.create()
+  })
 
   handle(IPC_CHANNELS.artifactImportFiles, async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
@@ -436,6 +461,41 @@ export function registerIpc(services: Services): void {
     return payload ? evaluationMemoryView(payload) : null
   })
 
+  handle(IPC_CHANNELS.nativeAgentBackendStatus, () => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.backendStatus()
+  })
+  handle(IPC_CHANNELS.nativeAgentCreate, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    const value = input as NativeAgentCreateRequest
+    return services.nativeAgent.create(value.projectId, value.title)
+  })
+  handle(IPC_CHANNELS.nativeAgentList, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.list((input as NativeAgentListRequest).projectId)
+  })
+  handle(IPC_CHANNELS.nativeAgentGet, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.get((input as NativeAgentGetRequest).sessionId)
+  })
+  handle(IPC_CHANNELS.nativeAgentSend, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    const value = input as NativeAgentSendRequest
+    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds)
+  })
+  handle(IPC_CHANNELS.nativeAgentRetry, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.retry((input as NativeAgentRetryRequest).sessionId)
+  })
+  handle(IPC_CHANNELS.nativeAgentCancel, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.cancel((input as NativeAgentCancelRequest).sessionId)
+  })
+  handle(IPC_CHANNELS.nativeAgentRecordSearch, (_event, input) => {
+    if (!services.nativeAgent) return
+    return services.nativeAgent.recordSearch(input as NativeAgentSearchEventInput)
+  })
+
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())
   handle(IPC_CHANNELS.settingsSaveLlm, (_event, input) =>
     services.llmConfig.save(input as LlmConfigInput)
@@ -468,6 +528,8 @@ export function unregisterIpc(): void {
   agentUpdateUnsubscribe = null
   registeredAgent?.cancelAll()
   registeredAgent = null
+  nativeAgentUpdateUnsubscribe?.()
+  nativeAgentUpdateUnsubscribe = null
   agentSenderCleanup.forEach((cleanup, senderId) => {
     agentSenders.get(senderId)?.removeListener('destroyed', cleanup)
   })
@@ -482,7 +544,7 @@ export function unregisterIpc(): void {
   activeArtifactEvidenceInspections.forEach((controller) => controller.abort())
   activeArtifactEvidenceInspections.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
-    if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.agentUpdate && channel !== IPC_CHANNELS.appCommand) {
+    if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.agentUpdate && channel !== IPC_CHANNELS.nativeAgentUpdate && channel !== IPC_CHANNELS.appCommand) {
       ipcMain.removeHandler(channel)
     }
   })

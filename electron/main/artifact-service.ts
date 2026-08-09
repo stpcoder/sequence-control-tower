@@ -195,7 +195,7 @@ function isWithinPath(parent: CanonicalRoot, child: CanonicalRoot): boolean {
   return isPathWithin(parent.path, child.path)
 }
 
-function opaqueRootId(rootPath: string): string {
+export function artifactRootIdForPath(rootPath: string): string {
   const normalized = process.platform === 'win32' ? resolve(rootPath).toLocaleLowerCase() : resolve(rootPath)
   return createHash('sha256').update('sequence-control-tower-root\0').update(normalized).digest('hex').slice(0, 24)
 }
@@ -213,7 +213,7 @@ function sourceForFolder(folderPath: string, filePath: string): ArtifactSourceLo
     throw new Error('선택한 폴더 밖의 파일은 가져올 수 없습니다.')
   }
   return {
-    rootId: opaqueRootId(root),
+    rootId: artifactRootIdForPath(root),
     folderLabel: safeSourcePart(basename(root), '선택한 폴더'),
     relativePath: relativePath
       .split(sep)
@@ -224,7 +224,7 @@ function sourceForFolder(folderPath: string, filePath: string): ArtifactSourceLo
 
 function sourceForSelectedFile(filePath: string): ArtifactSourceLocation {
   return {
-    rootId: opaqueRootId(dirname(resolve(filePath))),
+    rootId: artifactRootIdForPath(dirname(resolve(filePath))),
     folderLabel: '선택한 파일',
     relativePath: safeSourcePart(basename(filePath), '이름 없는 파일')
   }

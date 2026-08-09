@@ -15,9 +15,9 @@ export function sourceKeyFor(rootId: string, relativePath: string): string {
   return `root:${rootId}\u001f${normalizeSourcePath(relativePath)}`
 }
 
-export function matchesProjectSource(file: Pick<WorkbenchFile, 'artifactId' | 'rootId' | 'relativePath' | 'sourceKey'>, source: Pick<ProjectArtifactSourceRef, 'artifactId' | 'rootId' | 'relativePath'>): boolean {
+export function matchesProjectSource(file: Pick<WorkbenchFile, 'artifactId' | 'rootId' | 'relativePath' | 'sourceKey'>, source: Pick<ProjectArtifactSourceRef, 'artifactId' | 'rootId' | 'artifactRootId' | 'relativePath'>): boolean {
   return file.artifactId === source.artifactId
-    && file.rootId === source.rootId
+    && file.rootId === (source.artifactRootId ?? source.rootId)
     && normalizeSourcePath(file.relativePath ?? '') === normalizeSourcePath(source.relativePath)
 }
 

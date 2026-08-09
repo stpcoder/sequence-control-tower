@@ -39,6 +39,7 @@ function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
   const capture = (expression: RegExp): string | undefined => expression.exec(name)?.[1]
   const numberCapture = (expression: RegExp): number | undefined => numeric(capture(expression) ?? null)
   return {
+    material: capture(/(?:^|[_\-.])(?:MAT|MATERIAL)[=:_-]?([A-Z0-9-]+)/i),
     temperatureC: numeric(parsed.temperature.value),
     testMode: parsed.mode.value ?? undefined,
     bl: capture(/(?:^|[_\-.])BL[=:_-]?(\d+)/i), dq: capture(/(?:^|[_\-.])DQ[=:_-]?(\d+)/i),

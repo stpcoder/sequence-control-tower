@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, FolderPlus, LoaderCircle, Plus, RefreshCw, Unplug, X } from 'lucide-react'
+import { Beaker, ChevronDown, FolderPlus, LoaderCircle, Plus, RefreshCw, Unplug, X } from 'lucide-react'
 import type { ProjectLoadResult, ProjectSaveInput, ProjectSnapshot } from '../../electron/shared/contracts'
 
 export const PROJECT_INIT_ITEMS = ['Sample', '온도', 'Mode', 'Grid', 'PASS/FAIL', 'Reboot/Halt'] as const
@@ -119,6 +119,17 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     finally { setBusy(false) }
   }
 
+  const createSample = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const result = await api.projects.createSample()
+      onLoaded(result); setCreatedProjectId(null); setOpen(false)
+      await refresh()
+    } catch (error) { onError(error instanceof Error ? error.message : '샘플 프로젝트를 만들지 못했습니다.') }
+    finally { setBusy(false) }
+  }
+
   const attach = async () => {
     const target = project
     if (!target) return
@@ -172,7 +183,7 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
         {step === 2 ? <><div className="project-question">무엇을 추출·결정할까요?</div><div className="project-chips">{PROJECT_INIT_ITEMS.map((item) => <button type="button" className={draft.items.includes(item) ? 'selected' : ''} key={item} onClick={() => toggleItem(item, draft.items, (items) => setDraft({ ...draft, items }))}>{item}</button>)}</div><input value={draft.custom} onChange={(event) => setDraft({ ...draft, custom: event.target.value })} placeholder="직접 입력 (선택)" aria-label="추출 또는 결정할 항목 직접 입력" /></> : null}
         {step === 3 ? <><div className="project-question">설정 시작점</div><div className="project-choice-row"><button className={!draft.reuseProjectId ? 'selected' : ''} onClick={() => setDraft({ ...draft, reuseProjectId: '' })}>빈 프로젝트</button><select value={draft.reuseProjectId} onChange={(event) => setDraft({ ...draft, reuseProjectId: event.target.value })} aria-label="재사용할 기존 프로젝트"><option value="">기존 설정 재사용…</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></> : null}
         <div className="project-step-actions">{step > 1 ? <button onClick={() => setStep((step - 1) as ProjectInitStep)}>이전</button> : <span />}{step < 3 ? <button className="project-primary-action" onClick={() => canAdvance && setStep((step + 1) as ProjectInitStep)} disabled={!canAdvance}>다음</button> : <button className="project-primary-action" onClick={() => void create()} disabled={busy || !canAdvance}>{busy ? <LoaderCircle className="wb-spin" size={14} /> : <Plus size={14} />}프로젝트 만들기</button>}</div>
-      </div> : <button className="project-add-action" onClick={() => { setShowNew(true); setStep(1) }}><Plus size={15} />새 프로젝트</button>}
+      </div> : <div className="project-create-actions"><button className="project-add-action" onClick={() => { setShowNew(true); setStep(1) }}><Plus size={15} />새 프로젝트</button><button className="project-sample-action" onClick={() => void createSample()} disabled={busy}>{busy ? <LoaderCircle className="wb-spin" size={14} /> : <Beaker size={14} />}LPDDR6 샘플 열기</button></div>}
       {createdProjectId && project?.id === createdProjectId ? <div className="project-next-action"><span>프로젝트가 준비되었습니다.</span><button className="project-primary-action" onClick={() => void attach()} disabled={busy}><FolderPlus size={14} />폴더 추가</button></div> : null}
       {project ? <div className="project-settings-block">
         <details><summary>프로젝트 고급 설정</summary><div className="project-advanced-content">

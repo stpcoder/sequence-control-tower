@@ -19,7 +19,7 @@
 
 ![Log Workbench](docs/images/manual-lw-00-overview.png)
 
-[v0.8 평가 이력과 Agent](docs/manual/05-v0.8-평가-이력-Agent.md) · [v0.7 빠른 시작](docs/manual/00-v0.7-빠른-시작.md) · [사용자 매뉴얼](docs/manual/README.md) · [시작하기](docs/manual/10-시작하기.md) · [로그 워크벤치](docs/manual/20-로그-워크벤치.md) · [여러 폴더 반복 분석](docs/manual/30-여러-폴더-반복-분석.md)
+[v0.9 프로젝트 Native Agent](docs/manual/05-v0.9-Native-Agent.md) · [v0.8 평가 이력과 Agent](docs/manual/05-v0.8-평가-이력-Agent.md) · [사용자 매뉴얼](docs/manual/README.md) · [로그 워크벤치](docs/manual/20-로그-워크벤치.md) · [여러 폴더 반복 분석](docs/manual/30-여러-폴더-반복-분석.md)
 
 ## 작업 순서
 
@@ -53,10 +53,18 @@
 - 결과표의 `FAIL 모아보기` 및 `미확인·검토필요` preset
 - 판정, 규칙, 일괄 판정, metadata 승인의 revision 저장
 - 파일 내용 SHA가 변경된 경우 새 revision 검토
+- 프로젝트별 Agent 대화, 도구 실행 근거, Ctrl-F/정규식 검색 기록 영구 보관
+- 파일명 기반 자재·Sample·Lot·온도·VDD·주파수·TM·DQ·BL 조건 후보 추출
+- marker 상태기계 기반 PASS, FAIL, training fail, reboot, halt, fast fail 검사
+- 평가 브랜치와 과거 LPDDR5/LPDDR6 유사 사례를 이용한 다음 평가 제안
+- OpenCode headless harness 자동 연결과 미설치·버전 오류 시 내장 bounded harness 전환
+- `LPDDR6 샘플 열기`로 Xiaomi 16Gb VPERI 평가 시나리오 즉시 실행
 
 ## LLM 연결
 
-폴더 가져오기, 검색, 규칙 판정, 결과표 생성은 로컬에서 실행되며 LLM을 호출하지 않습니다. AI 분석은 사용자가 요청한 경우에만 구조화된 최소 근거를 사내 OpenAI-compatible API로 전송합니다. 로그 원문 전체, 절대경로, API key는 요청에 포함하지 않습니다.
+폴더 가져오기, 검색, 규칙 판정, 결과표 생성, Pass/Fail marker 검사와 불량률 계산은 로컬에서 실행됩니다. 프로젝트 Agent는 검색 도구가 반환한 제한된 근거와 저장된 평가 문맥만 사내 OpenAI-compatible API로 전송합니다. 로그 원문 전체, 절대경로, API key는 요청에 포함하지 않습니다.
+
+OpenCode CLI가 설치되어 있으면 로컬 headless sidecar를 사용합니다. 앱은 파일·shell·편집·웹 도구를 차단하고 Sequence Control Tower의 읽기 전용 MCP 도구만 제공합니다. OpenCode가 없거나 시작하지 못하면 동일한 저장소와 도구를 사용하는 내장 Agent로 자동 전환합니다.
 
 Endpoint, model ID, API key, RPM/TPM, timeout 설정은 [LLM 연결 안내](docs/manual/50-LLM-연결-검증.md)를 참고하세요. `모델 목록 확인`을 선택한 경우에만 `/models`를 조회합니다.
 
@@ -65,6 +73,7 @@ Endpoint, model ID, API key, RPM/TPM, timeout 설정은 [LLM 연결 안내](docs
 - Artifact DB: content hash, 크기, 확장자, 파일 출처
 - Evaluation DB: 엔지니어 판정, 규칙 revision, 일괄 판정, 예외, metadata 승인
 - localStorage: 기존 규칙과 UI 상태 호환 데이터
+- Native Agent DB: 프로젝트별 대화, 도구 실행 상태, Ctrl-F/정규식 검색 기록
 
 Evaluation DB에는 로그 원문, excerpt, 절대경로, secret을 저장하지 않습니다. 판정은 artifact SHA와 연결됩니다. 손상되거나 지원하지 않는 DB는 `.corrupt-*` 또는 `.unsupported-*` 파일로 보존합니다.
 
@@ -83,6 +92,15 @@ Evaluation DB에는 로그 원문, excerpt, 절대경로, secret을 저장하지
 
 - Windows: Authenticode code-signing certificate
 - macOS: Apple Developer ID Application signing과 notarization
+
+## v0.9.0
+
+- OpenCode-compatible headless harness와 읽기 전용 SCT MCP 도구
+- 프로젝트별 영속 대화와 느린 LLM 대기·중지·재시도
+- LPDDR 조건 추출, 결정적 Pass/Fail 검사, 평가 이력·유사 사례·불량 경향 도구
+- LPDDR6 Xiaomi 샘플 프로젝트와 LPDDR5 과거 사례
+
+[v0.9.0 릴리스 노트](docs/manual/90-v0.9.0-release-notes.md)
 
 ## v0.7.0
 
@@ -124,8 +142,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.

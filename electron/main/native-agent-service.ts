@@ -1,0 +1,285 @@
+import { randomUUID } from 'node:crypto'
+import type {
+  NativeAgentBackendStatusView, NativeAgentSearchEventInput, NativeAgentSessionSummary,
+  NativeAgentSessionView
+} from '../shared/contracts'
+import type { OpenAiCompatibleClient } from './llm-service'
+import type { ProjectStore } from './project-store'
+import { NativeAgentStore, type StoredNativeAgentSession } from './native-agent-store'
+import {
+  LPDDR_AGENT_TOOL_DESCRIPTIONS, type LpddrAgentToolCall, type LpddrAgentToolResult,
+  type LpddrAgentToolService
+} from './lpddr-agent-tools'
+import type { OpenCodeHost } from './opencode-host'
+import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
+
+const safe = (value: unknown, max = 12_000): string => typeof value === 'string'
+  ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
+  : ''
+const now = (): string => new Date().toISOString()
+
+function uniquePlan(calls: LpddrAgentToolCall[]): LpddrAgentToolCall[] {
+  const seen = new Set<string>()
+  return calls.filter((call) => {
+    const key = `${call.name}:${JSON.stringify(call.args ?? {})}`
+    if (seen.has(key)) return false
+    seen.add(key); return true
+  }).slice(0, 6)
+}
+
+/** Small built-in skill router used when OpenCode is not installed. It does
+ * not pretend to reason about arithmetic: it only selects bounded SCT tools. */
+export function planLpddrTools(content: string): LpddrAgentToolCall[] {
+  const text = content.toLowerCase()
+  const calls: LpddrAgentToolCall[] = [
+    { name: 'project_context_get' }, { name: 'project_history_get' }
+  ]
+  if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|sku|주파수|skew|tm|mode)/i.test(text)) {
+    calls.push({ name: 'filename_dimensions_scan' })
+  }
+  if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
+  if (/(경향|집중|불량률|dq|bl|channel|채널|bank|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
+  if (/(과거|이전|유사|lpddr5|다음|추천|어떻게|시도)/i.test(text)) calls.push({ name: 'similar_case_search', args: { query: content.slice(0, 240) } })
+  if (/(검색 기록|ctrl.?f|정규식|regex|찾아봤)/i.test(text)) calls.push({ name: 'search_history_get' })
+  const quoted = content.match(/[“"']([^”"']{2,120})[”"']/)?.[1]
+  if (quoted && /(검색|찾|marker|문장|라인)/i.test(text)) calls.push({ name: 'log_search', args: { query: quoted, mode: /정규식|regex/i.test(text) ? 'regex' : 'literal' } })
+  return uniquePlan(calls)
+}
+
+function fallbackSummary(results: LpddrAgentToolResult[]): string {
+  const facts = results.filter((item) => item.summary).map((item) => `- ${item.label}: ${item.summary}`)
+  return `확인된 사실\n${facts.join('\n') || '- 저장된 근거가 없습니다.'}\n\n추정 또는 미확인\n- LLM 응답을 받지 못해 인과관계와 다음 평가 제안은 보류했습니다. 아래 도구 결과는 로컬에서 계산된 값입니다.`
+}
+
+export class NativeAgentService {
+  private readonly controllers = new Map<string, AbortController>()
+  private readonly listeners = new Set<(session: NativeAgentSessionView) => void>()
+
+  constructor(private readonly deps: {
+    store: NativeAgentStore
+    tools: LpddrAgentToolService
+    projects: Pick<ProjectStore, 'get'>
+    llm: Pick<OpenAiCompatibleClient, 'complete'>
+    opencode: OpenCodeHost
+  }) {}
+
+  async initialize(): Promise<void> { await this.deps.store.initialize() }
+
+  onUpdate(listener: (session: NativeAgentSessionView) => void): () => void {
+    this.listeners.add(listener); return () => this.listeners.delete(listener)
+  }
+
+  async backendStatus(): Promise<NativeAgentBackendStatusView> {
+    const opencodeAvailable = await this.deps.opencode.available()
+    return {
+      preferred: 'opencode', active: opencodeAvailable ? 'opencode' : 'internal', opencodeAvailable,
+      detail: opencodeAvailable
+        ? 'OpenCode headless harness · SCT 읽기 전용 도구 · 내부 LLM'
+        : '내장 bounded harness · SCT 읽기 전용 도구 · OpenCode 설치 시 자동 전환'
+    }
+  }
+
+  async create(projectId: string, title?: string): Promise<NativeAgentSessionView> {
+    const project = await this.deps.projects.get(safe(projectId, 160))
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    const backend = (await this.deps.opencode.available()) ? 'opencode' : 'internal'
+    let session = await this.deps.store.create(project.id, safe(title, 160) || `${project.name} 분석`, backend)
+    if (project.artifacts.length) {
+      const sourceIds = project.artifacts.slice(0, 100).map((item) => item.sourceId)
+      try {
+        const [filenames, statuses] = await Promise.all([
+          this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
+          this.deps.tools.execute(project.id, { name: 'pass_fail_scan' }, sourceIds)
+        ])
+        session = await this.deps.store.update(session.id, (draft) => {
+          for (const result of [filenames, statuses]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
+        })
+        session = await this.deps.store.appendMessage(session.id, {
+          role: 'assistant', content: this.onboardingQuestion(filenames, statuses),
+          evidenceSourceIds: [...new Set([...filenames.evidenceSourceIds, ...statuses.evidenceSourceIds])]
+        })
+      } catch {
+        session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `프로젝트 로그 ${project.artifacts.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
+      }
+    } else {
+      session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: '프로젝트에 로그를 연결하면 파일명 조건, Pass/Fail marker, 과거 평가 이력을 함께 확인할 수 있습니다.' })
+    }
+    return this.public(session)
+  }
+
+  list(projectId: string): Promise<NativeAgentSessionSummary[]> { return this.deps.store.list(projectId) }
+
+  async get(sessionId: string): Promise<NativeAgentSessionView | null> {
+    const session = await this.deps.store.get(sessionId)
+    return session ? this.public(session) : null
+  }
+
+  async send(sessionId: string, content: string, requestedSourceIds?: string[]): Promise<NativeAgentSessionView> {
+    const session = await this.require(sessionId)
+    if (session.status === 'queued' || session.status === 'running') throw new Error('현재 분석이 끝난 후 다시 보내 주세요.')
+    const message = safe(content, 4_000)
+    if (!message) throw new Error('메시지를 입력해 주세요.')
+    const sourceIds = await this.authorize(session.projectId, requestedSourceIds)
+    let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+    next = await this.deps.store.update(session.id, (draft) => {
+      draft.status = 'queued'; draft.failure = undefined; draft.lastRequest = { content: message, sourceIds }
+      if (draft.messages.filter((item) => item.role === 'user').length === 1) draft.title = message.slice(0, 48)
+    })
+    this.emit(next)
+    queueMicrotask(() => { void this.run(next.id) })
+    return this.public(next)
+  }
+
+  async retry(sessionId: string): Promise<NativeAgentSessionView> {
+    const session = await this.require(sessionId)
+    if (!session.lastRequest) throw new Error('재시도할 요청이 없습니다.')
+    if (session.status === 'queued' || session.status === 'running') return this.public(session)
+    const next = await this.deps.store.setStatus(session.id, 'queued')
+    this.emit(next); queueMicrotask(() => { void this.run(next.id) })
+    return this.public(next)
+  }
+
+  async cancel(sessionId: string): Promise<NativeAgentSessionView> {
+    const session = await this.require(sessionId)
+    this.controllers.get(session.id)?.abort()
+    if (session.externalSessionId) await this.deps.opencode.abort(session.externalSessionId)
+    let next = await this.deps.store.setStatus(session.id, 'idle')
+    next = await this.deps.store.appendMessage(session.id, { role: 'system', content: '사용자가 분석을 중지했습니다.' })
+    this.emit(next); return this.public(next)
+  }
+
+  async recordSearch(input: NativeAgentSearchEventInput): Promise<void> {
+    const project = await this.deps.projects.get(safe(input.projectId, 160))
+    if (!project) return
+    const allowed = new Set(project.artifacts.map((item) => item.sourceId))
+    if (input.sourceIds.some((item) => !allowed.has(item))) throw new Error('프로젝트 검색 범위가 올바르지 않습니다.')
+    await this.deps.store.recordSearch(input)
+  }
+
+  close(): void { this.controllers.forEach((controller) => controller.abort()); this.deps.opencode.close() }
+
+  private async run(sessionId: string): Promise<void> {
+    const controller = new AbortController(); this.controllers.set(sessionId, controller)
+    try {
+      let session = await this.require(sessionId)
+      if (!session.lastRequest) throw new Error('분석 요청이 없습니다.')
+      const lastRequest = session.lastRequest
+      session = await this.deps.store.setStatus(session.id, 'running'); this.emit(session)
+      if (session.backend === 'opencode') {
+        try {
+          const response = await this.deps.opencode.send({
+            externalSessionId: session.externalSessionId, projectId: session.projectId,
+            sourceIds: lastRequest.sourceIds, title: session.title, content: lastRequest.content
+          })
+          session = await this.deps.store.update(session.id, (draft) => {
+            draft.externalSessionId = response.externalSessionId
+            for (const name of response.toolNames.slice(0, 20)) draft.tools.push({ id: randomUUID(), name, label: name, state: 'completed', startedAt: now(), completedAt: now() })
+          })
+          session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: response.content })
+          session = await this.deps.store.setStatus(session.id, 'idle'); this.emit(session); return
+        } catch (error) {
+          if (controller.signal.aborted) throw error
+          session = await this.deps.store.update(session.id, (draft) => { draft.backend = 'internal' })
+          this.emit(session)
+        }
+      }
+      await this.runInternal(session.id, controller.signal)
+    } catch (error) {
+      const aborted = controller.signal.aborted
+      const message = aborted ? undefined : this.failure(error)
+      const session = await this.deps.store.setStatus(sessionId, aborted ? 'idle' : 'paused', message).catch(() => null)
+      if (session) this.emit(session)
+    } finally {
+      if (this.controllers.get(sessionId) === controller) this.controllers.delete(sessionId)
+    }
+  }
+
+  private async runInternal(sessionId: string, signal: AbortSignal): Promise<void> {
+    let session = await this.require(sessionId)
+    const request = session.lastRequest!
+    const results: LpddrAgentToolResult[] = []
+    for (const call of planLpddrTools(request.content)) {
+      if (signal.aborted) throw new Error('ABORTED')
+      const traceId = randomUUID()
+      session = await this.deps.store.update(session.id, (draft) => {
+        draft.tools.push({ id: traceId, name: call.name, label: LPDDR_AGENT_TOOL_DESCRIPTIONS[call.name].split('.')[0], state: 'running', startedAt: now() })
+      }); this.emit(session)
+      try {
+        const result = await this.deps.tools.execute(session.projectId, call, request.sourceIds)
+        results.push(result)
+        session = await this.deps.store.update(session.id, (draft) => {
+          const trace = draft.tools.find((item) => item.id === traceId)
+          if (trace) { trace.state = 'completed'; trace.completedAt = now(); trace.summary = result.summary; trace.evidenceSourceIds = result.evidenceSourceIds }
+        }); this.emit(session)
+      } catch (error) {
+        session = await this.deps.store.update(session.id, (draft) => {
+          const trace = draft.tools.find((item) => item.id === traceId)
+          if (trace) { trace.state = 'failed'; trace.completedAt = now(); trace.summary = this.failure(error) }
+        }); this.emit(session)
+      }
+    }
+    const conversation = session.messages.filter((item) => item.role === 'user' || item.role === 'assistant').slice(-12).map((item) => `${item.role}: ${item.content}`).join('\n')
+    const evidence = results.map((item) => ({ tool: item.name, summary: item.summary, data: item.data, sourceIds: item.evidenceSourceIds })).slice(0, 6)
+    const prompt = `${NATIVE_AGENT_SYSTEM_PROMPT}\n\n대화 기록:\n${conversation.slice(-12_000)}\n\n도구 실행 결과(JSON):\n${JSON.stringify(evidence).slice(0, 24_000)}\n\n현재 사용자 요청에 답하십시오. tool output에 없는 수치나 인과관계를 만들지 마십시오.`
+    try {
+      const completed = await this.deps.llm.complete(prompt, signal, () => undefined)
+      session = await this.deps.store.appendMessage(session.id, {
+        role: 'assistant', content: completed.content,
+        evidenceSourceIds: [...new Set(results.flatMap((item) => item.evidenceSourceIds))]
+      })
+      session = await this.deps.store.setStatus(session.id, 'idle'); this.emit(session)
+    } catch (error) {
+      if (signal.aborted) throw error
+      session = await this.deps.store.appendMessage(session.id, {
+        role: 'assistant', content: fallbackSummary(results),
+        evidenceSourceIds: [...new Set(results.flatMap((item) => item.evidenceSourceIds))]
+      })
+      session = await this.deps.store.setStatus(session.id, 'paused', `${this.failure(error)} · 로컬 도구 결과는 보존되었습니다.`)
+      this.emit(session)
+    }
+  }
+
+  private async authorize(projectId: string, requested?: string[]): Promise<string[]> {
+    const project = await this.deps.projects.get(projectId)
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    const wanted = requested?.length ? [...new Set(requested.map((item) => safe(item, 160)).filter(Boolean))] : project.artifacts.slice(0, 100).map((item) => item.sourceId)
+    const allowed = new Set(project.artifacts.map((item) => item.sourceId))
+    if (wanted.length > 100 || wanted.some((item) => !allowed.has(item))) throw new Error('프로젝트 로그 범위가 올바르지 않습니다.')
+    return wanted
+  }
+
+  private async require(sessionId: string): Promise<StoredNativeAgentSession> {
+    const session = await this.deps.store.get(safe(sessionId, 160))
+    if (!session) throw new Error('에이전트 대화를 찾을 수 없습니다.')
+    return session
+  }
+
+  private emit(session: StoredNativeAgentSession): void {
+    const view = this.public(session); this.listeners.forEach((listener) => listener(view))
+  }
+  private public(session: StoredNativeAgentSession): NativeAgentSessionView { return this.deps.store.public(session) }
+  private failure(error: unknown): string {
+    const raw = error instanceof Error ? error.message : 'AGENT_FAILED'
+    if (/timeout|429|LLM_REQUEST_TIMEOUT/i.test(raw)) return '사내 LLM 응답이 늦거나 사용량 제한에 도달했습니다.'
+    if (/LLM_UNAVAILABLE/i.test(raw)) return '설정에서 LLM 주소와 모델을 연결해 주세요.'
+    if (/OPENCODE/i.test(raw)) return 'OpenCode harness를 시작하지 못해 내장 분석으로 전환했습니다.'
+    return safe(raw, 300) || '에이전트 분석을 완료하지 못했습니다.'
+  }
+
+  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult): string {
+    const rows = (filenames.data as { rows?: Array<{ dimensions?: Record<string, unknown> }> })?.rows ?? []
+    const dimensions = ['testMode', 'temperatureC', 'vdd', 'material', 'dq', 'pattern'] as const
+    const leaders = dimensions.flatMap((dimension) => {
+      const counts = new Map<string, number>()
+      rows.forEach((row) => {
+        const value = row.dimensions?.[dimension]
+        if (value !== undefined && value !== '') counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
+      })
+      const first = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+      if (!first) return []
+      const label = dimension === 'temperatureC' ? `${first[0]}°C` : dimension === 'vdd' ? `VDD ${first[0]}V` : dimension === 'dq' ? `DQ${first[0]}` : first[0]
+      return first[1] >= 2 ? [label] : []
+    }).slice(0, 4)
+    return `파일명과 종료 marker를 먼저 확인했습니다.\n${filenames.summary}\n${statuses.summary || '확정 상태 없음'}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 이 조건을 중심으로 한 평가인가요?` : '반복되는 조건의 평가 목적을 확인할 수 없습니다.'} 맞다면 분석할 불량 또는 개선 목적을 선택하거나 짧게 적어주세요.`
+  }
+}

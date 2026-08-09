@@ -6,7 +6,7 @@
 import type { AssessmentOrigin, EvaluationDimensions, EvaluationNode, EvidenceRecord, FailureHypothesis } from './evaluation-memory'
 
 /** Reuse the durable evaluation-memory vocabulary; do not invent agent-only keys. */
-export const EVALUATION_DIMENSIONS = ['bl', 'dq', 'channel', 'bank', 'bankGroup', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'skewPs', 'testMode'] as const satisfies readonly (keyof EvaluationDimensions)[]
+export const EVALUATION_DIMENSIONS = ['sku', 'lot', 'material', 'sample', 'bl', 'dq', 'channel', 'bank', 'bankGroup', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'skewPs', 'testMode'] as const satisfies readonly (keyof EvaluationDimensions)[]
 export type EvaluationDimension = typeof EVALUATION_DIMENSIONS[number]
 export type EvaluationOutcome = 'PASS' | 'FAIL' | 'UNKNOWN'
 export type EvaluationAgentStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'

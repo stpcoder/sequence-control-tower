@@ -8,6 +8,7 @@ export type AssessmentOrigin = "engineer-confirmed" | "ai-proposed";
 export interface EvaluationDimensions {
   sku?: string;
   lot?: string;
+  material?: string;
   sample?: string;
   bl?: string | number;
   dq?: string | number;
@@ -173,7 +174,7 @@ export interface EvaluationExportRow {
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
   nodeId: string; parentNodeId: string; branchId: string; nodeName: string; nodeStatus: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
-  sku: string; lot: string; sample: string; bl: string; dq: string; channel: string; bank: string; bankGroup: string;
+  sku: string; lot: string; material: string; sample: string; bl: string; dq: string; channel: string; bank: string; bankGroup: string;
   pattern: string; frequencyMHz: string; temperatureC: string; vdd: string; skewPs: string; testMode: string;
 }
 
@@ -192,7 +193,7 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
       nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), nodeName: node.name, nodeStatus: text(node.status),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
-      sku: text(d.sku), lot: text(d.lot), sample: text(d.sample), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), bank: text(d.bank), bankGroup: text(d.bankGroup), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), skewPs: text(d.skewPs), testMode: text(d.testMode),
+      sku: text(d.sku), lot: text(d.lot), material: text(d.material), sample: text(d.sample), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), bank: text(d.bank), bankGroup: text(d.bankGroup), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), skewPs: text(d.skewPs), testMode: text(d.testMode),
     };
   });
 }

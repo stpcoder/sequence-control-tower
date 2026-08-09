@@ -26,7 +26,7 @@ export interface EvaluationMemoryViewProps {
 }
 
 const dimensionFields: Array<[keyof EvaluationDimensions, string, 'text' | 'number']> = [
-  ['sku', 'SKU', 'text'], ['lot', 'Lot', 'text'], ['sample', 'Sample', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['bank', 'Bank', 'text'], ['bankGroup', 'Bank group', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['skewPs', 'Skew (ps)', 'number'], ['testMode', 'Mode', 'text'],
+  ['sku', 'SKU', 'text'], ['lot', 'Lot', 'text'], ['material', '자재', 'text'], ['sample', 'Sample', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['bank', 'Bank', 'text'], ['bankGroup', 'Bank group', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['skewPs', 'Skew (ps)', 'number'], ['testMode', 'Mode', 'text'],
 ]
 
 const emptyDimensions = (): EvaluationDimensions => ({})
@@ -60,7 +60,7 @@ export function openIdForEvidenceLog(logId: string, logs: readonly AvailableEval
 function csvCell(value: unknown) { return `"${String(value ?? '').replaceAll('"', '""')}"` }
 export function evaluationMemoryCsv(memory: EvaluationMemory): string {
   const evidenceById = new Map(memory.evidence.map((record) => [record.id, record]))
-  const header = ['projectId', 'projectName', 'product', 'projectSku', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'nodeName', 'nodeStatus', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'sku', 'lot', 'sample', 'bl', 'dq', 'channel', 'bank', 'bankGroup', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'skewPs', 'testMode']
+  const header = ['projectId', 'projectName', 'product', 'projectSku', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'nodeName', 'nodeStatus', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'sku', 'lot', 'material', 'sample', 'bl', 'dq', 'channel', 'bank', 'bankGroup', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'skewPs', 'testMode']
   const rows = flattenEvaluationMemory(memory).map((row) => {
     const sourceIds = evidenceById.get(row.evidenceId)?.sourceIds?.join('|') ?? ''
     return [...header].map((key) => csvCell(key === 'sourceIds' ? sourceIds : row[key as keyof typeof row])).join(',')

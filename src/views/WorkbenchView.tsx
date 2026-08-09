@@ -37,6 +37,7 @@ import type {
   ArtifactEvidenceSourceResult,
   ArtifactSearchInput,
   ArtifactSearchResult,
+  ProjectSnapshot,
   RendererCommand,
   SequenceIntelligenceApi,
 } from '../../electron/shared/contracts'
@@ -127,6 +128,7 @@ export interface WorkbenchViewProps {
   onApplyMetadataSuggestion?: (fileId: string, field: MetadataSuggestionField, value: string) => void | Promise<void>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   projectId?: string
+  projectSources?: readonly ProjectSnapshot['artifacts'][number][]
 }
 
 export type SearchScope = 'file' | 'open' | 'workspace'
@@ -968,6 +970,7 @@ export function WorkbenchView({
   onApplyMetadataSuggestion,
   onNotify,
   projectId = 'log-workbench',
+  projectSources = [],
 }: WorkbenchViewProps) {
   const [localFiles, setLocalFiles] = useState<WorkbenchFile[]>(() => controlledFiles ?? (electronApi() ? [] : DEMO_LOGS))
   const files = useMemo(() => dedupeWorkbenchFiles(controlledFiles ?? localFiles), [controlledFiles, localFiles])
@@ -2064,7 +2067,20 @@ export function WorkbenchView({
         }))))
         const successfulCounts = successfulSearchCounts(searchFiles, result)
         setBackendCounts(successfulCounts)
-        setBackendTotal(Object.values(successfulCounts).reduce((total, count) => total + count, 0))
+        const total = Object.values(successfulCounts).reduce((sum, count) => sum + count, 0)
+        setBackendTotal(total)
+        const sourceIds = searchFiles.flatMap((file) => {
+          const source = projectSources.find((item) => (item.artifactRootId ?? item.rootId) === file.rootId && item.relativePath === file.relativePath)
+          return source ? [source.sourceId] : []
+        })
+        if (api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
+          void api.nativeAgent.recordSearch({
+            projectId, sourceIds: [...new Set(sourceIds)], query: compiled.query, mode: compiled.mode,
+            caseSensitive: options.caseSensitive,
+            scope: searchScope === 'file' ? 'current' : searchScope === 'open' ? 'open' : 'project',
+            matchCount: total
+          }).catch(() => undefined)
+        }
         const failure = result.files.find((file) => file.error)?.error
         setSearchError(failure ?? '')
       }).catch((error) => {
@@ -2080,7 +2096,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [invalidPattern, options, query, resetSearchNavigation, searchFiles])
+  }, [invalidPattern, options, projectId, projectSources, query, resetSearchNavigation, searchFiles, searchScope])
 
   useEffect(() => {
     if (!query.trim() || invalidPattern || !activeFile || searching) return undefined

@@ -1,6 +1,6 @@
 {
   "name": "sequence-control-tower",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Local-first log parsing workbench for Windows and macOS validation engineers",
   "author": "stpcoder",
@@ -18,9 +18,12 @@
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@opencode-ai/sdk": "^1.18.15",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
@@ -44,6 +47,13 @@
     "files": [
       "out/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "agent-skills",
+        "to": "agent-skills",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "icon": "build/icon.ico",

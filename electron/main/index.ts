@@ -11,11 +11,19 @@ import { registerIpc, unregisterIpc } from './ipc'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { WikiService } from './wiki-service'
 import { ProjectStore } from './project-store'
+import { NativeAgentStore } from './native-agent-store'
+import { LpddrAgentToolService } from './lpddr-agent-tools'
+import { startSctMcpServer, type SctMcpServerHandle } from './sct-mcp-server'
+import { OpenCodeHost } from './opencode-host'
+import { NativeAgentService } from './native-agent-service'
+import { SampleProjectService } from './sample-project-service'
 import { isSameRendererDocument } from './renderer-document'
 import { IPC_CHANNELS } from '../shared/contracts'
 import type { RendererCommand } from '../shared/contracts'
 
 let mainWindow: BrowserWindow | null = null
+let nativeAgentForShutdown: NativeAgentService | null = null
+let mcpForShutdown: SctMcpServerHandle | null = null
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
 
 function allowedNavigation(target: string): boolean {
@@ -121,15 +129,25 @@ async function bootstrap(): Promise<void> {
   })
   const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
   const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm })
+  const nativeAgentStore = new NativeAgentStore(dataRoot)
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
     projects.initialize(),
     llmConfig.initialize(),
     wiki.initialize(),
-    analysis.initialize()
+    analysis.initialize(),
+    nativeAgentStore.initialize()
   ])
-  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent, evaluationAgent })
+  const nativeTools = new LpddrAgentToolService({ artifacts, projects, agentStore: nativeAgentStore })
+  const mcp = await startSctMcpServer(nativeTools)
+  const skillRoot = app.isPackaged ? join(process.resourcesPath, 'agent-skills') : join(app.getAppPath(), 'agent-skills')
+  const opencode = new OpenCodeHost({ dataRoot, skillRoot, mcpUrl: mcp.url, mcpToken: mcp.token, effectiveLlm: () => llmConfig.effective() })
+  const nativeAgent = new NativeAgentService({ store: nativeAgentStore, tools: nativeTools, projects, llm, opencode })
+  const samples = new SampleProjectService(dataRoot, { artifacts, projects })
+  nativeAgentForShutdown = nativeAgent
+  mcpForShutdown = mcp
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent, evaluationAgent, nativeAgent, samples })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
@@ -170,7 +188,10 @@ if (!hasLock) {
         if (BrowserWindow.getAllWindows().length === 0) openMainWindow()
       })
     })
-    .catch(() => {
+    .catch((error) => {
+      // Keep the native dialog concise while retaining a useful diagnostic in
+      // terminal and CI logs for packaged-startup failures.
+      console.error('Sequence Control Tower bootstrap failed', error)
       dialog.showErrorBox(
         'Sequence Control Tower',
         '로컬 데이터 저장소를 초기화하지 못했습니다. 디스크 공간과 사용자 권한을 확인해 주세요.'
@@ -183,4 +204,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('will-quit', () => unregisterIpc())
+app.on('will-quit', () => {
+  nativeAgentForShutdown?.close()
+  void mcpForShutdown?.close()
+  unregisterIpc()
+})

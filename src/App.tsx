@@ -649,6 +649,7 @@ export default function App() {
       onApplyMetadataSuggestion={applyMetadataSuggestion}
       onNotify={notify}
       projectId={project?.id ?? PROJECT_ID}
+      projectSources={project?.artifacts ?? []}
     />
   ) : activePage === 'results' ? (
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onNotify={notify} />
