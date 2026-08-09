@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, History, LoaderCircle, Plus, Sparkles, Wrench, X } from 'lucide-react'
+import { ArrowUp, Check, History, LoaderCircle, Plus, RotateCcw, Sparkles, Wrench, X } from 'lucide-react'
 import type {
   AgentRun,
   EvaluationProjectSnapshot,
@@ -140,7 +140,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const [nativeSession, setNativeSession] = useState<NativeAgentSessionView | null>(null)
   const [nativeBackend, setNativeBackend] = useState<NativeAgentBackendStatusView | null>(null)
   const [nativeHistoryOpen, setNativeHistoryOpen] = useState(false)
-  const [scope, setScope] = useState<'current' | 'project'>('current')
+  const [scope, setScope] = useState<'current' | 'project'>(project ? 'project' : 'current')
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -175,6 +175,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setBusy(false)
     setError('')
     setSavedMessage('')
+    setScope(project ? 'project' : 'current')
   }, [projectKey])
 
   useEffect(() => {
@@ -417,7 +418,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       {savedMessage ? <div className="agent-saved" role="status">{savedMessage}</div> : null}
     </div>
     {scope === 'current' && pending ? <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{stageText(run!)}</span><button onClick={() => void cancel()}>취소</button></div> : null}
-    {scope === 'project' && nativeSession && nativeSession.status !== 'idle' ? <div className="agent-stage" role="status">{nativeSession.status === 'queued' || nativeSession.status === 'running' ? <LoaderCircle size={12} className="wb-spin" /> : null}<span>{nativeSession.status === 'queued' ? '대기 중' : nativeSession.status === 'running' ? '도구 실행 및 분석 중' : nativeSession.failure ?? '분석이 멈췄습니다.'}</span>{nativeSession.status === 'paused' || nativeSession.status === 'failed' ? <button onClick={() => void retryNative()} disabled={busy}>재시도</button> : <button onClick={() => void cancelNative()}>중지</button>}</div> : null}
+    {scope === 'project' && nativeSession && nativeSession.status !== 'idle' ? nativeSession.status === 'paused' || nativeSession.status === 'failed' ? <div className="agent-stage retry-only"><button onClick={() => void retryNative()} disabled={busy} aria-label="재시도" title="재시도"><RotateCcw size={15} /></button></div> : <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{nativeSession.status === 'queued' ? '대기 중' : '분석 중'}</span><button onClick={() => void cancelNative()}>중지</button></div> : null}
     {scope === 'current' ? <form className="agent-composer" onSubmit={send}>
       <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="짧은 메시지 입력" rows={2} disabled={!run || busy} />
       <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>

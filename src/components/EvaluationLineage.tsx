@@ -114,10 +114,10 @@ export function EvaluationLineage({
   return (
     <section className={`evaluation-lineage ${className}`.trim()} aria-label={ariaLabel}>
       <div className="evaluation-lineage__topline">
-        <span>평가 이력</span>
+        <span>평가 흐름</span>
         <div className="evaluation-lineage__legend" aria-label="계보 상태 범례">
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--confirmed" />확정
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--proposed" />제안
+          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--confirmed" />실선 확정
+          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--proposed" />점선 제안
         </div>
       </div>
 
@@ -158,9 +158,7 @@ export function EvaluationLineage({
                       onClick={() => onSelectNode?.(item.node)}
                     >
                       <span className="evaluation-lineage__point"><i /></span>
-                      <span className="evaluation-lineage__node-copy">
-                        <b>{item.node.id}</b><span>{item.node.name}</span>
-                      </span>
+                      <span className="evaluation-lineage__node-copy"><b>{item.node.name}</b></span>
                     </button>
                   </li>
                 )
@@ -175,7 +173,7 @@ export function EvaluationLineage({
             <span className={`evaluation-lineage__confidence evaluation-lineage__confidence--${selected.confidence}`}>{selected.confidence === 'confirmed' ? '확정됨' : 'AI 제안'}</span>
           </div>
           <strong>{selected.node.name}</strong>
-          <small>{selected.node.id}{selected.timestamp ? ` · ${selected.timestamp}` : ''}</small>
+          {selected.timestamp ? <small>{selected.timestamp}</small> : null}
           <dl>
             <div><dt>브랜치</dt><dd>{selected.lane}</dd></div>
             <div><dt>근거</dt><dd>{selected.evidenceCount}건</dd></div>
@@ -184,7 +182,7 @@ export function EvaluationLineage({
             <div><dt>패턴</dt><dd>{selected.dominantPattern || '—'}</dd></div>
             <div><dt>주요 DQ</dt><dd>{selected.dominantDq || '—'}</dd></div>
           </dl>
-          {selected.hypothesisTitle && <p className="evaluation-lineage__issue">{selected.hypothesisTitle} · {selected.origin === 'engineer-confirmed' ? '확정' : 'AI 제안'}</p>}
+          {selected.hypothesisTitle && <p className="evaluation-lineage__issue">{selected.hypothesisTitle}</p>}
         </aside>}
       </div>
     </section>
