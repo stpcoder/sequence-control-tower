@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
 import { AgentService } from './agent-service'
+import { EvaluationAgentService } from './evaluation-agent-service'
 import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from './app-menu'
 import { ArtifactService } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
@@ -119,6 +120,7 @@ async function bootstrap(): Promise<void> {
     })
   })
   const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
+  const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm })
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
@@ -127,7 +129,7 @@ async function bootstrap(): Promise<void> {
     wiki.initialize(),
     analysis.initialize()
   ])
-  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent })
+  registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent, evaluationAgent })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)

@@ -37,4 +37,11 @@ describe('UI readability contract', () => {
     expect(dataViews).toContain('.data-view option')
     expect(workbench).toContain('.log-workbench option')
   })
+
+  it('keeps the Agent mouse entry point visible', async () => {
+    const styles = normalizeNewlines(await readFile(resolve(root, 'src/styles.css'), 'utf8'))
+    const rule = styles.slice(styles.indexOf('.agent-fab {'), styles.indexOf('}', styles.indexOf('.agent-fab {')))
+    expect(rule).toContain('display: inline-flex;')
+    expect(rule).not.toContain('display: none;')
+  })
 })

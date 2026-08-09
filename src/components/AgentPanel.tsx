@@ -5,6 +5,8 @@ import type {
   EvaluationProjectSnapshot,
   EvaluationResultLabel,
   EvaluationSaveDecisionInput,
+  EvaluationAgentMemoryPayloadView,
+  EvaluationAgentSessionView,
   ProjectSnapshot,
 } from '../../electron/shared/contracts'
 import type { WorkbenchFile } from '../views/WorkbenchView'
@@ -18,6 +20,43 @@ interface AgentPanelProps {
   selectedFile?: WorkbenchFile
   evaluationSnapshot: EvaluationProjectSnapshot | null
   onSnapshotSaved: (snapshot: EvaluationProjectSnapshot) => void
+  onProjectUpdated: (project: ProjectSnapshot) => void
+}
+
+export function mergeEvaluationAgentMemory(project: ProjectSnapshot, payload: EvaluationAgentMemoryPayloadView): ProjectSnapshot {
+  const confirmed = 'engineer-confirmed' as const
+  const upsert = <T extends { id: string }>(existing: readonly T[], additions: readonly T[]): T[] => {
+    const byId = new Map(existing.map((item) => [item.id, item]))
+    additions.forEach((item) => byId.set(item.id, { ...byId.get(item.id), ...item }))
+    return [...byId.values()]
+  }
+  const evidence = payload.evidence.map((item) => {
+    const previous = (project.evidenceRecords ?? []).find((record) => record.id === item.id)
+    return {
+      ...item,
+      sourceIds: [...new Set([...(previous?.sourceIds ?? []), ...item.sourceIds])],
+      note: item.summary ?? previous?.note,
+      origin: confirmed,
+    }
+  })
+  return {
+    ...project,
+    failureHypotheses: upsert(project.failureHypotheses ?? [], [{ ...payload.hypothesis, origin: confirmed }]),
+    evaluationNodes: upsert(project.evaluationNodes ?? [], [payload.node]),
+    evidenceRecords: upsert(project.evidenceRecords ?? [], evidence)
+  }
+}
+
+export function evaluationProposalTitle(proposal: EvaluationAgentSessionView['proposal']): string {
+  if (!proposal) return '평가 경향'
+  const d = proposal.dimensions
+  const lead = [d.testMode, d.pattern, d.dq !== undefined ? `DQ${d.dq}` : '', d.channel !== undefined ? `CH${d.channel}` : ''].filter(Boolean).slice(0, 2)
+  return `${lead.join(' · ') || proposal.outcome} 경향`
+}
+
+/** A revision bump is not a project switch: keep a slow native session alive. */
+export function shouldRetainAgentSession(previous: ProjectSnapshot | null, next: ProjectSnapshot | null): boolean {
+  return previous?.id === next?.id
 }
 
 export function buildAgentDecisionInput(
@@ -91,14 +130,19 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved, onProjectUpdated }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
+  const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
+  const [scope, setScope] = useState<'current' | 'project'>('current')
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [savedMessage, setSavedMessage] = useState('')
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeRunId = useRef<string | null>(null)
-  const projectKey = project ? `${project.id}:${project.revision}` : 'no-project'
+  const projectRef = useRef<ProjectSnapshot | null>(project)
+  projectRef.current = project
+  const projectKey = project?.id ?? 'no-project'
   const projectKeyRef = useRef(projectKey)
   projectKeyRef.current = projectKey
 
@@ -110,14 +154,16 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       setRun(next)
       if (shouldClearSubmissionBusy(next)) setBusy(false)
     })
-  }, [project?.id, project?.revision, projectKey])
+  }, [project?.id, projectKey])
 
   useEffect(() => {
     activeRunId.current = null
     setRun(null)
+    setEvaluationRun(null)
     setInput('')
     setBusy(false)
     setError('')
+    setSavedMessage('')
   }, [projectKey])
 
   useEffect(() => {
@@ -166,6 +212,45 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     } catch (reason) { setBusy(false); setError(boundedError(reason)) }
   }
 
+  const startProjectTrend = async () => {
+    const api = window.sequenceIntelligence
+    if (!api?.evaluationAgent || !project || busy) return
+    setBusy(true); setError(''); setSavedMessage(''); setEvaluationRun(null)
+    try {
+      const next = await api.evaluationAgent.start({ projectId: project.id, sourceIds: project.artifacts.slice(0, 32).map((source) => source.sourceId), intent: 'failure-trend' })
+      if (projectKeyRef.current === projectKey) setEvaluationRun(next)
+    } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
+  }
+
+  const resumeProjectTrend = async (input: { answer?: string; confirm?: 'accept' | 'reject' }) => {
+    if (!evaluationRun || busy || !window.sequenceIntelligence?.evaluationAgent) return
+    setBusy(true); setError('')
+    try { setEvaluationRun(await window.sequenceIntelligence.evaluationAgent.resume({ sessionId: evaluationRun.id, ...input })) }
+    catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
+  }
+
+  const saveProjectProposal = async () => {
+    if (!evaluationRun?.proposal || (evaluationRun.status !== 'waiting_confirmation' && evaluationRun.status !== 'completed') || busy || !project || !window.sequenceIntelligence?.evaluationAgent || !window.sequenceIntelligence?.projects) return
+    setBusy(true); setError('')
+    try {
+      const completed = evaluationRun.status === 'completed' ? evaluationRun : await window.sequenceIntelligence.evaluationAgent.resume({ sessionId: evaluationRun.id, confirm: 'accept' })
+      setEvaluationRun(completed)
+      const prefix = `ea-${project.id}-${evaluationRun.id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120)
+      const payload = await window.sequenceIntelligence.evaluationAgent.memorySavePayload({ sessionId: evaluationRun.id, projectId: project.id, hypothesisId: `${prefix}-h`, nodeId: `${prefix}-n`, evidenceIdPrefix: `${prefix}-e` })
+      if (!payload) throw new Error('저장할 제안이 없습니다.')
+      // A slow LLM may complete after another same-project write. Always save
+      // against the current prop/revision, not the revision that started it.
+      const current = projectRef.current
+      if (!current || current.id !== project.id) throw new Error('프로젝트가 변경되었습니다. 최신 프로젝트에서 다시 시도해 주세요.')
+      const title = evaluationProposalTitle(evaluationRun.proposal)
+      const namedPayload: EvaluationAgentMemoryPayloadView = { ...payload, hypothesis: { ...payload.hypothesis, title }, node: { ...payload.node, name: title } }
+      const merged = mergeEvaluationAgentMemory(current, namedPayload)
+      const saved = await window.sequenceIntelligence.projects.save({ projectId: current.id, expectedRevision: current.revision, failureHypotheses: merged.failureHypotheses, evaluationNodes: merged.evaluationNodes, evidenceRecords: merged.evidenceRecords })
+      onProjectUpdated(saved)
+      setSavedMessage('평가 이력에 저장됨')
+    } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
+  }
+
   const answer = (value: string) => {
     if (!run?.question) return
     void invoke(() => window.sequenceIntelligence!.agent.answer({ runId: run.id, questionId: run.question!.id, value }))
@@ -201,31 +286,41 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     } catch (reason) { setBusy(false); setError(boundedError(reason)) }
   }
 
-  const dismiss = () => { activeRunId.current = null; setRun(null); setBusy(false); setError('') }
+  const dismiss = () => { activeRunId.current = null; setRun(null); setEvaluationRun(null); setBusy(false); setError(''); setSavedMessage('') }
   const canStart = Boolean(project && window.sequenceIntelligence?.agent && selectedFile?.artifactId)
   const confirmable = Boolean(run?.candidate?.kind === 'result' && buildAgentDecisionInput(project, selectedFile, evaluationSnapshot, run.candidate.result))
   const pending = Boolean(run && isAgentRunPending(run))
 
+  const projectPending = evaluationRun?.status === 'running' || evaluationRun?.status === 'paused'
+  const projectCanStart = Boolean(project && project.artifacts.length && window.sequenceIntelligence?.evaluationAgent)
   if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={16} /><span>Agent 열기</span><kbd>⌘/Ctrl J</kbd></button>
 
   return <aside className="agent-panel" aria-label="Evaluation Agent">
     <div className="agent-panel-head">
       <div className="agent-orb"><Sparkles size={15} /></div>
-      <div><strong>Evaluation Agent</strong><span>현재 파일 기반 분석</span></div>
+      <div><strong>Evaluation Agent</strong><span>{scope === 'current' ? '현재 파일 기반 분석' : '프로젝트 경향 분석'}</span></div>
       <button className="icon-button small" onClick={onClose} aria-label="Agent 패널 닫기"><X size={15} /></button>
     </div>
     <div className="agent-context"><span>컨텍스트</span><strong>{project ? project.name : '프로젝트 없음'}</strong><small>{selectedFile?.name ?? '선택한 artifact 없음'}</small></div>
+    <div className="agent-scope" role="group" aria-label="분석 범위"><button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>현재 로그</button><button className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>프로젝트 경향</button></div>
     <div className="agent-thread">
-      {!run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? '선택한 artifact의 판정을 분석합니다.' : '분석할 artifact를 선택하세요.') : '저장된 프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석 시작</button></div> : null}
-      {run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}>{choice}</button>)}</div> : null}</> : null}
-      {run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
-      {run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}
-      {error ? <div className="agent-error" role="alert">{error}</div> : null}
+      {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? '선택한 artifact의 판정을 분석합니다.' : '분석할 artifact를 선택하세요.') : '저장된 프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석 시작</button></div> : null}
+      {scope === 'project' && !evaluationRun ? <div className="agent-empty"><p>{project ? (project.artifacts.length ? `연결된 ${project.artifacts.length}개 로그${project.artifacts.length > 32 ? ' 중 최대 32개' : ''}에서 실패 경향을 찾습니다.` : '연결된 로그가 없습니다.') : '저장된 프로젝트를 선택하세요.'}</p>{busy ? <p>분석 중…</p> : <button className="agent-start" onClick={() => void startProjectTrend()} disabled={!projectCanStart}>경향 분석 시작</button>}</div> : null}
+      {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}>{choice}</button>)}</div> : null}</> : null}
+      {scope === 'current' && run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
+      {scope === 'current' && run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}
+      {scope === 'current' && error ? <div className="agent-error" role="alert">{error}</div> : null}
+      {scope === 'project' && evaluationRun?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{evaluationRun.question.prompt}</p></div>{evaluationRun.question.choices?.length ? <div className="quick-answers">{evaluationRun.question.choices.map((choice) => <button key={choice} onClick={() => void resumeProjectTrend({ answer: choice })} disabled={busy}>{choice}</button>)}</div> : null}<form className="agent-free-answer" onSubmit={(event) => { event.preventDefault(); const value = input.trim(); if (value) { void resumeProjectTrend({ answer: value }); setInput('') } }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="직접 답변 입력" disabled={busy} /><button disabled={busy || !input.trim()}>답변</button></form></> : null}
+      {scope === 'project' && evaluationRun?.proposal ? <div className="agent-candidate"><span>경향 제안 · {evaluationRun.proposal.outcome}</span><strong>{evaluationRun.proposal.rationale}</strong><small>{Object.entries(evaluationRun.proposal.dimensions).map(([key, value]) => `${key} ${value}`).join(' · ') || '핵심 차원 미확정'} · 근거 {evaluationRun.proposal.evidenceIds.length}건</small>{evaluationRun.status === 'waiting_confirmation' ? <div className="agent-review-actions"><button onClick={() => void saveProjectProposal()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={() => void resumeProjectTrend({ confirm: 'reject' })} disabled={busy}>거절</button></div> : evaluationRun.status === 'completed' && error ? <div className="agent-review-actions"><button onClick={() => void saveProjectProposal()} disabled={busy}>다시 저장</button></div> : null}</div> : null}
+      {scope === 'project' && evaluationRun?.failure ? <div className="agent-error" role="alert">{boundedError(new Error(evaluationRun.failure))}</div> : null}
+      {scope === 'project' && error ? <div className="agent-error" role="alert">{error}</div> : null}
+      {savedMessage ? <div className="agent-saved" role="status">{savedMessage}</div> : null}
     </div>
-    {pending ? <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{stageText(run!)}</span><button onClick={() => void cancel()}>취소</button></div> : null}
-    <form className="agent-composer" onSubmit={send}>
+    {scope === 'current' && pending ? <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{stageText(run!)}</span><button onClick={() => void cancel()}>취소</button></div> : null}
+    {scope === 'project' && evaluationRun ? <div className="agent-stage" role="status">{projectPending ? <LoaderCircle size={12} className="wb-spin" /> : null}<span>단계 {evaluationRun.depth} · 호출 {evaluationRun.calls} · 근거 {evaluationRun.evidence.length}</span>{evaluationRun.status === 'paused' ? <button onClick={() => void resumeProjectTrend({})} disabled={busy}>재시도</button> : null}</div> : null}
+    {scope === 'current' ? <form className="agent-composer" onSubmit={send}>
       <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="짧은 메시지 입력" rows={2} disabled={!run || busy} />
       <div><span>{run ? '분석 맥락에 추가' : '분석을 시작하면 입력할 수 있습니다'}</span><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
-    </form>
+    </form> : null}
   </aside>
 }

@@ -4,7 +4,8 @@ import { join, basename, resolve } from 'node:path'
 import type {
   ProjectArchiveExportPresetInput, ProjectArchiveInput, ProjectArtifactSourceRef, ProjectConnectArtifactsInput,
   ProjectCreateInput, ProjectEquipmentProfile, ProjectExportPreset, ProjectFolderRef, ProjectFolderStatus,
-  ProjectSaveExportPresetInput, ProjectSaveInput, ProjectSnapshot, ProjectTemplatePin
+  ProjectSaveExportPresetInput, ProjectSaveInput, ProjectSnapshot, ProjectTemplatePin, ProjectLpddrDevelopmentContext,
+  ProjectFailureHypothesis, ProjectEvaluationNode, ProjectEvidenceRecord, ProjectEvaluationDimensions
 } from '../shared/contracts'
 import type { JsonValue } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
@@ -47,6 +48,26 @@ const presetOptions = (value: unknown): Record<string, JsonValue> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('export preset options가 올바르지 않습니다.')
   return jsonValue(value) as Record<string, JsonValue>
 }
+const optionalText = (value: unknown, name: string, max = 240): string | undefined => value === undefined ? undefined : text(value, name, max)
+const optionalNumber = (value: unknown, name: string): number | undefined => {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return value
+}
+const optionalPositiveNumber = (value: unknown, name: string): number | undefined => {
+  const result = optionalNumber(value, name)
+  if (result !== undefined && result <= 0) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return result
+}
+const optionalDimension = (value: unknown, name: string): string | number | undefined => typeof value === 'number' ? optionalNumber(value, name) : optionalText(value, name)
+const status = (value: unknown, name: string): 'pass' | 'fail' | 'inconclusive' | 'running' => {
+  if (value === 'pass' || value === 'fail' || value === 'inconclusive' || value === 'running') return value
+  throw new Error(`${name}이(가) 올바르지 않습니다.`)
+}
+const origin = (value: unknown, name: string): 'engineer-confirmed' | 'ai-proposed' => {
+  if (value === 'engineer-confirmed' || value === 'ai-proposed') return value
+  throw new Error(`${name}이(가) 올바르지 않습니다.`)
+}
 
 export class ProjectStore {
   private readonly projects: AtomicJsonStore<ProjectDatabase>
@@ -62,6 +83,7 @@ export class ProjectStore {
     await Promise.all([this.projects.initialize(), this.roots.initialize()])
     const database = await this.projects.read()
     if (database.schemaVersion !== 2 || !database.projects) await this.projects.update(() => ({ schemaVersion: 2, projects: {} }))
+    else await this.projects.update((db) => { for (const project of Object.values(db.projects)) this.defaults(project) })
     const rootDatabase = await this.roots.read()
     if (rootDatabase.schemaVersion !== 2 || !rootDatabase.roots) await this.roots.update(() => ({ schemaVersion: 2, roots: {} }))
     await chmod(join(this.dataRoot, 'config', 'canonical-roots.json'), 0o600).catch(() => undefined)
@@ -70,7 +92,7 @@ export class ProjectStore {
 
   async create(input: ProjectCreateInput): Promise<ProjectSnapshot> {
     await this.initialize(); const name = text(input?.name, '프로젝트 이름'); const description = input?.description === undefined ? undefined : text(input.description, '설명', 2_000)
-    const project: StoredProject = { id: randomUUID(), name, ...(description ? { description } : {}), ...(input.onboardingAnswers ? { onboardingAnswers: input.onboardingAnswers } : {}), revision: 0, archived: false, createdAt: now(), updatedAt: now(), folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
+    const project: StoredProject = { id: randomUUID(), name, ...(description ? { description } : {}), ...(input.onboardingAnswers ? { onboardingAnswers: input.onboardingAnswers } : {}), revision: 0, archived: false, createdAt: now(), updatedAt: now(), folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [], lpddrDevelopmentContext: {}, failureHypotheses: [], evaluationNodes: [], evidenceRecords: [] }
     await this.projects.update((db) => { db.projects[project.id] = project })
     return this.public(project)
   }
@@ -87,6 +109,11 @@ export class ProjectStore {
       if (input.equipmentProfiles !== undefined) p.equipmentProfiles = this.profiles(input.equipmentProfiles)
       if (input.templatePins !== undefined) p.templatePins = this.pins(input.templatePins)
       if (input.exportPresets !== undefined) p.exportPresets = this.presets(input.exportPresets)
+      if (input.lpddrDevelopmentContext !== undefined) p.lpddrDevelopmentContext = this.context(input.lpddrDevelopmentContext)
+      if (input.failureHypotheses !== undefined || input.evaluationNodes !== undefined || input.evidenceRecords !== undefined) {
+        const memory = this.memory(input.failureHypotheses ?? p.failureHypotheses, input.evaluationNodes ?? p.evaluationNodes, input.evidenceRecords ?? p.evidenceRecords, p.artifacts)
+        p.failureHypotheses = memory.hypotheses; p.evaluationNodes = memory.nodes; p.evidenceRecords = memory.evidence
+      }
     })
   }
 
@@ -144,10 +171,62 @@ export class ProjectStore {
     await this.projects.update((db) => { const p = db.projects[projectKey]; if (!p) throw new Error('프로젝트를 찾을 수 없습니다.'); const wanted = revision(expected); if (p.revision !== wanted) throw new ProjectRevisionConflictError(wanted, p.revision); change(p); p.revision += 1; p.updatedAt = now(); result = p })
     return this.public(result!)
   }
-  private public(project: StoredProject): ProjectSnapshot { return { schemaVersion: 2, ...structuredClone(project) } }
+  private public(project: StoredProject): ProjectSnapshot { this.defaults(project); return { schemaVersion: 2, ...structuredClone(project) } }
   private async status(path: string | undefined): Promise<ProjectFolderStatus> { if (!path) return 'missing'; try { await stat(path); await access(path); return 'available' } catch (error) { const code = (error as NodeJS.ErrnoException).code; return code === 'EACCES' || code === 'EPERM' ? 'permission-denied' : 'missing' } }
   private pathError(error: unknown): Error { const code = (error as NodeJS.ErrnoException).code; return new Error(code === 'EACCES' || code === 'EPERM' ? '선택한 폴더에 접근할 권한이 없습니다.' : '선택한 폴더를 찾을 수 없습니다.') }
   private profiles(value: ProjectEquipmentProfile[]): ProjectEquipmentProfile[] { if (!Array.isArray(value)) throw new Error('장비 profile이 올바르지 않습니다.'); return value.map((p) => ({ alias: text(p.alias, '장비 alias', 120), profileId: id(p.profileId, 'profileId'), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
   private pins(value: ProjectTemplatePin[]): ProjectTemplatePin[] { if (!Array.isArray(value)) throw new Error('template pin이 올바르지 않습니다.'); return value.map((p) => ({ templateId: id(p.templateId, 'templateId'), revision: revision(p.revision), pinnedAt: text(p.pinnedAt, 'pinnedAt', 80) })) }
   private presets(value: ProjectExportPreset[]): ProjectExportPreset[] { if (!Array.isArray(value)) throw new Error('export preset이 올바르지 않습니다.'); return value.map((p) => ({ ...p, id: id(p.id, 'presetId'), name: text(p.name, 'preset 이름'), format: p.format, options: presetOptions(p.options), createdAt: text(p.createdAt, 'createdAt', 80), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
+  private defaults(project: StoredProject): void {
+    // v2 already permits these optional fields, so a corrupt legacy value can
+    // otherwise survive until an unrelated partial save combines it with new
+    // input. Normalize all memory fields as one transaction: a broken graph
+    // must never leave a partially trusted hypothesis/node/evidence set.
+    try {
+      project.lpddrDevelopmentContext = project.lpddrDevelopmentContext === undefined
+        ? {}
+        : this.context(project.lpddrDevelopmentContext)
+    } catch {
+      project.lpddrDevelopmentContext = {}
+    }
+    try {
+      const memory = this.memory(
+        project.failureHypotheses ?? [], project.evaluationNodes ?? [], project.evidenceRecords ?? [], project.artifacts
+      )
+      project.failureHypotheses = memory.hypotheses
+      project.evaluationNodes = memory.nodes
+      project.evidenceRecords = memory.evidence
+    } catch {
+      project.failureHypotheses = []
+      project.evaluationNodes = []
+      project.evidenceRecords = []
+    }
+  }
+  private context(value: ProjectLpddrDevelopmentContext): ProjectLpddrDevelopmentContext {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('LPDDR 개발 context가 올바르지 않습니다.')
+    return {
+      product: optionalText(value.product, 'product', 120), sku: optionalText(value.sku, 'sku', 120),
+      program: optionalText(value.program, 'program', 120), phase: optionalText(value.phase, 'phase', 120),
+      customer: optionalText(value.customer, 'customer', 160), targetDevice: optionalText(value.targetDevice, 'targetDevice', 160),
+      densityGb: optionalPositiveNumber(value.densityGb, 'densityGb'), nominalVoltage: optionalPositiveNumber(value.nominalVoltage, 'nominalVoltage'),
+    }
+  }
+  private dimensions(value: unknown): ProjectEvaluationDimensions {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('평가 조건이 올바르지 않습니다.')
+    const v = value as Record<string, unknown>
+    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), sample: optionalText(v.sample, 'sample', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
+  }
+  private memory(hypothesesValue: unknown, nodesValue: unknown, evidenceValue: unknown, artifacts: ProjectArtifactSourceRef[]): { hypotheses: ProjectFailureHypothesis[]; nodes: ProjectEvaluationNode[]; evidence: ProjectEvidenceRecord[] } {
+    if (!Array.isArray(hypothesesValue) || !Array.isArray(nodesValue) || !Array.isArray(evidenceValue) || hypothesesValue.length > 200 || nodesValue.length > 1_000 || evidenceValue.length > 5_000) throw new Error('평가 메모리 크기가 올바르지 않습니다.')
+    const hypotheses = hypothesesValue.map((value): ProjectFailureHypothesis => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('failure hypothesis가 올바르지 않습니다.'); return { id: id(v.id, 'hypothesisId'), title: text(v.title, 'hypothesis title', 240), ...(v.description === undefined ? {} : { description: text(v.description, 'hypothesis description', 2_000) }), origin: origin(v.origin, 'hypothesis origin'), ...(v.evaluationNodeIds === undefined ? {} : { evaluationNodeIds: this.ids(v.evaluationNodeIds, 'evaluationNodeIds', 1_000) }) } })
+    const nodes = nodesValue.map((value): ProjectEvaluationNode => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evaluation node가 올바르지 않습니다.'); return { id: id(v.id, 'nodeId'), ...(v.hypothesisId === undefined ? {} : { hypothesisId: id(v.hypothesisId, 'hypothesisId') }), ...(v.parentId === undefined ? {} : { parentId: id(v.parentId, 'parentId') }), ...(v.branchId === undefined ? {} : { branchId: id(v.branchId, 'branchId') }), name: text(v.name, 'node name', 240), dimensions: this.dimensions(v.dimensions), ...(v.status === undefined ? {} : { status: status(v.status, 'node status') }) } })
+    const nodeIds = new Set(nodes.map((node) => node.id)); const hypothesisIds = new Set(hypotheses.map((hypothesis) => hypothesis.id)); const sourceIds = new Set(artifacts.map((artifact) => artifact.sourceId)); this.unique(hypothesisIds, hypotheses.length, 'hypothesisId'); this.unique(nodeIds, nodes.length, 'nodeId')
+    if (nodes.some((node) => (node.parentId && !nodeIds.has(node.parentId)) || (node.hypothesisId && !hypothesisIds.has(node.hypothesisId)))) throw new Error('evaluation node 참조가 올바르지 않습니다.')
+    if (hypotheses.some((hypothesis) => hypothesis.evaluationNodeIds?.some((nodeId) => !nodeIds.has(nodeId)))) throw new Error('failure hypothesis 참조가 올바르지 않습니다.')
+    const evidence = evidenceValue.map((value): ProjectEvidenceRecord => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evidence record가 올바르지 않습니다.'); const record = { id: id(v.id, 'evidenceId'), evaluationNodeId: id(v.evaluationNodeId, 'evaluationNodeId'), status: status(v.status, 'evidence status'), sourceIds: this.ids(v.sourceIds, 'sourceIds', 200), ...(v.occurredAt === undefined ? {} : { occurredAt: text(v.occurredAt, 'occurredAt', 80) }), ...(v.result === undefined ? {} : { result: text(v.result, 'result', 2_000) }), ...(v.dimensions === undefined ? {} : { dimensions: this.dimensions(v.dimensions) }), ...(v.note === undefined ? {} : { note: text(v.note, 'note', 4_000) }), ...(v.origin === undefined ? {} : { origin: origin(v.origin, 'evidence origin') }) }; if (!nodeIds.has(record.evaluationNodeId) || record.sourceIds.some((sourceId) => !sourceIds.has(sourceId))) throw new Error('evidence record 참조가 올바르지 않습니다.'); return record })
+    this.unique(new Set(evidence.map((record) => record.id)), evidence.length, 'evidenceId')
+    return { hypotheses, nodes, evidence }
+  }
+  private ids(value: unknown, name: string, max: number): string[] { if (!Array.isArray(value) || value.length > max) throw new Error(`${name}이(가) 올바르지 않습니다.`); const values = value.map((item) => id(item, name)); this.unique(new Set(values), values.length, name); return values }
+  private unique(values: Set<string>, expected: number, name: string): void { if (values.size !== expected) throw new Error(`${name}이(가) 중복되었습니다.`) }
 }

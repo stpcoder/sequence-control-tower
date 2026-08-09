@@ -22,6 +22,11 @@ import type {
   EvaluationSaveDecisionInput,
   EvaluationSaveRecipeInput,
   EvaluationSaveRecipeAndBatchInput,
+  EvaluationAgentMemoryPayloadRequest,
+  EvaluationAgentResumeRequest,
+  EvaluationAgentStartRequest,
+  EvaluationAgentMemoryPayloadView,
+  EvaluationAgentSessionView,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   StartAnalysisInput,
@@ -36,6 +41,7 @@ import { isSameRendererDocument } from './renderer-document'
 import { WikiService } from './wiki-service'
 import { ProjectStore } from './project-store'
 import { AgentService } from './agent-service'
+import { EvaluationAgentService } from './evaluation-agent-service'
 import { createHash } from 'node:crypto'
 import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
 import type { WebContents } from 'electron'
@@ -48,6 +54,7 @@ interface Services {
   wiki: WikiService
   projects: ProjectStore
   agent: AgentService
+  evaluationAgent?: EvaluationAgentService
 }
 
 const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -58,6 +65,10 @@ const agentOwners = new Map<string, number>()
 const agentRunsBySender = new Map<number, Set<string>>()
 const agentSenders = new Map<number, WebContents>()
 const agentSenderCleanup = new Map<number, () => void>()
+const evaluationAgentOwners = new Map<string, number>()
+const evaluationAgentSessionsBySender = new Map<number, Set<string>>()
+const evaluationAgentSenders = new Map<number, WebContents>()
+const evaluationAgentSenderCleanup = new Map<number, () => void>()
 let agentUpdateUnsubscribe: (() => void) | null = null
 let registeredAgent: AgentService | null = null
 const FOLDER_IMPORT_IN_PROGRESS_ERROR =
@@ -87,6 +98,34 @@ function handle(
     if (!isTrustedSender(event)) throw new Error('IPC 요청이 차단되었습니다.')
     return listener(event, ...args)
   })
+}
+
+function safeAgentText(value: unknown, max = 800): string {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
+}
+function safeEvidenceSummary(value: unknown): string {
+  return safeAgentText(value, 500)
+    .replace(/(?:[A-Za-z]:[\\/]|\\\\|\/)(?:[^\\/\s]+[\\/])+[^\\/\s,;)]*/g, '<PATH>')
+    .replace(/\b(?:api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, '<SECRET>')
+}
+
+/** Removes excerpts/aggregates so the renderer sees decisions, not raw log text. */
+function evaluationAgentView(session: import('../../src/domain/evaluation-agent').EvaluationAgentSession): EvaluationAgentSessionView {
+  return {
+    schemaVersion: 1, id: session.id, status: session.status, depth: session.depth, calls: session.calls, searches: session.searches,
+    files: session.files.map((file) => ({ sourceId: file.id, name: safeAgentText(file.name, 240), lineCount: file.lineCount, size: file.size, dimensions: file.metadata })),
+    evidence: session.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, sourceId: evidence.fileId, summary: safeAgentText(evidence.detail, 400) })),
+    transcript: session.transcript.map((item) => ({ at: item.at, role: item.role, type: item.type })),
+    dimensions: session.context.dimensions, question: session.question, proposal: session.proposal, failure: session.failure ? safeAgentText(session.failure, 300) : undefined
+  }
+}
+
+function evaluationMemoryView(payload: NonNullable<ReturnType<EvaluationAgentService['memorySavePayload']>>): EvaluationAgentMemoryPayloadView {
+  return {
+    hypothesis: payload.hypothesis,
+    node: payload.node,
+    evidence: payload.evidence.map((item) => ({ id: item.id, projectId: item.projectId, evaluationNodeId: item.evaluationNodeId, status: item.status, result: item.result, dimensions: item.dimensions, sourceIds: item.logRef ? [item.logRef] : [], summary: safeEvidenceSummary(item.note), origin: item.origin }))
+  }
 }
 
 export function registerIpc(services: Services): void {
@@ -143,6 +182,31 @@ export function registerIpc(services: Services): void {
 
   const requireAgentOwner = (event: IpcMainInvokeEvent, runId: string): void => {
     if (agentOwners.get(runId) !== event.sender.id) throw new Error('agent run을 찾을 수 없습니다.')
+  }
+  const evaluationAgent = (): EvaluationAgentService => {
+    if (!services.evaluationAgent) throw new Error('evaluation agent is unavailable')
+    return services.evaluationAgent
+  }
+  const removeEvaluationAgentOwner = (sessionId: string): void => {
+    const senderId = evaluationAgentOwners.get(sessionId); if (senderId === undefined) return
+    evaluationAgentOwners.delete(sessionId); const ids = evaluationAgentSessionsBySender.get(senderId); ids?.delete(sessionId)
+    if (ids?.size) return
+    evaluationAgentSessionsBySender.delete(senderId); const sender = evaluationAgentSenders.get(senderId); const cleanup = evaluationAgentSenderCleanup.get(senderId)
+    if (sender && cleanup) sender.removeListener('destroyed', cleanup)
+    evaluationAgentSenderCleanup.delete(senderId); evaluationAgentSenders.delete(senderId)
+  }
+  const registerEvaluationAgentOwner = (sender: WebContents, sessionId: string): void => {
+    const senderId = sender.id; evaluationAgentOwners.set(sessionId, senderId)
+    let ids = evaluationAgentSessionsBySender.get(senderId)
+    if (!ids) {
+      ids = new Set(); evaluationAgentSessionsBySender.set(senderId, ids); evaluationAgentSenders.set(senderId, sender)
+      const cleanup = (): void => { [...(evaluationAgentSessionsBySender.get(senderId) ?? [])].forEach(removeEvaluationAgentOwner) }
+      evaluationAgentSenderCleanup.set(senderId, cleanup); sender.once('destroyed', cleanup)
+    }
+    ids.add(sessionId)
+  }
+  const requireEvaluationAgentOwner = (event: IpcMainInvokeEvent, sessionId: string): void => {
+    if (evaluationAgentOwners.get(sessionId) !== event.sender.id) throw new Error('evaluation agent session not found')
   }
 
   const hydrateProject = async (project: ProjectSnapshot | null): Promise<ProjectLoadResult | null> => {
@@ -351,6 +415,27 @@ export function registerIpc(services: Services): void {
     return services.agent.cancel(input as never)
   })
 
+  handle(IPC_CHANNELS.evaluationAgentStart, async (event, input) => {
+    const session = await evaluationAgent().start(input as EvaluationAgentStartRequest)
+    if (event.sender.isDestroyed()) return evaluationAgentView(session)
+    registerEvaluationAgentOwner(event.sender, session.id)
+    return evaluationAgentView(session)
+  })
+  handle(IPC_CHANNELS.evaluationAgentGet, (event, id) => {
+    const sessionId = String(id ?? ''); requireEvaluationAgentOwner(event, sessionId)
+    const session = evaluationAgent().get(sessionId); return session ? evaluationAgentView(session) : null
+  })
+  handle(IPC_CHANNELS.evaluationAgentResume, async (event, input) => {
+    const value = input as EvaluationAgentResumeRequest; requireEvaluationAgentOwner(event, value.sessionId)
+    return evaluationAgentView(await evaluationAgent().resume(value.sessionId, { answer: value.answer, confirm: value.confirm }))
+  })
+  handle(IPC_CHANNELS.evaluationAgentMemorySavePayload, (event, input) => {
+    const value = input as EvaluationAgentMemoryPayloadRequest; requireEvaluationAgentOwner(event, value.sessionId)
+    const prefix = safeAgentText(value.evidenceIdPrefix, 120); if (!prefix) throw new Error('invalid evidence ID prefix')
+    const payload = evaluationAgent().memorySavePayload(value.sessionId, { projectId: value.projectId, hypothesisId: value.hypothesisId, nodeId: value.nodeId, evidenceId: (id) => `${prefix}-${safeAgentText(id, 120)}` })
+    return payload ? evaluationMemoryView(payload) : null
+  })
+
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())
   handle(IPC_CHANNELS.settingsSaveLlm, (_event, input) =>
     services.llmConfig.save(input as LlmConfigInput)
@@ -390,6 +475,8 @@ export function unregisterIpc(): void {
   agentSenders.clear()
   agentRunsBySender.clear()
   agentOwners.clear()
+  evaluationAgentSenderCleanup.forEach((cleanup, senderId) => evaluationAgentSenders.get(senderId)?.removeListener('destroyed', cleanup))
+  evaluationAgentSenderCleanup.clear(); evaluationAgentSenders.clear(); evaluationAgentSessionsBySender.clear(); evaluationAgentOwners.clear()
   activeArtifactSearches.forEach((controller) => controller.abort())
   activeArtifactSearches.clear()
   activeArtifactEvidenceInspections.forEach((controller) => controller.abort())

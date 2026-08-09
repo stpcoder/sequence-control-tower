@@ -754,16 +754,43 @@ export interface ProjectOnboardingAnswers {
   importantMetadata?: string
   reuseRules?: string
 }
+/** Structured, renderer-safe LPDDR evaluation memory. It is deliberately
+ * duplicated here rather than importing domain code into preload/main. */
+export type ProjectEvaluationStatus = 'pass' | 'fail' | 'inconclusive' | 'running'
+export type ProjectAssessmentOrigin = 'engineer-confirmed' | 'ai-proposed'
+export interface ProjectLpddrDevelopmentContext {
+  product?: string; sku?: string; program?: string; phase?: string; customer?: string; targetDevice?: string
+  densityGb?: number; nominalVoltage?: number
+}
+export interface ProjectEvaluationDimensions {
+  sku?: string; lot?: string; sample?: string; bl?: string | number; dq?: string | number
+  channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number
+  frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string
+}
+export interface ProjectFailureHypothesis {
+  id: string; title: string; description?: string; origin: ProjectAssessmentOrigin; evaluationNodeIds?: string[]
+}
+export interface ProjectEvaluationNode {
+  id: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string
+  dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
+}
+export interface ProjectEvidenceRecord {
+  id: string; evaluationNodeId: string; occurredAt?: string; status: ProjectEvaluationStatus; result?: string
+  dimensions?: Partial<ProjectEvaluationDimensions>; sourceIds: string[]; note?: string; origin?: ProjectAssessmentOrigin
+}
 export interface ProjectSnapshot {
   schemaVersion: 2; id: string; name: string; description?: string; revision: number; archived: boolean
   createdAt: string; updatedAt: string; folders: ProjectFolderRef[]; artifacts: ProjectArtifactSourceRef[]
   equipmentProfiles: ProjectEquipmentProfile[]; templatePins: ProjectTemplatePin[]; exportPresets: ProjectExportPreset[]
   onboardingAnswers?: ProjectOnboardingAnswers
+  /** Present as empty values for newly-created/reloaded projects; optional for v2 compatibility. */
+  lpddrDevelopmentContext?: ProjectLpddrDevelopmentContext; failureHypotheses?: ProjectFailureHypothesis[]
+  evaluationNodes?: ProjectEvaluationNode[]; evidenceRecords?: ProjectEvidenceRecord[]
 }
 export interface ProjectCreateInput { name: string; description?: string; onboardingAnswers?: ProjectOnboardingAnswers }
 export interface ProjectListInput { includeArchived?: boolean }
 export interface ProjectRequest { projectId: string }
-export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[]; onboardingAnswers?: ProjectOnboardingAnswers }
+export interface ProjectSaveInput extends ProjectRequest { expectedRevision: number; name?: string; description?: string; equipmentProfiles?: ProjectEquipmentProfile[]; templatePins?: ProjectTemplatePin[]; exportPresets?: ProjectExportPreset[]; onboardingAnswers?: ProjectOnboardingAnswers; lpddrDevelopmentContext?: ProjectLpddrDevelopmentContext; failureHypotheses?: ProjectFailureHypothesis[]; evaluationNodes?: ProjectEvaluationNode[]; evidenceRecords?: ProjectEvidenceRecord[] }
 export interface ProjectArchiveInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectFolderInput extends ProjectRequest { expectedRevision: number }
 export interface ProjectDetachFolderInput extends ProjectFolderInput { rootId: string }
@@ -788,6 +815,29 @@ export interface SequenceIntelligenceProjectsApi {
 }
 
 export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'preferences'
+
+/** Renderer-safe, bounded projection of the native evaluation-agent session. */
+export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
+export type EvaluationAgentPublicOutcome = 'PASS' | 'FAIL' | 'UNKNOWN'
+/** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
+export interface EvaluationAgentDimensions { sample?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
+export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
+export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
+export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
+export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[] }
+export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string }
+export interface EvaluationAgentSessionView {
+  schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number
+  files: Array<{ sourceId: string; name: string; lineCount?: number; size?: number; dimensions?: Partial<EvaluationAgentDimensions> }>
+  evidence: EvaluationAgentEvidenceView[]; transcript: Array<{ at: string; role: 'runtime' | 'provider' | 'user'; type: string }>
+  dimensions: Partial<EvaluationAgentDimensions>; question?: EvaluationAgentQuestionView; proposal?: EvaluationAgentProposalView; failure?: string
+}
+export interface EvaluationAgentMemoryPayloadRequest { sessionId: string; projectId: string; hypothesisId: string; nodeId: string; evidenceIdPrefix: string }
+export interface EvaluationAgentMemoryPayloadView {
+  hypothesis: { id: string; projectId: string; title: string; description?: string; origin: 'ai-proposed' | 'engineer-confirmed'; evaluationNodeIds?: string[] }
+  node: { id: string; projectId: string; hypothesisId?: string; name: string; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running' }
+  evidence: Array<{ id: string; projectId: string; evaluationNodeId: string; status: 'pass' | 'fail' | 'inconclusive' | 'running'; result?: string; dimensions?: Partial<EvaluationAgentDimensions>; sourceIds: string[]; summary?: string; origin?: 'ai-proposed' | 'engineer-confirmed' }>
+}
 
 /** This is the only API exposed by contextBridge. */
 export interface SequenceIntelligenceApi {
@@ -819,6 +869,12 @@ export interface SequenceIntelligenceApi {
     confirm(input: AgentConfirmInput): Promise<AgentConfirmResult>
     cancel(input: AgentCancelInput): Promise<AgentRun>
     onRunUpdate(listener: (run: AgentRun) => void): () => void
+  }
+  evaluationAgent: {
+    start(input: EvaluationAgentStartRequest): Promise<EvaluationAgentSessionView>
+    get(sessionId: string): Promise<EvaluationAgentSessionView | null>
+    resume(input: EvaluationAgentResumeRequest): Promise<EvaluationAgentSessionView>
+    memorySavePayload(input: EvaluationAgentMemoryPayloadRequest): Promise<EvaluationAgentMemoryPayloadView | null>
   }
   settings: {
     getLlm(): Promise<LlmConfigSummary>
@@ -860,6 +916,8 @@ export const IPC_CHANNELS = {
   analysisUpdate: 'analysis:update',
   agentStart: 'agent:start', agentGet: 'agent:get', agentAnswer: 'agent:answer', agentMessage: 'agent:message',
   agentConfirm: 'agent:confirm', agentCancel: 'agent:cancel', agentUpdate: 'agent:update',
+  evaluationAgentStart: 'evaluation-agent:start', evaluationAgentGet: 'evaluation-agent:get',
+  evaluationAgentResume: 'evaluation-agent:resume', evaluationAgentMemorySavePayload: 'evaluation-agent:memory-save-payload',
   settingsGetLlm: 'settings:get-llm',
   settingsSaveLlm: 'settings:save-llm',
   settingsDiscoverModels: 'settings:discover-models',

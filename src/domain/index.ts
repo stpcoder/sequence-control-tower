@@ -8,3 +8,4 @@ export * from "./diff";
 export * from "./lineage";
 export * from "./analyze";
 export * from "./demo";
+export * from "./evaluation-memory";

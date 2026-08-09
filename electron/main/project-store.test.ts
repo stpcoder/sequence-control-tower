@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -52,5 +52,60 @@ describe('ProjectStore', () => {
       projectId: saved.id, expectedRevision: saved.revision,
       preset: { id: 'layout', name: 'Layout', format: 'json', options: { invalid: new Date() } as unknown as Record<string, never> },
     })).rejects.toThrow('JSON')
+  })
+
+  it('creates, saves, and reloads bounded LPDDR evaluation memory through projects.save', async () => {
+    const dataRoot = await tempRoot(); const folder = await mkdtemp(join(tmpdir(), 'project-folder-')); roots.push(folder)
+    const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'LPDDR6' })
+    const attached = await store.attachFolder(project.id, project.revision, folder)
+    const connected = await store.connectArtifacts({ projectId: project.id, expectedRevision: attached.revision, artifacts: [{ sourceId: 'log-vperi', rootId: attached.folders[0].rootId, artifactId: 'artifact-vperi', relativePath: 'vperi.log' }] })
+    const payload = {
+      projectId: project.id, expectedRevision: connected.revision,
+      lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'H9L6', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
+      failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
+      evaluationNodes: [
+        { id: 'base', name: 'baseline', dimensions: { bl: 16, temperatureC: 85 } },
+        { id: 'dq9', parentId: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9', dimensions: { dq: 9, testMode: 'VPERI' }, status: 'fail' as const },
+      ],
+      evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
+    }
+    const saved = await store.save(payload)
+    expect(saved.lpddrDevelopmentContext).toEqual(payload.lpddrDevelopmentContext)
+    expect(saved.evidenceRecords).toEqual(payload.evidenceRecords)
+    expect((await new ProjectStore(dataRoot).get(project.id))?.evaluationNodes).toEqual(payload.evaluationNodes)
+    await expect(store.save({ ...payload, expectedRevision: saved.revision, evidenceRecords: [{ ...payload.evidenceRecords[0], id: 'bad', sourceIds: ['not-connected'] }] })).rejects.toThrow('evidence record')
+    await expect(store.save({ ...payload, expectedRevision: saved.revision, lpddrDevelopmentContext: { ...payload.lpddrDevelopmentContext, nominalVoltage: 0 } })).rejects.toThrow('nominalVoltage')
+    await expect(store.save({ ...payload, expectedRevision: saved.revision, lpddrDevelopmentContext: { ...payload.lpddrDevelopmentContext, densityGb: -1 } })).rejects.toThrow('densityGb')
+  })
+
+  it('adds empty LPDDR memory fields when reading a legacy v2 project and rejects broken references', async () => {
+    const dataRoot = await tempRoot(); await mkdir(join(dataRoot, 'metadata'), { recursive: true })
+    await writeFile(join(dataRoot, 'metadata', 'projects.json'), JSON.stringify({ schemaVersion: 2, projects: {
+      legacy: { id: 'legacy', name: 'Legacy', revision: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] },
+    } }))
+    const store = new ProjectStore(dataRoot); const legacy = await store.get('legacy')
+    expect(legacy).toMatchObject({ lpddrDevelopmentContext: {}, failureHypotheses: [], evaluationNodes: [], evidenceRecords: [] })
+    await expect(store.save({ projectId: 'legacy', expectedRevision: 0, evaluationNodes: [{ id: 'orphan', parentId: 'missing', name: 'orphan', dimensions: {} }] })).rejects.toThrow('evaluation node')
+  })
+
+  it('atomically clears malformed present legacy memory before later partial saves', async () => {
+    const dataRoot = await tempRoot(); await mkdir(join(dataRoot, 'metadata'), { recursive: true })
+    await writeFile(join(dataRoot, 'metadata', 'projects.json'), JSON.stringify({ schemaVersion: 2, projects: {
+      broken: {
+        id: 'broken', name: 'Broken', revision: 3, archived: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [],
+        lpddrDevelopmentContext: ['not-an-object'],
+        failureHypotheses: { id: 'not-an-array' },
+        evaluationNodes: [{ id: 'n1', hypothesisId: 'missing', name: 'orphan', dimensions: {} }],
+        evidenceRecords: [{ id: 'e1', evaluationNodeId: 'n1', status: 'fail', sourceIds: [] }],
+      },
+    } }))
+    const store = new ProjectStore(dataRoot); const normalized = await store.get('broken')
+    expect(normalized).toMatchObject({ lpddrDevelopmentContext: {}, failureHypotheses: [], evaluationNodes: [], evidenceRecords: [] })
+    const renamed = await store.save({ projectId: 'broken', expectedRevision: 3, name: 'Recovered' })
+    expect(renamed.name).toBe('Recovered')
+    expect(renamed.evidenceRecords).toEqual([])
+    const persisted = JSON.parse(await readFile(join(dataRoot, 'metadata', 'projects.json'), 'utf8'))
+    expect(persisted.projects.broken.lpddrDevelopmentContext).toEqual({})
+    expect(persisted.projects.broken.failureHypotheses).toEqual([])
   })
 })

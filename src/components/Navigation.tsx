@@ -1,6 +1,7 @@
 import {
   FileSearch2,
   GitBranch,
+  History,
   ScanSearch,
   Settings,
   Table2,
@@ -11,6 +12,7 @@ const primary = [
   { id: 'workbench' as const, label: '로그', icon: FileSearch2 },
   { id: 'results' as const, label: '결과', icon: Table2 },
   { id: 'patterns' as const, label: '결과 정리', icon: ScanSearch },
+  { id: 'history' as const, label: '평가 이력', icon: History },
 ]
 
 export function Navigation({ active, onChange }: { active: AppPage; onChange: (page: AppPage) => void; onAgentOpen?: () => void }) {

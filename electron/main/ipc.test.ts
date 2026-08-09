@@ -80,6 +80,10 @@ const agentOnUpdate = vi.fn((listener: (run: unknown) => void) => {
   agentUpdate.unsubscribe = vi.fn()
   return agentUpdate.unsubscribe
 })
+const evaluationAgentStart = vi.fn(async () => ({ id: 'eval-1', status: 'paused', schemaVersion: 1, files: [], evidence: [], transcript: [], context: { dimensions: {} }, depth: 0, calls: 0, searches: 0 }))
+const evaluationAgentGet = vi.fn(() => ({ id: 'eval-1', status: 'paused', schemaVersion: 1, files: [], evidence: [], transcript: [], context: { dimensions: {} }, depth: 0, calls: 0, searches: 0 }))
+const evaluationAgentResume = vi.fn(async () => ({ id: 'eval-1', status: 'completed', schemaVersion: 1, files: [], evidence: [], transcript: [], context: { dimensions: {} }, depth: 0, calls: 1, searches: 0 }))
+const evaluationAgentMemory = vi.fn(() => null)
 const services = {
   artifacts: {
     search: search.fn,
@@ -89,7 +93,8 @@ const services = {
   },
   evaluations: { saveRecipeAndBatch, archiveRecipe },
   llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() },
-  agent: { start: agentStart, get: agentGet, answer: vi.fn(), message: vi.fn(), confirm: vi.fn(), cancel: agentCancel, onUpdate: agentOnUpdate, cancelAll: agentCancelAll }
+  agent: { start: agentStart, get: agentGet, answer: vi.fn(), message: vi.fn(), confirm: vi.fn(), cancel: agentCancel, onUpdate: agentOnUpdate, cancelAll: agentCancelAll },
+  evaluationAgent: { start: evaluationAgentStart, get: evaluationAgentGet, resume: evaluationAgentResume, memorySavePayload: evaluationAgentMemory }
 } as unknown as Parameters<typeof registerIpc>[0]
 
 function trustedEvent(senderId = 42): unknown {
@@ -132,6 +137,7 @@ beforeEach(() => {
   agentCancel.mockClear()
   agentCancelAll.mockClear()
   agentOnUpdate.mockClear()
+  evaluationAgentStart.mockClear(); evaluationAgentGet.mockClear(); evaluationAgentResume.mockClear(); evaluationAgentMemory.mockClear()
   agentUpdate.current = null
   agentUpdate.unsubscribe = null
   search.requests.length = 0
@@ -224,6 +230,32 @@ describe('agent IPC ownership', () => {
 
     expect(agentCancelAll).toHaveBeenCalledOnce()
     expect(agentUpdate.unsubscribe).toHaveBeenCalledOnce()
+  })
+})
+
+describe('evaluation-agent IPC ownership and projection', () => {
+  it('rejects cross-renderer session access and routes only the safe API', async () => {
+    const first = trustedEvent(11)
+    await invokeEvent(IPC_CHANNELS.evaluationAgentStart, first, { projectId: 'p1', sourceIds: ['s1'] })
+    await expect(invokeEvent(IPC_CHANNELS.evaluationAgentGet, trustedEvent(22), 'eval-1')).rejects.toThrow('evaluation agent session not found')
+    await expect(invokeEvent(IPC_CHANNELS.evaluationAgentResume, first, { sessionId: 'eval-1', confirm: 'accept' })).resolves.toMatchObject({ id: 'eval-1', status: 'completed' })
+    expect(evaluationAgentResume).toHaveBeenCalledWith('eval-1', { answer: undefined, confirm: 'accept' })
+  })
+
+  it('strips raw excerpts and transcript detail from renderer responses', async () => {
+    evaluationAgentStart.mockResolvedValueOnce({ id: 'eval-safe', status: 'paused', schemaVersion: 1, depth: 0, calls: 0, searches: 0, files: [{ id: 's1', name: 'safe.log', metadata: {} }], evidence: [{ id: 'e1', kind: 'window', fileId: 's1', detail: 'lines 1-2', excerpt: '/Users/private/token=secret' }], transcript: [{ at: 'now', role: 'provider', type: 'planner-action', detail: '/Users/private/token=secret' }], context: { dimensions: {}, aggregate: '/Users/private/token=secret' } } as never)
+    const view = await invokeEvent(IPC_CHANNELS.evaluationAgentStart, trustedEvent(33), { projectId: 'p1' }) as Record<string, unknown>
+    expect(JSON.stringify(view)).not.toContain('/Users/private'); expect(JSON.stringify(view)).not.toContain('token=secret')
+    expect((view.transcript as Array<Record<string, unknown>>)[0].detail).toBeUndefined()
+  })
+
+  it('projects durable source IDs and a sanitized bounded evidence summary', async () => {
+    await invokeEvent(IPC_CHANNELS.evaluationAgentStart, trustedEvent(44), { projectId: 'p1' })
+    evaluationAgentMemory.mockReturnValueOnce({ hypothesis: { id: 'h', projectId: 'p1', title: 'x', origin: 'ai-proposed' }, node: { id: 'n', projectId: 'p1', name: 'x', dimensions: {} }, evidence: [{ id: 'e', projectId: 'p1', evaluationNodeId: 'n', status: 'fail', logRef: 'source-a', note: '/Users/private/token=secret useful line', origin: 'ai-proposed' }] } as never)
+    const payload = await invokeEvent(IPC_CHANNELS.evaluationAgentMemorySavePayload, trustedEvent(44), { sessionId: 'eval-1', projectId: 'p1', hypothesisId: 'h', nodeId: 'n', evidenceIdPrefix: 'e' }) as { evidence: Array<{ sourceIds: string[]; summary?: string }> }
+    expect(payload.evidence[0].sourceIds).toEqual(['source-a'])
+    expect(payload.evidence[0].summary).toContain('<PATH>')
+    expect(payload.evidence[0].summary).not.toContain('secret')
   })
 })
 

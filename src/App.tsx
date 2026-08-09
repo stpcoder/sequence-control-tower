@@ -39,7 +39,10 @@ import type {
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
-import { matchesPersistedSource } from './state/sourceIdentity'
+import { matchesPersistedSource, resolveProjectSource } from './state/sourceIdentity'
+import { evaluationMemoryToProjectSave, projectSnapshotToEvaluationMemory } from './state/evaluationMemory'
+import type { EvaluationMemory } from './domain/evaluation-memory'
+import { EvaluationMemoryView, type AvailableEvaluationLog } from './views/EvaluationMemoryView'
 
 const PROJECT_ID = 'log-workbench'
 
@@ -212,6 +215,49 @@ function initialFiles(): WorkbenchFile[] {
   return window.sequenceIntelligence ? [] : DEMO_LOGS
 }
 
+function previewEvaluationMemory(): EvaluationMemory {
+  return { project: { id: PROJECT_ID, name: '웹 미리보기 평가 이력' }, hypotheses: [], nodes: [], evidence: [] }
+}
+
+export function availableEvaluationLogs(records: readonly LogResultRecord[], files: readonly WorkbenchFile[], project: ProjectSnapshot | null): AvailableEvaluationLog[] {
+  const filesById = new Map(files.map((file) => [file.id, file]))
+  return records.flatMap((record) => {
+    const file = filesById.get(record.id)
+    const source = project && file ? resolveProjectSource(project, file) : null
+    // Electron persistence accepts only a connected project source. The browser
+    // preview intentionally falls back to the renderer identity.
+    if (project && !source) return []
+    const temperature = record.temperature.value === null ? Number.NaN : Number(record.temperature.value)
+    return [{
+      id: source?.sourceId ?? record.id, openId: file?.id ?? record.id, name: record.fileName, result: record.result,
+      ...(record.sample.value ? { sample: record.sample.value } : {}),
+      ...(Number.isFinite(temperature) ? { temperatureC: temperature } : {}),
+      ...(record.mode.value ? { mode: record.mode.value } : {}),
+      ...(record.grid.value ? { grid: record.grid.value } : {}),
+    }]
+  })
+}
+
+/** Serializes requests and reads the current project immediately before each save. */
+export function createLatestProjectSaveQueue<TProject, TValue>(
+  getProject: () => TProject | null,
+  save: (project: TProject, value: TValue) => Promise<TProject>,
+  onSaved: (project: TProject) => void,
+): (value: TValue) => Promise<TProject | null> {
+  let tail: Promise<void> = Promise.resolve()
+  return (value) => {
+    const task = tail.then(async () => {
+      const project = getProject()
+      if (!project) return null
+      const saved = await save(project, value)
+      onSaved(saved)
+      return saved
+    })
+    tail = task.then(() => undefined, () => undefined)
+    return task
+  }
+}
+
 export default function App() {
   const [activePage, setActivePage] = useState<AppPage>(readInitialPage)
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
@@ -220,6 +266,7 @@ export default function App() {
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
+  const [previewMemory, setPreviewMemory] = useState<EvaluationMemory>(previewEvaluationMemory)
   const activeProjectId = project?.id ?? PROJECT_ID
   const projectGeneration = useRef(0)
   const [previewMetadataApprovals, setPreviewMetadataApprovals] = useState<MetadataApprovalsBySource>({})
@@ -229,7 +276,11 @@ export default function App() {
   const shownStorageNotice = useRef('')
   const lifecycleRef = useRef<AppLifecycle>({ mounted: false, generation: 0 })
   const filesRef = useRef(files)
+  const projectRef = useRef<ProjectSnapshot | null>(project)
+  const projectUpdatedRef = useRef<(next: ProjectSnapshot) => void>(() => undefined)
+  const notifyRef = useRef<(message: string, tone?: 'success' | 'error' | 'info', generation?: number) => void>(() => undefined)
   filesRef.current = files
+  projectRef.current = project
 
   useEffect(() => {
     return setupAppLifecycle(lifecycleRef.current)
@@ -240,6 +291,7 @@ export default function App() {
     if (!isAppLifecycleActive(lifecycle, generation)) return
     setToast({ message, tone })
   }, [])
+  notifyRef.current = notify
 
   const navigate = useCallback((page: AppPage) => {
     setActivePage(page)
@@ -325,6 +377,7 @@ export default function App() {
     setFiles(next.files)
     setSelectedFileId(next.selectedFileId)
   }, [project, selectedFileId])
+  projectUpdatedRef.current = projectUpdated
 
   useEffect(() => {
     const api = window.sequenceIntelligence
@@ -369,6 +422,9 @@ export default function App() {
     () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals),
     [evidenceCounts, files, metadataApprovals, persistedEvidenceCounts],
   )
+
+  const memory = useMemo(() => project ? projectSnapshotToEvaluationMemory(project) : previewMemory, [previewMemory, project])
+  const availableLogs = useMemo(() => availableEvaluationLogs(records, files, project), [files, project, records])
 
   const durableRules = useMemo<readonly RecipeRule[] | undefined>(() => {
     if (!window.sequenceIntelligence?.evaluations || !evaluationSnapshot) return undefined
@@ -526,6 +582,57 @@ export default function App() {
     navigate('workbench')
   }, [navigate])
 
+  const memorySaveQueue = useRef<ReturnType<typeof createLatestProjectSaveQueue<ProjectSnapshot, EvaluationMemory>> | null>(null)
+  if (!memorySaveQueue.current) {
+    memorySaveQueue.current = createLatestProjectSaveQueue(
+      () => projectRef.current,
+      async (currentProject, nextMemory) => {
+        const api = window.sequenceIntelligence
+        if (!api?.projects) return currentProject
+        const payload = evaluationMemoryToProjectSave(nextMemory)
+        const save = (target: ProjectSnapshot) => api.projects.save({ ...payload, projectId: target.id, expectedRevision: target.revision })
+        try {
+          const saved = await save(currentProject)
+          notifyRef.current('평가 이력을 저장했습니다.')
+          return saved
+        } catch (error) {
+          const conflict = error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
+          if (!conflict) {
+            notifyRef.current(error instanceof Error ? `평가 이력을 저장하지 못했습니다: ${error.message}` : '평가 이력을 저장하지 못했습니다.', 'error')
+            throw error
+          }
+          try {
+            const refreshed = await api.projects.get({ projectId: currentProject.id })
+            if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+            const remoteMemory = evaluationMemoryToProjectSave(projectSnapshotToEvaluationMemory(refreshed))
+            const baselineMemory = evaluationMemoryToProjectSave(projectSnapshotToEvaluationMemory(currentProject))
+            if (JSON.stringify(remoteMemory) !== JSON.stringify(baselineMemory)) {
+              notifyRef.current('다른 변경으로 평가 이력이 갱신되었습니다. 최신 프로젝트를 불러왔습니다. 다시 시도하세요.', 'info')
+              projectRef.current = refreshed
+              projectUpdatedRef.current(refreshed)
+              throw new Error('다른 변경으로 평가 이력이 갱신되었습니다.')
+            }
+            const saved = await save(refreshed)
+            notifyRef.current('최신 프로젝트 기준으로 평가 이력을 저장했습니다.')
+            return saved
+          } catch (retryError) {
+            notifyRef.current(retryError instanceof Error ? `평가 이력을 저장하지 못했습니다: ${retryError.message}` : '평가 이력을 저장하지 못했습니다.', 'error')
+            throw retryError
+          }
+        }
+      },
+      (saved) => { projectRef.current = saved; projectUpdatedRef.current(saved) },
+    )
+  }
+  const saveEvaluationMemory = useCallback(async (nextMemory: EvaluationMemory) => {
+    if (!window.sequenceIntelligence?.projects || !projectRef.current) {
+      setPreviewMemory(nextMemory)
+      notify('웹 미리보기에서는 평가 이력이 로컬 상태로만 유지됩니다. 프로젝트를 열면 저장할 수 있습니다.', 'info')
+      return
+    }
+    await memorySaveQueue.current!(nextMemory)
+  }, [notify])
+
   const content = activePage === 'workbench' ? (
     <WorkbenchView
       files={files}
@@ -547,6 +654,8 @@ export default function App() {
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onNotify={notify} />
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
+  ) : activePage === 'history' ? (
+    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} />
   ) : <SettingsView />
 
   return (
@@ -566,6 +675,7 @@ export default function App() {
         selectedFile={selectedFile}
         evaluationSnapshot={evaluationSnapshot}
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
+        onProjectUpdated={projectUpdated}
       />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

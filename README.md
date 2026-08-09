@@ -19,7 +19,7 @@
 
 ![Log Workbench](docs/images/manual-lw-00-overview.png)
 
-[v0.7 빠른 시작](docs/manual/00-v0.7-빠른-시작.md) · [사용자 매뉴얼](docs/manual/README.md) · [시작하기](docs/manual/10-시작하기.md) · [로그 워크벤치](docs/manual/20-로그-워크벤치.md) · [여러 폴더 반복 분석](docs/manual/30-여러-폴더-반복-분석.md)
+[v0.8 평가 이력과 Agent](docs/manual/05-v0.8-평가-이력-Agent.md) · [v0.7 빠른 시작](docs/manual/00-v0.7-빠른-시작.md) · [사용자 매뉴얼](docs/manual/README.md) · [시작하기](docs/manual/10-시작하기.md) · [로그 워크벤치](docs/manual/20-로그-워크벤치.md) · [여러 폴더 반복 분석](docs/manual/30-여러-폴더-반복-분석.md)
 
 ## 작업 순서
 

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ArtifactRecord, ProjectSnapshot } from '../electron/shared/contracts'
 import {
+  availableEvaluationLogs,
+  createLatestProjectSaveQueue,
   projectLoadFileState,
   reconcileProjectUpdateFileState,
 } from './App'
 import type { WorkbenchFile } from './views/WorkbenchView'
+import type { LogResultRecord } from './state/logRecords'
 
 function project(id: string, roots: string[]): ProjectSnapshot {
   return {
@@ -42,6 +45,55 @@ function artifact(id: string, rootId: string): ArtifactRecord {
 }
 
 describe('project UI state updates', () => {
+  it('serializes immediate memory saves against the latest saved revision', async () => {
+    let current = { revision: 1, value: '' }
+    const seen: Array<{ revision: number; value: string }> = []
+    const queue = createLatestProjectSaveQueue(
+      () => current,
+      async (project, value: string) => {
+        seen.push({ revision: project.revision, value })
+        return { revision: project.revision + 1, value }
+      },
+      (saved) => { current = saved },
+    )
+    await Promise.all([queue('first'), queue('second')])
+    expect(seen).toEqual([{ revision: 1, value: 'first' }, { revision: 2, value: 'second' }])
+    expect(current).toEqual({ revision: 3, value: 'second' })
+  })
+
+  it('propagates a rejected save without blocking the subsequent queued save', async () => {
+    let current = { revision: 1, value: '' }
+    const queue = createLatestProjectSaveQueue(
+      () => current,
+      async (project, value: string) => {
+        if (value === 'reject') throw new Error('disk unavailable')
+        return { revision: project.revision + 1, value }
+      },
+      (saved) => { current = saved },
+    )
+    const rejected = queue('reject')
+    const saved = queue('persisted')
+    await expect(rejected).rejects.toThrow('disk unavailable')
+    await expect(saved).resolves.toEqual({ revision: 2, value: 'persisted' })
+    expect(current).toEqual({ revision: 2, value: 'persisted' })
+  })
+
+  it('maps result rows to evaluation-memory log references without losing source identity', () => {
+    const row: LogResultRecord = {
+      id: 'source-a', fileName: 'VPERI_DQ9.log', folder: 'logs', relativePath: 'VPERI_DQ9.log',
+      sample: { value: 'S01', state: 'approved' }, temperature: { value: '85', state: 'approved' },
+      mode: { value: 'VPERI', state: 'approved' }, grid: { value: 'DQ9', state: 'candidate' },
+      result: 'TEST_FAIL', resultSource: 'engineer', review: 'confirmed', evidenceCount: 1, selectedEvidenceCount: 1,
+    }
+    const projectWithSource = { ...project('p1', ['root-a']), artifacts: [{ sourceId: 'durable-source-a', rootId: 'root-a', artifactId: 'artifact-a', relativePath: 'VPERI_DQ9.log' }] }
+    const rendererFile: WorkbenchFile = { id: 'renderer-row-a', name: row.fileName, artifactId: 'artifact-a', rootId: 'root-a', relativePath: 'VPERI_DQ9.log' }
+    const mappedRow = { ...row, id: rendererFile.id }
+    expect(availableEvaluationLogs([mappedRow], [rendererFile], projectWithSource)).toEqual([{
+      id: 'durable-source-a', openId: 'renderer-row-a', name: 'VPERI_DQ9.log', result: 'TEST_FAIL', sample: 'S01', temperatureC: 85, mode: 'VPERI', grid: 'DQ9',
+    }])
+    expect(availableEvaluationLogs([mappedRow], [rendererFile], { ...projectWithSource, artifacts: [] })).toEqual([])
+  })
+
   it('keeps files and selection when validation changes only folder status', () => {
     const previous = project('p1', ['root-a'])
     const next = { ...previous, folders: [{ ...previous.folders[0], status: 'missing' as const }] }
