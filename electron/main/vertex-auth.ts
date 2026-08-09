@@ -80,16 +80,17 @@ export class VertexAccessTokenProvider {
 
   private async fetchToken(): Promise<string> {
     for (const executable of executableCandidates()) {
-      try {
-        return safeToken(await this.runner(executable, [
-          'auth',
-          'application-default',
-          'print-access-token',
-          '--quiet'
-        ]))
-      } catch {
-        // Finder-launched macOS apps often have a smaller PATH. Try the known
-        // installation locations without reflecting command errors or tokens.
+      for (const args of [
+        ['auth', 'application-default', 'print-access-token', '--quiet'],
+        ['auth', 'print-access-token', '--quiet'],
+      ]) {
+        try {
+          return safeToken(await this.runner(executable, args))
+        } catch {
+          // Prefer ADC, then use the already active gcloud account. A
+          // Finder-launched app can also have a smaller PATH, so continue with
+          // known installation locations without reflecting command errors.
+        }
       }
     }
     throw new Error('LLM_VERTEX_AUTH_UNAVAILABLE')

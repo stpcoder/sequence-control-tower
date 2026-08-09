@@ -102,6 +102,6 @@ Vertex의 예시 주소 형식은 다음과 같습니다.
 https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/${VERTEX_PROJECT}/locations/${VERTEX_LOCATION}/endpoints/openapi
 ```
 
-`${VERTEX_PROJECT}`와 `${VERTEX_LOCATION}`을 실제 값으로 바꿉니다. `Model`에는 권한이 있는 모델 ID를 입력합니다. `API key`는 비워 둡니다. 앱이 `gcloud auth application-default print-access-token`을 실행하고 access token을 35분 동안 메모리에만 캐시합니다. Finder에서 실행해도 Homebrew 기본 설치 위치의 `gcloud`를 찾습니다.
+`${VERTEX_PROJECT}`와 `${VERTEX_LOCATION}`을 실제 값으로 바꿉니다. `Model`에는 `google/gemini-2.5-flash`처럼 권한이 있는 모델 ID를 입력합니다. `API key`는 비워 둡니다. 앱은 Application Default Credentials를 우선 사용하고, 없으면 현재 활성화된 `gcloud` 계정을 사용합니다. access token은 35분 동안 메모리에만 캐시합니다. Finder에서 실행해도 Homebrew 기본 설치 위치의 `gcloud`를 찾습니다.
 
 `모델 목록 확인`은 해당 endpoint가 `/models`를 제공할 때만 성공합니다. 실제 Agent 전송은 프로젝트의 `Agent`에서 질문을 보냈을 때 확인합니다. 외부 Vertex에는 합성 샘플만 사용하고, 회사 로그는 사내 데이터 반출 정책을 확인하기 전 전송하지 마세요. 테스트가 끝나면 운영용 사내 vLLM 주소로 복원합니다.

@@ -36,6 +36,20 @@ describe('Vertex gcloud authentication', () => {
     expect(runner).not.toHaveBeenCalled()
   })
 
+  it('falls back to the active gcloud account when ADC is not configured', async () => {
+    const runner = vi.fn(async (_executable: string, args: string[]) => {
+      if (args.includes('application-default')) throw new Error('ADC missing')
+      return 'active-account-token\n'
+    })
+    const provider = new VertexAccessTokenProvider(runner)
+
+    await expect(provider.token(VERTEX_URL)).resolves.toBe('active-account-token')
+    expect(runner.mock.calls.map((call) => call[1])).toEqual([
+      ['auth', 'application-default', 'print-access-token', '--quiet'],
+      ['auth', 'print-access-token', '--quiet'],
+    ])
+  })
+
   it('returns one stable error when gcloud or ADC is unavailable', async () => {
     const provider = new VertexAccessTokenProvider(vi.fn(async (_executable: string, _args: string[]) => {
       throw new Error('local path and account details')
