@@ -135,7 +135,7 @@ npm run dist:mac
 
 ## 배포
 
-- `CI`: typecheck, tests, production build
+- `Continuous Build`: 모든 브랜치 push와 pull request에서 Windows, macOS, Linux 의존성 감사, typecheck, tests, production build
 - `Windows Release`: x64 Setup, Portable, ZIP, 무결성 및 서명 상태 확인
 - `macOS Release`: Universal DMG/ZIP, Intel/arm64 slice, macOS 12 최소 버전, 무결성 확인
 

@@ -1,24 +1,28 @@
-name: CI
+name: Continuous Build
 
 on:
-  pull_request:
   push:
     branches:
       - "**"
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate-windows:
-    name: Test and build on Windows
-    runs-on: windows-latest
-    timeout-minutes: 20
+  verify:
+    name: Verify ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -30,7 +34,7 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Install exact dependencies
         run: npm ci
 
       - name: Audit packaged dependencies
@@ -42,5 +46,5 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build application
+      - name: Build production application
         run: npm run build
