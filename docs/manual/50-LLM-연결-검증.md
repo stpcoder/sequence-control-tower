@@ -87,16 +87,21 @@ AI 요청에는 원문 전체를 보내지 않습니다. deterministic parser가
 - LLM이 설정되어 있어도 사용자 코멘트가 있거나 부모 파일과 의미 있는 변경이 있을 때만 LLM 요청을 선택합니다. 그 외에는 로컬 분석만 수행합니다.
 - LLM 요청이 실패하면 파일 구조와 사용자 코멘트를 이용한 로컬 요약으로 대체합니다. 로컬 기능 자체는 계속 사용할 수 있습니다.
 
-## 선택적 전송 경로 확인
+## macOS Vertex 연결
 
-Vertex 같은 다른 OpenAI 호환 접속 주소는 운영 연결 유형을 추가하는 기능이 아니라, 기존 API 전송 형식이 호환되는지 선택적으로 확인할 때만 사용합니다. 일반 운영에서는 승인된 로컬 또는 사내 접속 주소를 사용하세요.
+로컬 vLLM을 사용할 수 없는 macOS 테스트에서는 Vertex의 OpenAI-compatible endpoint를 사용할 수 있습니다. 먼저 Google Cloud CLI에서 Application Default Credentials 로그인을 완료합니다.
+
+```bash
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+```
 
 Vertex의 예시 주소 형식은 다음과 같습니다.
 
 ```text
-https://aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT}/locations/${VERTEX_LOCATION}/endpoints/openapi
+https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/${VERTEX_PROJECT}/locations/${VERTEX_LOCATION}/endpoints/openapi
 ```
 
-`${VERTEX_PROJECT}`와 `${VERTEX_LOCATION}`에는 권한이 있는 값을 넣고, 모델 ID는 직접 입력합니다. 단기 access token은 `API key`에 입력할 수 있지만 문서, 화면 캡처, 저장소에는 남기지 마세요. `/models`를 지원하는 경우에만 `모델 목록 확인`으로 전송 경로를 확인할 수 있습니다. 이 조회는 저장 동작과 분리되어 있으므로 임시 키를 저장하지 않고 확인할 수 있습니다. 지원하지 않으면 이 화면에서 모델 목록을 확인할 수 없습니다.
+`${VERTEX_PROJECT}`와 `${VERTEX_LOCATION}`을 실제 값으로 바꿉니다. `Model`에는 권한이 있는 모델 ID를 입력합니다. `API key`는 비워 둡니다. 앱이 `gcloud auth application-default print-access-token`을 실행하고 access token을 35분 동안 메모리에만 캐시합니다. Finder에서 실행해도 Homebrew 기본 설치 위치의 `gcloud`를 찾습니다.
 
-이 확인은 `/models` 전송과 응답만 점검하며, 운영용 Vertex 연결이나 별도 제공자 기능을 추가하지 않습니다. 이 화면에는 실제 분석 전송을 시작하는 동작이 없습니다. 테스트용 외부 접속을 사용할 때는 회사의 데이터 분류와 LLM 전송 정책을 먼저 확인하고, 확인이 끝나면 입력 칸을 비우고 운영용 주소를 복원하세요. 현재 `Base URL` host에 저장한 키는 `저장 키 삭제`로 삭제할 수 있지만, 환경변수로 관리되는 키는 앱에서 삭제할 수 없습니다.
+`모델 목록 확인`은 해당 endpoint가 `/models`를 제공할 때만 성공합니다. 실제 Agent 전송은 프로젝트의 `Agent`에서 질문을 보냈을 때 확인합니다. 외부 Vertex에는 합성 샘플만 사용하고, 회사 로그는 사내 데이터 반출 정책을 확인하기 전 전송하지 마세요. 테스트가 끝나면 운영용 사내 vLLM 주소로 복원합니다.

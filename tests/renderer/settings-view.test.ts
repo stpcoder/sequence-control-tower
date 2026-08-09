@@ -5,6 +5,7 @@ import {
   buildApiKeyClearRequest,
   llmRateLimitHelpText,
   MIN_LLM_TOKENS_PER_MINUTE,
+  isVertexBaseUrl,
   saveConfirmationMessage
 } from '../../src/views/SettingsView'
 import type { LlmConfigSummary } from '../../electron/shared/contracts'
@@ -90,5 +91,12 @@ describe('SettingsView LLM rate limits', () => {
     expect(llmRateLimitHelpText()).toContain('최소 1,201')
     expect(llmRateLimitHelpText()).toContain('응답 예약 1,200 토큰')
     expect(llmRateLimitHelpText()).toContain('최소 프롬프트 1토큰')
+  })
+})
+
+describe('SettingsView Vertex recognition', () => {
+  it('shows automatic gcloud auth only for the official OpenAI-compatible endpoint', () => {
+    expect(isVertexBaseUrl('https://asia-northeast3-aiplatform.googleapis.com/v1beta1/projects/demo/locations/asia-northeast3/endpoints/openapi')).toBe(true)
+    expect(isVertexBaseUrl('https://llm.internal.example/v1')).toBe(false)
   })
 })

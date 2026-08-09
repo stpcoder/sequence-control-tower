@@ -39,7 +39,8 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|sku|주파수|skew|tm|mode)/i.test(text)) {
     calls.push({ name: 'filename_dimensions_scan' })
   }
-  if (/(새 로그|이 로그|무슨 평가|어떤 평가|soc|퀄컴|qualcomm|미디어텍|mediatek|mtk|sm[-_ ]?\d|부팅|boot|pbl|xbl|abl|uefi|post.?pbl|lk2?)/i.test(text)) calls.push({ name: 'soc_boot_profile_scan' })
+  if (/(soc|퀄컴|qualcomm|미디어텍|mediatek|mtk|sm[-_ ]?\d|부팅|boot|pbl|xbl|abl|uefi|post.?pbl|lk2?)/i.test(text)) calls.push({ name: 'soc_boot_profile_scan' })
+  if (/(콘솔|console|명령|command|입력|prompt|sleep|uefi\s*>|lk2?\s*>)/i.test(text)) calls.push({ name: 'console_transcript_scan' })
   if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
   if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
   if (/(경향|집중|불량률|dq|bl|channel|채널|bank|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
@@ -95,20 +96,21 @@ export class NativeAgentService {
     if (project.artifacts.length) {
       const sourceIds = project.artifacts.slice(0, 100).map((item) => item.sourceId)
       try {
-        const [filenames, statuses, workflows, boot] = await Promise.all([
+        const [filenames, statuses, workflows, boot, consoleScan] = await Promise.all([
           this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
           this.deps.tools.execute(project.id, { name: 'pass_fail_scan' }, sourceIds),
           this.deps.tools.execute(project.id, { name: 'engineer_workflow_memory_get' }, sourceIds),
           this.deps.tools.execute(project.id, { name: 'soc_boot_profile_scan' }, sourceIds),
+          this.deps.tools.execute(project.id, { name: 'console_transcript_scan' }, sourceIds),
         ])
         session = await this.deps.store.update(session.id, (draft) => {
-          for (const result of [filenames, statuses, workflows, boot]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
+          for (const result of [filenames, statuses, workflows, boot, consoleScan]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
         })
         session = await this.deps.store.appendMessage(session.id, {
-          role: 'assistant', content: this.onboardingQuestion(filenames, statuses, workflows, boot),
+          role: 'assistant', content: this.onboardingQuestion(filenames, statuses, workflows, boot, consoleScan),
           evidenceSourceIds: [...new Set([...filenames.evidenceSourceIds, ...statuses.evidenceSourceIds, ...workflows.evidenceSourceIds])]
         })
-        const question = this.profileQuestion(filenames) ?? await this.commandQuestion(project.id, filenames)
+        const question = this.profileQuestion(filenames) ?? this.consoleQuestion(consoleScan) ?? await this.commandQuestion(project.id, filenames)
         if (question) session = await this.deps.store.update(session.id, (draft) => { draft.question = question })
       } catch {
         session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `프로젝트 로그 ${project.artifacts.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
@@ -143,6 +145,39 @@ export class NativeAgentService {
       await this.deps.store.confirmProfileBinding({ projectId: session.projectId, sourceIds: session.question.sourceIds, vendor, profileId: vendor === 'qualcomm' ? 'qualcomm-default' : 'mediatek-default' })
       next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
       next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `${vendor === 'qualcomm' ? 'Qualcomm · UEFI' : 'MediaTek · Post-PBL/LK'} profile로 저장했습니다. 다음 분석부터 해당 부팅 단계를 사용합니다.` })
+      this.emit(next); return this.public(next)
+    }
+    if (session.question?.kind === 'console-role') {
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      if (message === '건너뛰기') {
+        next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+        next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: '이 줄은 분류하지 않았습니다.' })
+        this.emit(next); return this.public(next)
+      }
+      const rememberedRole = message === '입력 명령 · 형식 기억' ? 'input' : message === '장비 출력 · 형식 제외' ? 'output' : null
+      if (!rememberedRole && message !== '이번 줄만 입력') throw new Error('이 줄이 입력인지 출력인지 선택해 주세요.')
+      if (rememberedRole) await this.deps.store.confirmConsolePromptRule({
+        projectId: session.projectId, promptSignature: session.question.promptSignature,
+        promptKind: session.question.promptKind, role: rememberedRole,
+      })
+      next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+      let following: NativeAgentSessionView['question'] | undefined
+      if (rememberedRole) {
+        const project = await this.deps.projects.get(session.projectId)
+        if (project?.artifacts.length) {
+          const scan = await this.deps.tools.execute(session.projectId, { name: 'console_transcript_scan' }, project.artifacts.slice(0, 100).map((item) => item.sourceId))
+          following = this.consoleQuestion(scan)
+        }
+      }
+      next = await this.deps.store.appendMessage(session.id, {
+        role: 'assistant',
+        content: rememberedRole === 'input'
+          ? `입력 형식을 저장했습니다.${following ? ' 다른 형식 하나만 더 확인해 주세요.' : ' 다음 로그부터 명령만 수집합니다.'}`
+          : rememberedRole === 'output'
+            ? `출력 형식으로 저장했습니다.${following ? ' 다른 형식 하나만 더 확인해 주세요.' : ''}`
+            : '이번 줄만 입력 명령으로 확인했습니다.',
+      })
+      if (following) next = await this.deps.store.update(session.id, (draft) => { draft.question = following })
       this.emit(next); return this.public(next)
     }
     if (session.question?.kind === 'command-purpose') {
@@ -351,7 +386,7 @@ export class NativeAgentService {
     return safe(raw, 300) || '에이전트 분석을 완료하지 못했습니다.'
   }
 
-  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult, workflows: LpddrAgentToolResult, boot: LpddrAgentToolResult): string {
+  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult, workflows: LpddrAgentToolResult, boot: LpddrAgentToolResult, consoleScan: LpddrAgentToolResult): string {
     const rows = (filenames.data as { rows?: Array<{ dimensions?: Record<string, unknown> }> })?.rows ?? []
     const dimensions = ['testMode', 'temperatureC', 'vdd', 'material', 'dq', 'pattern'] as const
     const leaders = dimensions.flatMap((dimension) => {
@@ -366,7 +401,18 @@ export class NativeAgentService {
       return first[1] >= 2 ? [label] : []
     }).slice(0, 4)
     const remembered = (workflows.data as { confirmed?: unknown[] })?.confirmed?.length ?? 0
-    return `파일명, SoC 부팅 구간과 종료 marker를 확인했습니다.\n${filenames.summary}\n${boot.summary}\n${statuses.summary || '확정 상태 없음'}${remembered ? `\n저장된 분석 절차 ${remembered}개를 함께 확인합니다.` : ''}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 어떤 목적의 평가인가요?` : '이번 평가 목적을 짧게 적어주세요.'}`
+    return `파일명, 콘솔 입력과 종료 marker를 확인했습니다.\n${filenames.summary}\n${boot.summary}\n${consoleScan.summary}\n${statuses.summary || '확정 상태 없음'}${remembered ? `\n저장된 분석 절차 ${remembered}개를 함께 확인합니다.` : ''}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 어떤 목적의 평가인가요?` : '이번 평가 목적을 짧게 적어주세요.'}`
+  }
+
+  private consoleQuestion(scan: LpddrAgentToolResult): NativeAgentSessionView['question'] | undefined {
+    const row = (scan.data as { ambiguous?: Array<{ sourceId?: string; lineNumber?: number; promptSignature?: string; promptKind?: string; command?: string }> })?.ambiguous?.[0]
+    if (!row?.sourceId || !row.promptSignature || !row.promptKind || !row.command || !Number.isSafeInteger(row.lineNumber)) return undefined
+    return {
+      id: `console-${randomUUID()}`, kind: 'console-role', sourceId: row.sourceId, lineNumber: row.lineNumber!,
+      promptSignature: row.promptSignature, promptKind: row.promptKind, command: safe(row.command, 500),
+      prompt: `“${safe(row.command, 120)}”은 엔지니어가 입력한 명령인가요?`,
+      choices: ['입력 명령 · 형식 기억', '이번 줄만 입력', '장비 출력 · 형식 제외', '건너뛰기'],
+    }
   }
 
   private async commandQuestion(projectId: string, filenames: LpddrAgentToolResult): Promise<NativeAgentSessionView['question'] | undefined> {

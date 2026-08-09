@@ -23,6 +23,17 @@ function urlOrigin(value: string): string {
   }
 }
 
+export function isVertexBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim())
+    return url.protocol === 'https:' &&
+      url.hostname.endsWith('-aiplatform.googleapis.com') &&
+      /\/locations\/[^/]+\/endpoints\/openapi(?:\/|$)/.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
 type SaveConfirmationSummary = Pick<LlmConfigSummary, 'apiKeyPersisted' | 'managedByEnvironment'>
 
 type ApiKeyActionSummary = Pick<LlmConfigSummary, 'apiKeyConfigured' | 'managedByEnvironment'>
@@ -242,7 +253,7 @@ export function SettingsView() {
           <div className="settings-card">
             <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>/v1 endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://llm-gateway.example/v1" /></div>
             <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>{models.length ? `${models.length}개 확인됨` : '모델 ID'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="예: qwen3-32b" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
-            <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.managedByEnvironment.apiKey ? '환경변수 관리 중' : summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · key 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} disabled={saving || summary?.managedByEnvironment.apiKey === true} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.managedByEnvironment.apiKey ? '환경변수로 관리됨' : summary?.apiKeyConfigured ? '••••••••••••••••' : '선택 사항'} /><button type="button" disabled={saving || apiKeyAction(apiKey, summary) === 'environment-managed'} onClick={() => void handleApiKeyAction()}>{saving ? '처리 중…' : apiKeyActionLabel(apiKeyAction(apiKey, summary))}</button></div>{summary?.managedByEnvironment.apiKey && <p className="settings-note">환경변수로 관리 중인 API key는 앱에서 입력하거나 저장할 수 없습니다.</p>}</div>
+            <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.managedByEnvironment.apiKey ? '환경변수 관리 중' : summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · key 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : isVertexBaseUrl(baseUrl) ? 'gcloud 자동 인증' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} disabled={saving || summary?.managedByEnvironment.apiKey === true} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.managedByEnvironment.apiKey ? '환경변수로 관리됨' : summary?.apiKeyConfigured ? '••••••••••••••••' : isVertexBaseUrl(baseUrl) ? '입력하지 않음' : '선택 사항'} /><button type="button" disabled={saving || apiKeyAction(apiKey, summary) === 'environment-managed'} onClick={() => void handleApiKeyAction()}>{saving ? '처리 중…' : apiKeyActionLabel(apiKeyAction(apiKey, summary))}</button></div>{summary?.managedByEnvironment.apiKey && <p className="settings-note">환경변수로 관리 중인 API key는 앱에서 입력하거나 저장할 수 없습니다.</p>}</div>
             <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured ? `연결됨 · ${summary.source}` : '로컬 규칙 엔진 사용 중'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={15} /> {discovering ? '연결 중' : '모델 목록 확인'}</button></div>
           </div>
 

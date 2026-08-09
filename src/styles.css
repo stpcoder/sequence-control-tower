@@ -845,11 +845,10 @@ button:disabled {
 .agent-message.question { margin: 12px 0 8px 22px; padding: 10px 11px; border-left: 2px solid var(--amber); background: rgba(243, 189, 87, .06); }
 .agent-message.user { margin-left: 52px; padding: 9px 10px; border-radius: 8px 8px 2px 8px; color: var(--text); background: #2b342d; }
 .native-agent-message { padding: 10px 0; border-bottom: 1px solid rgba(66,76,69,.45); color: var(--text); font-size: 12px; line-height: 1.6; }
-.native-agent-message > span { color: var(--dim); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
 .native-agent-message.user { margin: 7px 0 4px 34px; padding: 9px 10px; border: 0; border-radius: 8px 8px 2px 8px; background: #252d27; }
 .native-agent-message.assistant { white-space: pre-wrap; }
 .native-agent-message.system { color: var(--muted); }
-.native-agent-message p { margin: 3px 0 0; white-space: pre-wrap; }
+.native-agent-message p { margin: 0; white-space: pre-wrap; }
 .native-agent-message small { display: block; margin-top: 4px; color: var(--dim); font-size: 11px; }
 .native-agent-question { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .native-agent-question > p { margin: 0 0 7px; color: var(--text); font-size: 12px; line-height: 1.5; }

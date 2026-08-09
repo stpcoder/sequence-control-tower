@@ -26,6 +26,13 @@ export interface SequenceFingerprint {
   commandTokens: string[]
   /** Normalized family:executable pairs used for project-scoped command learning. */
   commandSignatures?: string[]
+  /** Bounded summary for console transcripts. Output text is never persisted here. */
+  console?: {
+    inputCount: number
+    ambiguousCount: number
+    promptKinds: string[]
+    statusCounts: Record<string, number>
+  }
   structuralHash: string
   facts: SequenceFact[]
 }
@@ -892,9 +899,14 @@ export interface EngineerBootProfileBindingView {
   id: string; projectId: string; vendor: Exclude<ProjectSocVendor, 'unknown'>; profileId: string
   sourceIds: string[]; confirmedAt: string
 }
+export interface EngineerConsolePromptRuleView {
+  id: string; projectId: string; promptSignature: string; promptKind: string; role: 'input' | 'output'
+  confirmedCount: number; createdAt: string; updatedAt: string
+}
 export type NativeAgentQuestionView =
   | { id: string; kind: 'command-purpose'; prompt: string; choices: string[]; command: string; bootProfileId?: string; socModel?: string }
   | { id: string; kind: 'boot-profile'; prompt: string; choices: string[]; sourceIds: string[] }
+  | { id: string; kind: 'console-role'; prompt: string; choices: string[]; sourceId: string; lineNumber: number; promptSignature: string; promptKind: string; command: string }
 export interface EngineerWorkflowReviewView {
   id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult
   stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]; evidenceLines: number[]

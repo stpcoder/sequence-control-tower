@@ -114,6 +114,33 @@ describe('OpenAI-compatible chat client', () => {
     }))
   })
 
+  it('obtains a Vertex ADC token when no static API key is configured', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      choices: [{ message: { content: 'vertex ok' } }]
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const token = vi.fn(async () => 'fresh-adc-token')
+    const configService = {
+      effective: vi.fn(async () => effective({
+        baseUrl: 'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/demo/locations/us-central1/endpoints/openapi',
+        apiKey: undefined
+      }))
+    } as unknown as LlmConfigService
+    const request = new OpenAiCompatibleClient(configService, { token })
+
+    await expect(request.complete('bounded evidence', undefined, vi.fn())).resolves.toEqual({
+      content: 'vertex ok',
+      model: 'qwen-internal'
+    })
+    expect(token).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/demo/locations/us-central1/endpoints/openapi/chat/completions'
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer fresh-adc-token' }) })
+    )
+  })
+
   it.each([401, 403, 404])('does not retry permanent HTTP %s errors', async (status) => {
     const server = await mockServer((_request, response) => {
       response.writeHead(status, { 'content-type': 'application/json' })

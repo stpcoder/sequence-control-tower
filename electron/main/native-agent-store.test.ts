@@ -97,4 +97,13 @@ describe('NativeAgentStore', () => {
     await store.confirmProfileBinding({ projectId: 'p', sourceIds: ['s1', 's2'], vendor: 'mediatek', profileId: 'mediatek-default' })
     expect(await store.profileBindings('p')).toEqual([expect.objectContaining({ vendor: 'mediatek', profileId: 'mediatek-default', sourceIds: ['s1', 's2'] })])
   })
+
+  it('persists a project console prompt decision and updates it by signature', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-console-prompt-rule-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    await store.confirmConsolePromptRule({ projectId: 'p', promptSignature: 'bare-root-hash', promptKind: 'bare-root', role: 'input' })
+    await store.confirmConsolePromptRule({ projectId: 'p', promptSignature: 'bare-root-hash', promptKind: 'bare-root', role: 'output' })
+    expect(await store.consolePromptRules('p')).toEqual([expect.objectContaining({ promptSignature: 'bare-root-hash', role: 'output', confirmedCount: 2 })])
+  })
 })

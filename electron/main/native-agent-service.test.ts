@@ -72,4 +72,29 @@ describe('planLpddrTools', () => {
     expect(answered.question).toBeUndefined()
     expect(await store.profileBindings('p')).toEqual([expect.objectContaining({ vendor: 'mediatek', sourceIds: ['s1'] })])
   })
+
+  it('asks for an ambiguous console prompt once and persists the project decision', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-console-question-')))
+    await store.initialize()
+    const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
+    const execute = vi.fn(async (_projectId: string, call: { name: string }) => {
+      if (call.name === 'filename_dimensions_scan') return result(call.name, { rows: [{ sourceId: 's1', dimensions: { socVendor: 'qualcomm' } }] })
+      if (call.name === 'console_transcript_scan') {
+        const learned = (await store.consolePromptRules('p')).length > 0
+        return result(call.name, { ambiguous: learned ? [] : [{ sourceId: 's1', lineNumber: 44, promptSignature: 'bare-root-hash', promptKind: 'bare-root', command: 'sleep 20' }] })
+      }
+      if (call.name === 'engineer_workflow_memory_get') return result(call.name, { confirmed: [] })
+      return result(call.name)
+    })
+    const service = new NativeAgentService({
+      store, tools: { execute },
+      projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', artifactId: 'a1', relativePath: 'SM-8975_SMP-01.log' }] })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    const created = await service.create('p')
+    expect(created.question).toMatchObject({ kind: 'console-role', command: 'sleep 20' })
+    const answered = await service.send(created.id, '입력 명령 · 형식 기억')
+    expect(answered.question).toBeUndefined()
+    expect(await store.consolePromptRules('p')).toEqual([expect.objectContaining({ promptSignature: 'bare-root-hash', role: 'input' })])
+  })
 })

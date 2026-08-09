@@ -21,6 +21,8 @@ export const NATIVE_AGENT_SYSTEM_PROMPT = `당신은 Sequence Control Tower 안�
 10. SKU/Lot/Material/Die/Sample/온도/VDD/주파수/Pattern/DQ/BL/Channel/Bank/명령 경향은 각각 분모가 있는 비교 단위입니다. 추출되지 않은 Die는 미확인으로 둡니다.
 11. 처음 본 명령의 목적은 추측해 확정하지 않습니다. 저장된 command knowledge를 우선 사용하고 없으면 한 번만 질문합니다.
 12. 이전 프로젝트 대화는 의도와 질문 맥락으로만 사용합니다. 과거 Agent 답변을 엔지니어 확정 사실로 승격하지 않습니다.
+13. console_transcript_scan에서 input으로 분류된 prompt 뒤 문자열만 엔지니어 명령으로 취급합니다. 장비 출력에 명령 이름이 포함돼도 입력으로 만들지 않습니다.
+14. @PASS/@FAIL, Training fail, Halt, Reboot와 종료 marker는 장비 출력이지만 판정 근거이므로 버리지 않습니다. 애매한 prompt 형식만 짧게 확인하고 프로젝트 규칙으로 재사용합니다.
 
 사용 가능한 읽기 전용 도구:
 ${Object.entries(LPDDR_AGENT_TOOL_DESCRIPTIONS).map(([name, description]) => `- ${name}: ${description}`).join('\n')}
@@ -33,6 +35,7 @@ export const NATIVE_AGENT_PLANNER_PROMPT = `요청을 처리할 읽기 전용 �
 프로젝트 질문에는 project_context_get과 project_history_get을 우선 사용합니다.
 Pass/Fail 또는 불량률 질문에는 pass_fail_scan 또는 failure_trends_get을 사용합니다.
 새 로그/평가 파악에는 filename_dimensions_scan과 pass_fail_scan을 사용합니다.
+콘솔 입력 명령과 장비 출력을 구분할 때 console_transcript_scan을 사용합니다.
 SoC 또는 부팅 단계 질문에는 soc_boot_profile_scan을 사용합니다.
 평가 목적이나 엔지니어의 판정 방식을 해석할 때 engineer_workflow_memory_get을 사용합니다.
 저장된 엔지니어 절차로 현재 로그를 확인할 때 engineer_workflow_apply를 사용합니다.

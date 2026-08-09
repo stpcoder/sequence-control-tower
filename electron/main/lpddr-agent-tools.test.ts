@@ -19,7 +19,7 @@ describe('LPDDR agent tools', () => {
     expect(extractLpddrFilenameDimensions('LPDDR6_SM-8975_SKU-X6_DIE03_SMP-01.log')).toMatchObject({
       socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', die: '03', sample: '01',
     })
-    expect(sourceEngineeringContext('MTK-24D_SMP-01_RT2.log', { fingerprint: { structuralHash: 'same', commandSignatures: ['voltage-control:set_rail'] } } as never)).toMatchObject({
+    expect(sourceEngineeringContext('MTK-24D_SMP-01_RT2.log', { fingerprint: { structuralHash: 'same', commandCount: 1, commandSignatures: ['voltage-control:set_rail'] } } as never)).toMatchObject({
       sequenceSignature: 'seq:same', explicitRetest: true, filenameAttemptNo: 2, commandSignatures: ['voltage-control:set_rail'],
     })
     expect(extractLpddrFilenameDimensions('CUSTOM_BOARD_A_SMP-01.log', [{ alias: 'Board A', profileId: 'mediatek-default', vendor: 'mediatek', socModels: ['MTK-5D'], filenameAliases: ['CUSTOM_BOARD_A'], updatedAt: '' }])).toMatchObject({ socVendor: 'mediatek', socModel: 'MTK-5D', bootProfileId: 'mediatek-default' })
@@ -34,7 +34,7 @@ describe('LPDDR agent tools', () => {
     const tools = new LpddrAgentToolService({
       artifacts: { inspectEvidence, list: vi.fn(async () => []), search: vi.fn(), lineWindow: vi.fn() } as never,
       projects: { get: vi.fn(async () => mtkProject), list: vi.fn(async () => [mtkProject]) } as never,
-      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) },
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
     })
     const result = await tools.execute('p', { name: 'soc_boot_profile_scan' })
     const rows = (result.data as { rows: Array<{ bootProfileId: string; stages: Array<{ stage: string }> }> }).rows
@@ -61,7 +61,7 @@ describe('LPDDR agent tools', () => {
     const tools = new LpddrAgentToolService({
       artifacts: { inspectEvidence, list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
       projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
-      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) }
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'pass_fail_scan' })
     expect(result.summary).toContain('FAST_FAIL 1')
@@ -94,7 +94,7 @@ describe('LPDDR agent tools', () => {
         list: vi.fn(async () => trendProject.artifacts.map((source) => ({ id: source.artifactId, fingerprint: { structuralHash: source.sourceId, commandSignatures: source.sourceId === 's2' ? ['training:train'] : ['diagnostic:hdiag'] } }))), search: vi.fn(), lineWindow: vi.fn()
       } as never,
       projects: { get: vi.fn(async () => trendProject), list: vi.fn(async () => [trendProject]) } as never,
-      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) }
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'failure_trends_get' })
     const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
@@ -132,12 +132,41 @@ describe('LPDDR agent tools', () => {
       agentStore: {
         searchHistory: vi.fn(async () => []), conversationHistory: vi.fn(async () => []),
         workflowMemories: vi.fn(async () => [workflow]),
-        attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []),
+        attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []),
       },
     })
     const result = await tools.execute('p', { name: 'engineer_workflow_apply' }, ['s1'])
     const rows = (result.data as { rows: Array<{ matched: boolean; orderMet: boolean; candidateResult: string }> }).rows
     expect(rows).toEqual([expect.objectContaining({ matched: true, orderMet: true, candidateResult: 'PASS' })])
     expect(result.summary).toContain('1개 중 1개')
+  })
+
+  it('separates prompt commands from output and applies the confirmed bare-prompt rule', async () => {
+    const search = vi.fn(async () => ({
+      query: '', mode: 'regex' as const, caseSensitive: false, totalMatchCount: 3, truncated: false, files: [],
+      matches: [
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 10, columnStart: 1, columnEnd: 8, lineText: '[00:00:00] UEFI> set_rail VDD 1.295', lineTruncated: false, before: [], after: [] },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 20, columnStart: 1, columnEnd: 8, lineText: '# sleep 20', lineTruncated: false, before: [], after: [] },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 30, columnStart: 1, columnEnd: 8, lineText: 'INFO set_rail completed', lineTruncated: false, before: [], after: [] },
+      ],
+    }))
+    const tools = new LpddrAgentToolService({
+      artifacts: { search, inspectEvidence: vi.fn(), lineWindow: vi.fn(), list: vi.fn(async () => [{ id: project.artifacts[0].artifactId, fingerprint: { console: { inputCount: 1, ambiguousCount: 1, promptKinds: ['uefi', 'bare-root'], statusCounts: { 'at-fail': 1 } } } }]) } as never,
+      projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
+      agentStore: {
+        searchHistory: vi.fn(async () => [{ projectId: 'p', sourceIds: ['s1'], query: 'sleep 20' }]),
+        workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []),
+        commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []),
+        consolePromptRules: vi.fn(async () => [{ id: 'r', projectId: 'p', promptSignature: 'bare-root-hash', promptKind: 'bare-root', role: 'input', confirmedCount: 1, createdAt: '', updatedAt: '' }]),
+      } as never,
+    })
+    const result = await tools.execute('p', { name: 'console_transcript_scan' }, ['s1'])
+    const data = result.data as { commands: Array<{ command: string; searchedByEngineer: boolean }>; ambiguous: unknown[] }
+    expect(data.commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'set_rail VDD 1.295' }),
+      expect.objectContaining({ command: 'sleep 20', searchedByEngineer: true }),
+    ]))
+    expect(data.ambiguous).toEqual([])
+    expect(result.summary).toContain('상태 신호 1개')
   })
 })

@@ -1,17 +1,18 @@
 import { basename } from 'node:path'
 import type {
-  ArtifactEvidenceSpec, ArtifactRecord, EngineerBootProfileBindingView, ProjectEquipmentProfile, ProjectEvaluationDimensions, ProjectSnapshot
+  ArtifactEvidenceSpec, ArtifactRecord, EngineerBootProfileBindingView, EngineerConsolePromptRuleView, ProjectEquipmentProfile, ProjectEvaluationDimensions, ProjectSnapshot
 } from '../shared/contracts'
 import { inferEvaluationTrends, type EvaluationMemory } from '../../src/domain/evaluation-memory'
 import { stableHash } from '../../src/domain/fingerprint'
 import { bootProfile, detectSocFilenameContext, normalizedEvaluationStem, type SocFilenameContext } from '../../src/domain/soc-profile'
+import { classifyConsoleLine, consolePromptSearchPattern } from '../../src/domain/console-transcript'
 import type { ArtifactService } from './artifact-service'
 import type { NativeAgentStore } from './native-agent-store'
 import type { ProjectStore } from './project-store'
 
 export type LpddrAgentToolName =
   | 'project_context_get' | 'project_history_get' | 'similar_case_search'
-  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'pass_fail_scan'
+  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'console_transcript_scan' | 'pass_fail_scan'
   | 'log_search' | 'log_read_window' | 'failure_trends_get'
 
 export interface LpddrAgentToolCall { name: LpddrAgentToolName; args?: Record<string, unknown> }
@@ -32,6 +33,7 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
   filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKU, Die, Sample, 조건, Sequence signature와 명령 후보를 추출합니다.',
   soc_boot_profile_scan: '파일명에서 선택한 Qualcomm/MediaTek profile의 단계 marker를 검사하고 로그가 도달한 부팅 구간을 반환합니다.',
+  console_transcript_scan: '콘솔 prompt 뒤의 엔지니어 입력과 장비 출력·상태 marker를 분리하고, 프로젝트에서 확정한 prompt 규칙을 적용합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
   log_read_window: '검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
@@ -107,7 +109,7 @@ export interface LpddrSourceEngineeringContext {
 
 export function sourceEngineeringContext(fileName: string, artifact?: ArtifactRecord, profiles: readonly ProjectEquipmentProfile[] = []): LpddrSourceEngineeringContext {
   const soc = projectSocContext(fileName, profiles)
-  const parsedSignature = artifact?.fingerprint?.structuralHash
+  const parsedSignature = artifact?.fingerprint?.commandCount ? artifact.fingerprint.structuralHash : undefined
   const fallback = normalizedEvaluationStem(fileName)
   return {
     dimensions: extractLpddrFilenameDimensions(fileName, profiles),
@@ -153,7 +155,7 @@ export class LpddrAgentToolService {
   constructor(private readonly deps: {
     artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow' | 'inspectEvidence'>
     projects: Pick<ProjectStore, 'get' | 'list'>
-    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings'>
+    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings' | 'consolePromptRules'>
   }) {}
 
   async execute(projectId: string, call: LpddrAgentToolCall, allowedSourceIds?: string[]): Promise<LpddrAgentToolResult> {
@@ -168,6 +170,7 @@ export class LpddrAgentToolService {
       case 'engineer_workflow_apply': return this.applyWorkflow(project, allowed, call.args)
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
       case 'soc_boot_profile_scan': return this.bootProfiles(project, allowed)
+      case 'console_transcript_scan': return this.consoleTranscript(project, allowed)
       case 'pass_fail_scan': return this.statuses(allowed)
       case 'log_search': return this.search(allowed, call.args)
       case 'log_read_window': return this.window(allowed, call.args)
@@ -221,13 +224,14 @@ export class LpddrAgentToolService {
   }
 
   private async workflowMemory(project: ProjectSnapshot): Promise<LpddrAgentToolResult> {
-    const [workflows, recentSearches, conversation, attempts, commandKnowledge, profileBindings] = await Promise.all([
+    const [workflows, recentSearches, conversation, attempts, commandKnowledge, profileBindings, consolePromptRules] = await Promise.all([
       this.deps.agentStore.workflowMemories(project.id, 50),
       this.deps.agentStore.searchHistory(project.id, 20),
       this.deps.agentStore.conversationHistory(project.id, 20),
       this.deps.agentStore.attemptHistory(project.id, 100),
       this.deps.agentStore.commandKnowledge(project.id, 100),
       this.deps.agentStore.profileBindings(project.id),
+      this.deps.agentStore.consolePromptRules(project.id),
     ])
     const data = {
       confirmed: workflows.map((item) => ({
@@ -244,11 +248,12 @@ export class LpddrAgentToolService {
       attempts,
       commandKnowledge,
       profileBindings,
+      consolePromptRules,
     }
     const applied = workflows.reduce((sum, item) => sum + item.appliedCount, 0)
     return {
       name: 'engineer_workflow_memory_get', label: '분석 절차 기억',
-      summary: `확정 절차 ${workflows.length}개 · RT ${attempts.filter((item) => item.relation === 'retest').length}건 · 명령 지식 ${commandKnowledge.length}개 · 최근 검색 ${recentSearches.length}건`,
+      summary: `확정 절차 ${workflows.length}개 · RT ${attempts.filter((item) => item.relation === 'retest').length}건 · 명령 지식 ${commandKnowledge.length}개 · 콘솔 형식 ${consolePromptRules.length}개`,
       data, evidenceSourceIds: [...new Set([
         ...workflows.flatMap((item) => item.sourceIds),
         ...conversation.flatMap((item) => item.evidenceSourceIds ?? []),
@@ -395,6 +400,48 @@ export class LpddrAgentToolService {
     })
     const totals = rows.reduce<Record<string, number>>((all, row) => ({ ...all, [row.status]: (all[row.status] ?? 0) + 1 }), {})
     return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: STATUS_SPECS.map((item) => item.id), rows, totals }, evidenceSourceIds: rows.map((row) => row.sourceId) }
+  }
+
+  private async consoleTranscript(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    if (!sources.length) return { name: 'console_transcript_scan', label: '콘솔 입력 구분', summary: '검사할 로그 없음', data: { commands: [], ambiguous: [] }, evidenceSourceIds: [] }
+    const [rules, searches, artifacts] = await Promise.all([
+      this.deps.agentStore.consolePromptRules(project.id),
+      this.deps.agentStore.searchHistory(project.id, 80),
+      this.deps.artifacts.list(),
+    ])
+    const decisions = rules.map((rule) => ({ promptSignature: rule.promptSignature, role: rule.role }))
+    const sourceByArtifact = new Map(sources.map((source) => [source.artifactId, source]))
+    const fingerprintByArtifact = new Map(artifacts.map((artifact) => [artifact.id, artifact.fingerprint]))
+    const found = await this.deps.artifacts.search({
+      artifactIds: [...new Set(sources.map((source) => source.artifactId))],
+      query: consolePromptSearchPattern(), mode: 'regex', caseSensitive: false, maxMatches: 240, contextLines: 0,
+    })
+    const rows = found.matches.flatMap((match) => {
+      const source = sourceByArtifact.get(match.artifactId)
+      if (!source) return []
+      const classified = classifyConsoleLine(match.lineText, decisions)
+      if (!classified.prompt || (classified.role !== 'input' && classified.role !== 'ambiguous')) return []
+      const searchedByEngineer = searches.some((event) => event.sourceIds.includes(source.sourceId)
+        && (classified.prompt!.command.toLowerCase().includes(event.query.toLowerCase()) || event.query.toLowerCase().includes(classified.prompt!.command.toLowerCase())))
+      return [{
+        sourceId: source.sourceId, lineNumber: match.lineNumber, role: classified.role,
+        promptKind: classified.prompt.promptKind, promptSignature: classified.prompt.promptSignature,
+        command: promptSafe(classified.prompt.command, 500), confidence: classified.prompt.confidence, searchedByEngineer,
+      }]
+    })
+    const commands = rows.filter((row) => row.role === 'input').slice(0, 80)
+    const ambiguous = rows.filter((row) => row.role === 'ambiguous')
+      .filter((row, index, all) => all.findIndex((item) => item.promptSignature === row.promptSignature) === index)
+      .slice(0, 8)
+    const persisted = sources.map((source) => fingerprintByArtifact.get(source.artifactId)?.console).filter(Boolean)
+    const inputCount = persisted.reduce((sum, item) => sum + (item?.inputCount ?? 0), 0)
+    const statusCount = persisted.reduce((sum, item) => sum + Object.values(item?.statusCounts ?? {}).reduce((all, count) => all + count, 0), 0)
+    const summary = `입력 명령 ${inputCount || commands.length}개 · 상태 신호 ${statusCount}개${ambiguous.length ? ` · 형식 확인 ${ambiguous.length}개` : ''}`
+    return {
+      name: 'console_transcript_scan', label: '콘솔 입력 구분', summary,
+      data: { commands, ambiguous, rules: rules.map((rule: EngineerConsolePromptRuleView) => ({ promptSignature: rule.promptSignature, promptKind: rule.promptKind, role: rule.role, confirmedCount: rule.confirmedCount })) },
+      evidenceSourceIds: [...new Set(rows.map((row) => row.sourceId))],
+    }
   }
 
   private async search(sources: ProjectSnapshot['artifacts'], args: Record<string, unknown> | undefined): Promise<LpddrAgentToolResult> {

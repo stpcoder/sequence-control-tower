@@ -7,6 +7,7 @@ import type {
   LlmModelDiscoveryResult
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
+import { isVertexOpenAiBaseUrl, vertexAccessTokenProvider, type VertexAccessTokenProvider } from './vertex-auth'
 
 interface SavedLlmConfig {
   schemaVersion: 1
@@ -420,7 +421,8 @@ export class LlmConfigService {
     )
     // A saved secret belongs to its configured origin. Never silently send it
     // to a newly typed host just because the token field was left blank.
-    const apiKey = providedApiKey || (mayReuseEffectiveKey ? effective.apiKey : undefined)
+    const apiKey = providedApiKey || (mayReuseEffectiveKey ? effective.apiKey : undefined) ||
+      await vertexAccessTokenProvider.token(baseUrl)
     const endpoint = `${baseUrl}/models`
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), MODEL_DISCOVERY_TIMEOUT_MS)
@@ -563,7 +565,10 @@ const MAX_CHAT_RESPONSE_BYTES = 2 * 1024 * 1024
 export class OpenAiCompatibleClient {
   private readonly limiter = new SlidingWindowLimiter()
 
-  constructor(private readonly configService: LlmConfigService) {}
+  constructor(
+    private readonly configService: LlmConfigService,
+    private readonly vertexAuth: Pick<VertexAccessTokenProvider, 'token'> = vertexAccessTokenProvider
+  ) {}
 
   async complete(
     prompt: string,
@@ -578,6 +583,9 @@ export class OpenAiCompatibleClient {
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
+    const automaticVertexAuth = !config.apiKey && isVertexOpenAiBaseUrl(config.baseUrl)
+    const accessToken = config.apiKey ?? await this.vertexAuth.token(config.baseUrl)
+    if (automaticVertexAuth && !accessToken) throw new Error('LLM_VERTEX_AUTH_UNAVAILABLE')
     let lastError: Error | undefined
 
     for (let attempt = 0; attempt <= config.maxRetries; attempt += 1) {
@@ -599,7 +607,7 @@ export class OpenAiCompatibleClient {
       signal?.addEventListener('abort', onAbort, { once: true })
       try {
         const headers: Record<string, string> = { 'content-type': 'application/json' }
-        if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`
+        if (accessToken) headers.authorization = `Bearer ${accessToken}`
         const response = await fetch(endpoint, {
           method: 'POST',
           headers,

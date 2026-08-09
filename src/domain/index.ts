@@ -9,3 +9,4 @@ export * from "./lineage";
 export * from "./analyze";
 export * from "./demo";
 export * from "./evaluation-memory";
+export * from "./console-transcript";

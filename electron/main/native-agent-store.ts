@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type {
-  EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerEvaluationAttemptView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
+  EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerConsolePromptRuleView, EngineerEvaluationAttemptView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
   NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentMessageView, NativeAgentSearchEventInput,
   NativeAgentSessionStatus, NativeAgentSessionSummary, NativeAgentSessionView,
   NativeAgentToolTraceView, ProjectEvaluationDimensions
@@ -22,7 +22,7 @@ interface StoredEngineerWorkflowReview extends EngineerWorkflowReviewView {
   searchEventIds: string[]
 }
 interface NativeAgentDatabase {
-  schemaVersion: 4
+  schemaVersion: 5
   sessions: Record<string, StoredNativeAgentSession>
   searches: Record<string, SearchEvent[]>
   workflows: Record<string, StoredEngineerWorkflow[]>
@@ -30,6 +30,7 @@ interface NativeAgentDatabase {
   attempts: Record<string, EngineerEvaluationAttemptView[]>
   commandKnowledge: Record<string, EngineerCommandKnowledgeView[]>
   profileBindings: Record<string, EngineerBootProfileBindingView[]>
+  consolePromptRules: Record<string, EngineerConsolePromptRuleView[]>
 }
 
 const MAX_SESSIONS_PER_PROJECT = 100
@@ -51,14 +52,15 @@ export class NativeAgentStore {
 
   constructor(dataRoot: string, private readonly id: () => string = randomUUID) {
     this.store = new AtomicJsonStore(join(dataRoot, 'metadata', 'native-agent.json'), {
-      schemaVersion: 4,
+      schemaVersion: 5,
       sessions: {},
       searches: {},
       workflows: {},
       reviews: {},
       attempts: {},
       commandKnowledge: {},
-      profileBindings: {}
+      profileBindings: {},
+      consolePromptRules: {}
     })
   }
 
@@ -74,16 +76,18 @@ export class NativeAgentStore {
         attempts?: NativeAgentDatabase['attempts']
         commandKnowledge?: NativeAgentDatabase['commandKnowledge']
         profileBindings?: NativeAgentDatabase['profileBindings']
+        consolePromptRules?: NativeAgentDatabase['consolePromptRules']
       }
-      if ((legacy.schemaVersion !== 1 && legacy.schemaVersion !== 2 && legacy.schemaVersion !== 3 && legacy.schemaVersion !== 4) || !legacy.sessions || !legacy.searches) {
-        return { schemaVersion: 4, sessions: {}, searches: {}, workflows: {}, reviews: {}, attempts: {}, commandKnowledge: {}, profileBindings: {} }
+      if (![1, 2, 3, 4, 5].includes(legacy.schemaVersion ?? 0) || !legacy.sessions || !legacy.searches) {
+        return { schemaVersion: 5, sessions: {}, searches: {}, workflows: {}, reviews: {}, attempts: {}, commandKnowledge: {}, profileBindings: {}, consolePromptRules: {} }
       }
-      database.schemaVersion = 4
+      database.schemaVersion = 5
       database.workflows = legacy.workflows && typeof legacy.workflows === 'object' ? legacy.workflows : {}
       database.reviews = legacy.reviews && typeof legacy.reviews === 'object' ? legacy.reviews : {}
       database.attempts = legacy.attempts && typeof legacy.attempts === 'object' ? legacy.attempts : {}
       database.commandKnowledge = legacy.commandKnowledge && typeof legacy.commandKnowledge === 'object' ? legacy.commandKnowledge : {}
       database.profileBindings = legacy.profileBindings && typeof legacy.profileBindings === 'object' ? legacy.profileBindings : {}
+      database.consolePromptRules = legacy.consolePromptRules && typeof legacy.consolePromptRules === 'object' ? legacy.consolePromptRules : {}
       for (const session of Object.values(database.sessions)) {
         if (session.status === 'queued' || session.status === 'running') {
           session.status = 'paused'
@@ -138,15 +142,25 @@ export class NativeAgentStore {
       session.failure = session.failure ? clean(session.failure, 500) : undefined
       session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
       session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
-      if (session.question) session.question = session.question.kind === 'boot-profile' ? {
-        id: clean(session.question.id, 160), kind: 'boot-profile', prompt: clean(session.question.prompt, 500),
-        choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8),
-        sourceIds: [...new Set(session.question.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))].slice(0, 100),
-      } : {
-        id: clean(session.question.id, 160), kind: 'command-purpose', prompt: clean(session.question.prompt, 500),
-        choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8), command: clean(session.question.command, 160),
-        ...(session.question.bootProfileId ? { bootProfileId: clean(session.question.bootProfileId, 160) } : {}),
-        ...(session.question.socModel ? { socModel: clean(session.question.socModel, 160) } : {}),
+      if (session.question) {
+        const base = {
+          id: clean(session.question.id, 160), prompt: clean(session.question.prompt, 500),
+          choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8),
+        }
+        if (session.question.kind === 'boot-profile') session.question = {
+          ...base, kind: 'boot-profile',
+          sourceIds: [...new Set(session.question.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))].slice(0, 100),
+        }
+        else if (session.question.kind === 'console-role') session.question = {
+          ...base, kind: 'console-role', sourceId: clean(session.question.sourceId, 160),
+          lineNumber: Number.isSafeInteger(session.question.lineNumber) && session.question.lineNumber > 0 ? session.question.lineNumber : 1,
+          promptSignature: clean(session.question.promptSignature, 160), promptKind: clean(session.question.promptKind, 80), command: clean(session.question.command, 500),
+        }
+        else session.question = {
+          ...base, kind: 'command-purpose', command: clean(session.question.command, 160),
+          ...(session.question.bootProfileId ? { bootProfileId: clean(session.question.bootProfileId, 160) } : {}),
+          ...(session.question.socModel ? { socModel: clean(session.question.socModel, 160) } : {}),
+        }
       }
       session.updatedAt = now()
       session.lastMessage = [...session.messages].reverse().find((item) => item.role !== 'tool')?.content.slice(0, 160)
@@ -344,6 +358,29 @@ export class NativeAgentStore {
 
   async profileBindings(projectId: string): Promise<EngineerBootProfileBindingView[]> {
     return structuredClone((await this.store.read()).profileBindings[clean(projectId, 160)] ?? [])
+  }
+
+  async consolePromptRules(projectId: string): Promise<EngineerConsolePromptRuleView[]> {
+    return structuredClone((await this.store.read()).consolePromptRules[clean(projectId, 160)] ?? [])
+  }
+
+  async confirmConsolePromptRule(input: { projectId: string; promptSignature: string; promptKind: string; role: 'input' | 'output' }): Promise<EngineerConsolePromptRuleView> {
+    const projectId = clean(input.projectId, 160); const promptSignature = clean(input.promptSignature, 160); const promptKind = clean(input.promptKind, 80)
+    if (!projectId || !promptSignature || !promptKind) throw new Error('콘솔 입력 형식을 확인할 수 없습니다.')
+    let result: EngineerConsolePromptRuleView | undefined
+    await this.store.update((database) => {
+      const rows = database.consolePromptRules[projectId] ?? []
+      const existing = rows.find((item) => item.promptSignature === promptSignature)
+      const stamp = now()
+      if (existing) {
+        existing.promptKind = promptKind; existing.role = input.role; existing.confirmedCount += 1; existing.updatedAt = stamp
+        result = structuredClone(existing)
+      } else {
+        result = { id: this.id(), projectId, promptSignature, promptKind, role: input.role, confirmedCount: 1, createdAt: stamp, updatedAt: stamp }
+        database.consolePromptRules[projectId] = [...rows, result].slice(-100)
+      }
+    })
+    return result!
   }
 
   async confirmProfileBinding(input: { projectId: string; sourceIds: string[]; vendor: 'qualcomm' | 'mediatek'; profileId: string }): Promise<EngineerBootProfileBindingView> {

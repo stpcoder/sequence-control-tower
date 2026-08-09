@@ -1,5 +1,6 @@
 import { analyzeSequence as analyzeDomainSequence } from '../../src/domain'
 import type { EvidenceValue, Provenance } from '../../src/domain'
+import { analyzeConsoleTranscript, looksLikeConsoleTranscript } from '../../src/domain/console-transcript'
 import type {
   SemanticChange,
   SequenceFact,
@@ -12,7 +13,7 @@ import type {
  * Only a compact fingerprint is persisted in artifacts.json; full parser
  * results are reproducible from the immutable content-addressed original.
  */
-export const PARSER_VERSION = 'domain-sequence-engine-1'
+export const PARSER_VERSION = 'domain-sequence-engine-2'
 
 function firstEvidence(value: EvidenceValue<unknown>): Provenance | undefined {
   return value.provenance.find((item) => item.kind === 'source') ?? value.provenance[0]
@@ -40,8 +41,14 @@ function makeFact<T>(
 }
 
 export function parseSequence(text: string, fileName = 'artifact.seq'): SequenceFingerprint {
+  const consoleTranscript = looksLikeConsoleTranscript(fileName, text)
+    ? analyzeConsoleTranscript(text)
+    : undefined
+  const sourceText = consoleTranscript
+    ? consoleTranscript.inputs.map((item) => `${item.command};`).join('\n')
+    : text
   const analysis = analyzeDomainSequence(
-    { id: 'artifact', filename: fileName, content: text },
+    { id: 'artifact', filename: fileName, content: sourceText },
     { askPurposeWhenMissing: false, maxQuestions: 0 }
   )
   const { dna, fingerprint, parsed } = analysis
@@ -65,9 +72,9 @@ export function parseSequence(text: string, fileName = 'artifact.seq'): Sequence
 
   return {
     parserVersion: PARSER_VERSION,
-    lineCount: parsed.stats.lineCount,
+    lineCount: consoleTranscript?.lineCount ?? parsed.stats.lineCount,
     blockCount: parsed.stats.blockCount,
-    commandCount: parsed.stats.commandCount,
+    commandCount: consoleTranscript?.inputCount ?? parsed.stats.commandCount,
     commandTokens: (dna.commandFamilies.value ?? [])
       .flatMap((item) => [item.family, item.executable])
       .filter((item, index, all) => all.indexOf(item) === index)
@@ -76,6 +83,14 @@ export function parseSequence(text: string, fileName = 'artifact.seq'): Sequence
       .map((item) => `${item.family}:${item.executable}`)
       .filter((item, index, all) => all.indexOf(item) === index)
       .slice(0, 40),
+    ...(consoleTranscript ? {
+      console: {
+        inputCount: consoleTranscript.inputCount,
+        ambiguousCount: consoleTranscript.ambiguousCount,
+        promptKinds: consoleTranscript.promptKinds,
+        statusCounts: Object.fromEntries(Object.entries(consoleTranscript.statusCounts).filter((entry): entry is [string, number] => typeof entry[1] === 'number')),
+      },
+    } : {}),
     structuralHash: fingerprint.structuralHash,
     facts
   }

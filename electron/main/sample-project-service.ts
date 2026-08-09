@@ -10,20 +10,40 @@ const REFERENCE_MARKER = 'SCT_SAMPLE_LPDDR5_REFERENCE_V1'
 const stamp = '2026-08-01T09:00:00.000Z'
 
 function bootLines(run: string, condition: string): string[] {
+  const vdd = /VDD=([0-9.]+)V/i.exec(condition)?.[1] ?? '1.295'
+  const frequency = /FREQ=(\d+)MHz/i.exec(condition)?.[1] ?? '9600'
   const lines = [
-    'set_rail VDD 1.295;',
     `[00:00:00.001] POWER_ON ${run}`,
     '[00:00:00.114] PBL: boot start',
     '[00:00:00.267] XBL: DDR init',
     `[00:00:00.411] DDR_CONDITION ${condition}`,
     '[00:00:00.790] UEFI: memory training start',
+    `[00:00:00.820] UEFI> set_rail VDD ${vdd}`,
+    `[00:00:00.821] INFO rail controller applied VDD=${vdd}V rc=0`,
+    `[00:00:00.850] UEFI> set_freq ${frequency}`,
+    `[00:00:00.851] DEBUG clock request ${frequency}MHz accepted`,
     '[00:00:01.206] UEFI: memory training complete',
     '[00:00:01.409] UEFI: ExitBootServices',
     '[00:00:02.901] OS: Linux boot complete',
+    'root@sm8975:/ # hdiag --mode memory --start',
     '[00:00:03.215] HIDAG DIAG START',
+    'root@sm8975:/ # stressapptest -M 4096 -s 600',
+    '# sleep 20',
     '[00:00:03.418] stressapptest BEGIN'
   ]
-  for (let index = 0; index < 240; index += 1) lines.push(`[00:00:${String(4 + Math.floor(index / 40)).padStart(2, '0')}.${String(index % 1000).padStart(3, '0')}] traffic loop=${index} channel=${index % 4} bank=${index % 8}`)
+  for (let index = 0; index < 7_200; index += 1) {
+    const time = `[00:${String(Math.floor(index / 3_600)).padStart(2, '0')}:${String(Math.floor(index / 60) % 60).padStart(2, '0')}.${String(index % 1_000).padStart(3, '0')}]`
+    const variants = [
+      `${time} DEBUG serial.rx packet=${index} bytes=${32 + (index % 96)} crc=ok`,
+      `${time} TRACE scheduler tick=${index} cpu=${index % 8} task=mem_stress`,
+      `${time} INFO traffic loop=${index} channel=${index % 4} bank=${index % 8} bankGroup=${index % 4}`,
+      `${time} [KERNEL] irq=${index % 64} wake=${index % 5} thermal_zone=${42 + (index % 7)}`,
+      `${time} [UI-AUTOMATION] clicked=serial-monitor-${index % 3} focus=${index % 2} frame=${index}`,
+      `${time} DEBUG training.telemetry dq=${index % 32} eye=${18 + (index % 11)}ps sample=${index % 128}`,
+      `${time} TRACE buffer alloc=${4096 + (index % 512)} free=${8192 - (index % 512)} event=complete`,
+    ]
+    lines.push(variants[index % variants.length])
+  }
   return lines
 }
 

@@ -24,6 +24,15 @@ describe('SampleProjectService', () => {
     expect(sourceEngineeringContext(initial.relativePath, allArtifacts.get(initial.artifactId)).sequenceSignature).toBe(
       sourceEngineeringContext(rt.relativePath, allArtifacts.get(rt.artifactId)).sequenceSignature,
     )
+    const initialArtifact = allArtifacts.get(initial.artifactId)!
+    expect(initialArtifact.fingerprint).toMatchObject({
+      lineCount: expect.any(Number), commandCount: 4,
+      console: { inputCount: 4, ambiguousCount: 1, promptKinds: expect.arrayContaining(['uefi', 'os-root', 'bare-root']) },
+    })
+    expect(initialArtifact.fingerprint!.lineCount).toBeGreaterThan(7_000)
+    expect(initialArtifact.fingerprint!.commandSignatures).toEqual(expect.arrayContaining([
+      'voltage-control:set_rail', 'shell:set_freq', 'diagnostic:hdiag', 'shell:stressapptest',
+    ]))
     expect(result.project.evidenceRecords?.find((item) => item.id === 'sample-e-screen-fail')?.sourceIds).toHaveLength(2)
     const all = await projects.list(true)
     expect(all.some((item) => item.archived && item.lpddrDevelopmentContext?.product === 'LPDDR5')).toBe(true)
