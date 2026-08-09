@@ -24,9 +24,13 @@ import type {
   LlmConfigInput,
   LlmModelDiscoveryInput,
   NativeAgentCancelRequest,
+  NativeAgentCompleteEvaluationInput,
+  NativeAgentConfirmWorkflowInput,
   NativeAgentCreateRequest,
+  NativeAgentDismissWorkflowInput,
   NativeAgentGetRequest,
   NativeAgentListRequest,
+  NativeAgentListWorkflowsInput,
   NativeAgentRetryRequest,
   NativeAgentSearchEventInput,
   NativeAgentSendRequest,
@@ -104,6 +108,10 @@ const api: SequenceIntelligenceApi = {
     retry: (input: NativeAgentRetryRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentRetry, input),
     cancel: (input: NativeAgentCancelRequest) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentCancel, input),
     recordSearch: (input: NativeAgentSearchEventInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentRecordSearch, input),
+    completeEvaluation: (input: NativeAgentCompleteEvaluationInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentCompleteEvaluation, input),
+    confirmWorkflow: (input: NativeAgentConfirmWorkflowInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentConfirmWorkflow, input),
+    dismissWorkflow: (input: NativeAgentDismissWorkflowInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentDismissWorkflow, input),
+    listWorkflows: (input: NativeAgentListWorkflowsInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentListWorkflows, input),
     onUpdate: (listener: (session: NativeAgentSessionView) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, session: NativeAgentSessionView): void => listener(session)
       ipcRenderer.on(IPC_CHANNELS.nativeAgentUpdate, handler)

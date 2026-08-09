@@ -37,6 +37,7 @@ import type {
   ArtifactEvidenceSourceResult,
   ArtifactSearchInput,
   ArtifactSearchResult,
+  EngineerWorkflowReviewView,
   ProjectSnapshot,
   RendererCommand,
   SequenceIntelligenceApi,
@@ -79,6 +80,8 @@ import {
   type LogDraft,
 } from '../state/logDraft'
 import '../workbench.css'
+import { engineerStageLabel } from '../domain/engineer-behavior'
+import { resolveProjectSource } from '../state/sourceIdentity'
 
 export type WorkbenchDecision = ResultLabel
 
@@ -1022,6 +1025,9 @@ export function WorkbenchView({
   const [invalidPattern, setInvalidPattern] = useState(false)
   const [patternReviewComment, setPatternReviewComment] = useState('')
   const [patternReview, setPatternReview] = useState<PatternReviewState>({ status: 'idle' })
+  const [workflowReviews, setWorkflowReviews] = useState<Record<string, EngineerWorkflowReviewView>>({})
+  const [workflowPurposes, setWorkflowPurposes] = useState<Record<string, string>>({})
+  const [workflowSaving, setWorkflowSaving] = useState(false)
   const [paneWidths, setPaneWidths] = useState<WorkbenchPaneWidths>(() => readWorkbenchPaneWidths(
     typeof window === 'undefined' ? undefined : workbenchStorage(),
     `sequence-control-tower:workbench-widths:${projectId}`,
@@ -1174,6 +1180,9 @@ export function WorkbenchView({
   }, [])
 
   const activeFile = files.find((file) => file.id === activeFileId)
+  const activeProjectSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
+  const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
+  const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeSourceLines = useMemo(() => {
     if (!activeFile) return []
@@ -1208,6 +1217,11 @@ export function WorkbenchView({
   }, [activeFileHits])
   const evidenceLines = evidenceByFile[activeFile?.id ?? ''] ?? []
   const decision = candidateDecisions[activeFile?.id ?? ''] ?? decisions[activeFile?.id ?? ''] ?? activeFile?.decision
+
+  useEffect(() => {
+    setWorkflowReviews({})
+    setWorkflowPurposes({})
+  }, [projectId])
   const searchTotal = memoryHits.length + backendTotal
   const activeBatchEvaluation = batchPreview.evaluations?.[activeFile?.id ?? '']
   const activeBatchConflict = batchPreview.conflictIds?.includes(activeFile?.id ?? '') ?? false
@@ -2070,7 +2084,13 @@ export function WorkbenchView({
         const total = Object.values(successfulCounts).reduce((sum, count) => sum + count, 0)
         setBackendTotal(total)
         const sourceIds = searchFiles.flatMap((file) => {
-          const source = projectSources.find((item) => (item.artifactRootId ?? item.rootId) === file.rootId && item.relativePath === file.relativePath)
+          const source = resolveProjectSource({ artifacts: projectSources }, file)
+          return source ? [source.sourceId] : []
+        })
+        const activeSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
+        const matchedSourceIds = searchFiles.flatMap((file) => {
+          if ((successfulCounts[file.id] ?? 0) < 1) return []
+          const source = resolveProjectSource({ artifacts: projectSources }, file)
           return source ? [source.sourceId] : []
         })
         if (api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
@@ -2078,7 +2098,9 @@ export function WorkbenchView({
             projectId, sourceIds: [...new Set(sourceIds)], query: compiled.query, mode: compiled.mode,
             caseSensitive: options.caseSensitive,
             scope: searchScope === 'file' ? 'current' : searchScope === 'open' ? 'open' : 'project',
-            matchCount: total
+            matchCount: total,
+            ...(activeSource ? { activeSourceId: activeSource.sourceId, activeMatchCount: successfulCounts[activeFile!.id] ?? 0 } : {}),
+            matchedSourceIds: [...new Set(matchedSourceIds)],
           }).catch(() => undefined)
         }
         const failure = result.files.find((file) => file.error)?.error
@@ -2096,7 +2118,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [invalidPattern, options, projectId, projectSources, query, resetSearchNavigation, searchFiles, searchScope])
+  }, [activeFile, invalidPattern, options, projectId, projectSources, query, resetSearchNavigation, searchFiles, searchScope])
 
   useEffect(() => {
     if (!query.trim() || invalidPattern || !activeFile || searching) return undefined
@@ -2261,6 +2283,26 @@ export function WorkbenchView({
         delete next[activeFile.id]
         return next
       })
+      const api = electronApi()
+      const source = resolveProjectSource({ artifacts: projectSources }, activeFile)
+      if (api?.nativeAgent && source && projectId !== 'log-workbench') {
+        void api.nativeAgent.completeEvaluation({
+          projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
+        }).then((completed) => {
+          if (completed.kind === 'review') {
+            setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
+            setWorkflowPurposes((current) => ({
+              ...current,
+              [completed.review.id]: current[completed.review.id] ?? completed.review.suggestions.find((item) => item !== '직접 입력') ?? '',
+            }))
+          } else if (completed.kind === 'applied') {
+            setWorkflowReviews((current) => {
+              const next = { ...current }; delete next[source.sourceId]; return next
+            })
+            onNotify?.(`저장된 분석 절차 적용 · ${completed.memory.purpose}`, 'success')
+          }
+        }).catch(() => undefined)
+      }
       return true
     } catch (error) {
       if (!window.sequenceIntelligence?.evaluations) {
@@ -2268,6 +2310,41 @@ export function WorkbenchView({
       }
       return false
     }
+  }
+
+  const confirmWorkflow = async () => {
+    const api = electronApi()
+    if (!api?.nativeAgent || !workflowReview || !workflowPurpose.trim()) return
+    setWorkflowSaving(true)
+    try {
+      const memory = await api.nativeAgent.confirmWorkflow({
+        projectId, reviewId: workflowReview.id, purpose: workflowPurpose.trim(),
+      })
+      setWorkflowReviews((current) => {
+        const next = { ...current }; delete next[workflowReview.sourceId]; return next
+      })
+      setWorkflowPurposes((current) => {
+        const next = { ...current }; delete next[workflowReview.id]; return next
+      })
+      onNotify?.(`분석 절차 저장 · ${memory.purpose}`, 'success')
+    } catch (error) {
+      onNotify?.(error instanceof Error ? error.message : '분석 절차를 저장하지 못했습니다.', 'error')
+    } finally {
+      setWorkflowSaving(false)
+    }
+  }
+
+  const dismissWorkflow = async () => {
+    const api = electronApi()
+    if (!workflowReview) return
+    const reviewId = workflowReview.id
+    setWorkflowReviews((current) => {
+      const next = { ...current }; delete next[workflowReview.sourceId]; return next
+    })
+    setWorkflowPurposes((current) => {
+      const next = { ...current }; delete next[workflowReview.id]; return next
+    })
+    if (api?.nativeAgent) void api.nativeAgent.dismissWorkflow({ projectId, reviewId }).catch(() => undefined)
   }
 
   const finishDecisionInteraction = (nextDecision: WorkbenchDecision) => {
@@ -2761,6 +2838,20 @@ export function WorkbenchView({
                 <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
                 {activeFile.decision && candidateDecisions[activeFile.id] && candidateDecisions[activeFile.id] !== activeFile.decision ? <button className="confirm-decision-revision" onClick={() => void confirmDecisionRevision()}>기존 {activeFile.decision} → {candidateDecisions[activeFile.id]} 변경 확정</button> : null}
               </section>
+
+              {workflowReview ? (
+                <section className="workflow-confirmation" aria-label="이번 분석 목적 확인">
+                  <div><strong>이번 분석</strong><span>{workflowReview.stages.map(engineerStageLabel).join(' → ')}</span></div>
+                  <p>어떤 목적이었나요?</p>
+                  <div className="workflow-purpose-options">
+                    {workflowReview.suggestions.filter((item) => item !== '직접 입력').map((item) => (
+                      <button type="button" className={workflowPurpose === item ? 'active' : ''} onClick={() => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: item }))} key={item}>{item}</button>
+                    ))}
+                  </div>
+                  <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
+                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim()}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
+                </section>
+              ) : null}
 
               <section className="pattern-review" aria-label="AI 패턴 검토">
                 <div className="pattern-review-heading">

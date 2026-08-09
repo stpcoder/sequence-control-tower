@@ -9,7 +9,7 @@ import type { ProjectStore } from './project-store'
 
 export type LpddrAgentToolName =
   | 'project_context_get' | 'project_history_get' | 'similar_case_search'
-  | 'search_history_get' | 'filename_dimensions_scan' | 'pass_fail_scan'
+  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'pass_fail_scan'
   | 'log_search' | 'log_read_window' | 'failure_trends_get'
 
 export interface LpddrAgentToolCall { name: LpddrAgentToolName; args?: Record<string, unknown> }
@@ -26,6 +26,8 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   project_history_get: '현재 프로젝트의 불량 가설, 평가 브랜치, 평가 결과와 근거 연결을 조회합니다.',
   similar_case_search: '다른 LPDDR5/LPDDR6 프로젝트에서 제목과 가설, 평가 요약이 비슷한 사례를 찾습니다.',
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
+  engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
+  engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
   filename_dimensions_scan: '로그 파일명에서 자재, Sample, Lot, 온도, VDD, 주파수, TM, DQ, BL 후보를 추출합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
@@ -36,6 +38,10 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
 const safe = (value: unknown, max = 500): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
   : ''
+const promptSafe = (value: unknown, max = 500): string => safe(value, max).replace(
+  /((?:api[_-]?key|token|authorization|password|secret)\s*[:=]\s*)([^\s,;]+)/gi,
+  '$1[REDACTED]',
+)
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
 const capture = (name: string, expression: RegExp): string | undefined => expression.exec(name)?.[1]
 const decimal = (value: string | undefined): number | undefined => {
@@ -97,7 +103,7 @@ export class LpddrAgentToolService {
   constructor(private readonly deps: {
     artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow' | 'inspectEvidence'>
     projects: Pick<ProjectStore, 'get' | 'list'>
-    agentStore: Pick<NativeAgentStore, 'searchHistory'>
+    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory'>
   }) {}
 
   async execute(projectId: string, call: LpddrAgentToolCall, allowedSourceIds?: string[]): Promise<LpddrAgentToolResult> {
@@ -108,6 +114,8 @@ export class LpddrAgentToolService {
       case 'project_history_get': return this.history(project)
       case 'similar_case_search': return this.similar(project, safe(call.args?.query, 240))
       case 'search_history_get': return this.searchHistory(project)
+      case 'engineer_workflow_memory_get': return this.workflowMemory(project)
+      case 'engineer_workflow_apply': return this.applyWorkflow(project, allowed, call.args)
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
       case 'pass_fail_scan': return this.statuses(allowed)
       case 'log_search': return this.search(allowed, call.args)
@@ -161,8 +169,118 @@ export class LpddrAgentToolService {
     return { name: 'search_history_get', label: '검색 기록', summary: `최근 Ctrl-F/정규식 확인 ${data.length}건`, data, evidenceSourceIds: [...new Set(data.flatMap((item) => item.sourceIds))] }
   }
 
-  private filenames(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): LpddrAgentToolResult {
-    const rows = sources.map((source) => ({ sourceId: source.sourceId, fileName: safe(basename(source.relativePath), 240), dimensions: extractLpddrFilenameDimensions(source.relativePath) }))
+  private async workflowMemory(project: ProjectSnapshot): Promise<LpddrAgentToolResult> {
+    const [workflows, recentSearches, conversation] = await Promise.all([
+      this.deps.agentStore.workflowMemories(project.id, 50),
+      this.deps.agentStore.searchHistory(project.id, 20),
+      this.deps.agentStore.conversationHistory(project.id, 20),
+    ])
+    const data = {
+      confirmed: workflows.map((item) => ({
+        ...item,
+        name: promptSafe(item.name, 160),
+        purpose: promptSafe(item.purpose, 160),
+        checks: item.checks.map((check) => ({ ...check, query: promptSafe(check.query) })),
+      })),
+      recentSearches: recentSearches.map((item) => ({
+        query: promptSafe(item.query), mode: item.mode, caseSensitive: item.caseSensitive,
+        activeMatchCount: item.activeMatchCount, matchCount: item.matchCount, occurredAt: item.occurredAt,
+      })),
+      conversation: conversation.map((item) => ({ ...item, content: promptSafe(item.content, 4_000) })),
+    }
+    const applied = workflows.reduce((sum, item) => sum + item.appliedCount, 0)
+    return {
+      name: 'engineer_workflow_memory_get', label: '분석 절차 기억',
+      summary: `확정 절차 ${workflows.length}개 · 재사용 ${applied}회 · 최근 검색 ${recentSearches.length}건 · 이전 대화 ${conversation.length}건`,
+      data, evidenceSourceIds: [...new Set([
+        ...workflows.flatMap((item) => item.sourceIds),
+        ...conversation.flatMap((item) => item.evidenceSourceIds ?? []),
+      ])],
+    }
+  }
+
+  private async applyWorkflow(
+    project: ProjectSnapshot,
+    sources: ProjectSnapshot['artifacts'],
+    args: Record<string, unknown> | undefined,
+  ): Promise<LpddrAgentToolResult> {
+    const requestedId = safe(args?.workflowId, 160)
+    const memories = (await this.deps.agentStore.workflowMemories(project.id, 50))
+      .filter((item) => !requestedId || item.id === requestedId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, requestedId ? 1 : 3)
+    if (!memories.length || !sources.length) return {
+      name: 'engineer_workflow_apply', label: '분석 절차 적용',
+      summary: memories.length ? '적용할 로그 없음' : '확정된 분석 절차 없음',
+      data: { rows: [] }, evidenceSourceIds: [],
+    }
+    const dimensionKeys: Array<keyof ProjectEvaluationDimensions> = [
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'sku', 'lot', 'sample',
+      'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
+    ]
+    const selectedBySource = new Map(sources.map((source) => {
+      const detected = extractLpddrFilenameDimensions(source.relativePath)
+      const ranked = memories.map((memory) => ({
+        memory,
+        score: dimensionKeys.filter((key) => detected[key] !== undefined && memory.dimensions?.[key] !== undefined
+          && String(detected[key]) === String(memory.dimensions?.[key])).length,
+      })).sort((a, b) => b.score - a.score || b.memory.updatedAt.localeCompare(a.memory.updatedAt))
+      return [source.sourceId, ranked[0].memory] as const
+    }))
+    const specIds = new Map<string, { memoryId: string; checkIndex: number }>()
+    const specs: ArtifactEvidenceSpec[] = memories.flatMap((memory, memoryIndex) => memory.checks.slice(0, 20).map((check, checkIndex) => {
+      const id = `workflow-${memoryIndex}-${checkIndex}`
+      specIds.set(id, { memoryId: memory.id, checkIndex })
+      return { id, query: check.query, mode: check.mode, caseSensitive: check.caseSensitive }
+    }))
+    const inspected = await this.deps.artifacts.inspectEvidence({
+      sources: sources.map((source) => ({
+        sourceId: source.sourceId, artifactId: source.artifactId,
+        rootId: source.artifactRootId ?? source.rootId, relativePath: source.relativePath,
+      })),
+      specs,
+    })
+    const rows = inspected.sources.map((source) => {
+      const memory = selectedBySource.get(source.sourceId)!
+      const checks = memory.checks.map((check, checkIndex) => {
+        const specId = [...specIds].find(([, value]) => value.memoryId === memory.id && value.checkIndex === checkIndex)?.[0]
+        const evidence = source.evidence.find((item) => item.specId === specId)
+        const count = evidence?.occurrenceCount ?? 0
+        return { query: promptSafe(check.query), expected: check.expected, count, firstLine: evidence?.firstOccurrence?.lineNumber }
+      })
+      const expectationsMet = checks.every((check) => check.expected === 'present' ? check.count > 0 : check.count === 0)
+      const presentLines = checks.filter((check) => check.expected === 'present').map((check) => check.firstLine)
+      const orderMet = presentLines.every((line, index) => index === 0 || (line !== undefined && presentLines[index - 1] !== undefined && line > presentLines[index - 1]!))
+      return {
+        sourceId: source.sourceId, workflowId: memory.id, purpose: promptSafe(memory.purpose, 160),
+        stages: memory.stages, candidateResult: memory.result, matched: expectationsMet && orderMet,
+        expectationsMet, orderMet, checks,
+      }
+    })
+    const matched = rows.filter((row) => row.matched).length
+    return {
+      name: 'engineer_workflow_apply', label: '분석 절차 적용',
+      summary: `${rows.length}개 중 ${matched}개가 확정 절차의 조건과 순서에 일치`,
+      data: { rows }, evidenceSourceIds: rows.map((row) => row.sourceId),
+    }
+  }
+
+  private async filenames(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    const workflows = await this.deps.agentStore.workflowMemories(project.id, 50)
+    const dimensions: Array<keyof ProjectEvaluationDimensions> = [
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'sku', 'lot', 'sample',
+      'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
+    ]
+    const rows = sources.map((source) => {
+      const detected = extractLpddrFilenameDimensions(source.relativePath)
+      const workflowHints = workflows.flatMap((memory) => {
+        const matched = dimensions.filter((dimension) => detected[dimension] !== undefined
+          && memory.dimensions?.[dimension] !== undefined
+          && String(detected[dimension]) === String(memory.dimensions?.[dimension]))
+        return matched.length ? [{ workflowId: memory.id, purpose: promptSafe(memory.purpose, 160), stages: memory.stages, matchedDimensions: matched }] : []
+      }).sort((a, b) => b.matchedDimensions.length - a.matchedDimensions.length).slice(0, 3)
+      return { sourceId: source.sourceId, fileName: promptSafe(basename(source.relativePath), 240), dimensions: detected, workflowHints }
+    })
     const detected = rows.filter((row) => Object.values(row.dimensions).some((value) => value !== undefined)).length
     return { name: 'filename_dimensions_scan', label: '파일명 조건 추출', summary: `${rows.length}개 중 ${detected}개에서 조건 후보 추출`, data: { project: project.name, rows }, evidenceSourceIds: rows.map((row) => row.sourceId) }
   }
@@ -175,7 +293,7 @@ export class LpddrAgentToolService {
     })
     const rows = inspected.sources.map((source) => {
       const counts = Object.fromEntries(source.evidence.map((item) => [item.specId, item.occurrenceCount ?? 0]))
-      return { sourceId: source.sourceId, fileName: safe(source.fileName, 240), counts, ...classifyStatus(counts) }
+      return { sourceId: source.sourceId, fileName: promptSafe(source.fileName, 240), counts, ...classifyStatus(counts) }
     })
     const totals = rows.reduce<Record<string, number>>((all, row) => ({ ...all, [row.status]: (all[row.status] ?? 0) + 1 }), {})
     return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: STATUS_SPECS.map((item) => item.id), rows, totals }, evidenceSourceIds: rows.map((row) => row.sourceId) }
@@ -189,8 +307,8 @@ export class LpddrAgentToolService {
     const mode = args?.mode === 'regex' ? 'regex' : 'literal'
     const result = await this.deps.artifacts.search({ artifactIds: [...new Set(selected.map((item) => item.artifactId))], query, mode, caseSensitive: args?.caseSensitive === true, maxMatches: 12, contextLines: 0 })
     const artifactSources = new Map(selected.map((item) => [item.artifactId, item.sourceId]))
-    const matches = result.matches.map((item) => ({ sourceId: artifactSources.get(item.artifactId), line: item.lineNumber, text: safe(item.lineText, 500) }))
-    return { name: 'log_search', label: '로그 검색', summary: `${mode === 'regex' ? '정규식' : '문자열'} “${query.slice(0, 60)}” ${result.totalMatchCount}건`, data: { query, mode, totalMatchCount: result.totalMatchCount, truncated: result.truncated, matches }, evidenceSourceIds: [...new Set(matches.flatMap((item) => item.sourceId ? [item.sourceId] : []))] }
+    const matches = result.matches.map((item) => ({ sourceId: artifactSources.get(item.artifactId), line: item.lineNumber, text: promptSafe(item.lineText, 500) }))
+    return { name: 'log_search', label: '로그 검색', summary: `${mode === 'regex' ? '정규식' : '문자열'} “${promptSafe(query, 60)}” ${result.totalMatchCount}건`, data: { query: promptSafe(query), mode, totalMatchCount: result.totalMatchCount, truncated: result.truncated, matches }, evidenceSourceIds: [...new Set(matches.flatMap((item) => item.sourceId ? [item.sourceId] : []))] }
   }
 
   private async window(sources: ProjectSnapshot['artifacts'], args: Record<string, unknown> | undefined): Promise<LpddrAgentToolResult> {
@@ -200,7 +318,7 @@ export class LpddrAgentToolService {
     const startLine = Math.max(1, Math.trunc(finite(args?.startLine) ?? 1))
     const lineCount = Math.min(24, Math.max(1, Math.trunc(finite(args?.lineCount) ?? 16)))
     const result = await this.deps.artifacts.lineWindow({ artifactId: source.artifactId, startLine, lineCount })
-    const lines = result.lines.map((line) => ({ line: line.lineNumber, text: safe(line.text, 500) }))
+    const lines = result.lines.map((line) => ({ line: line.lineNumber, text: promptSafe(line.text, 500) }))
     return { name: 'log_read_window', label: '근거 주변 읽기', summary: `${basename(source.relativePath)} ${startLine}행부터 ${lines.length}줄`, data: { sourceId, lines, hasMoreBefore: result.hasMoreBefore, hasMoreAfter: result.hasMoreAfter }, evidenceSourceIds: [sourceId] }
   }
 

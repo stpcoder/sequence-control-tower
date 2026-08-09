@@ -386,31 +386,29 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
 
   const projectPending = evaluationRun?.status === 'running' || evaluationRun?.status === 'paused'
   const projectCanStart = Boolean(project && project.artifacts.length && window.sequenceIntelligence?.evaluationAgent)
-  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={16} /><span>Agent 열기</span><kbd>⌘/Ctrl J</kbd></button>
+  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={16} /><span>Agent</span></button>
 
-  return <aside className="agent-panel" aria-label="Evaluation Agent">
+  return <aside className="agent-panel" aria-label="Agent">
     <div className="agent-panel-head">
-      <div className="agent-orb"><Sparkles size={15} /></div>
-      <div><strong>Evaluation Agent</strong><span>{scope === 'current' ? '현재 파일 기반 분석' : '프로젝트 기억 기반 대화'}</span></div>
+      <div><strong>Agent</strong><span title={`${project?.name ?? ''}${selectedFile?.name ? ` / ${selectedFile.name}` : ''}`}>{project?.name ?? '프로젝트 없음'}{selectedFile?.name ? ` / ${selectedFile.name}` : ''}</span></div>
       <button className="icon-button small" onClick={onClose} aria-label="Agent 패널 닫기"><X size={15} /></button>
     </div>
-    <div className="agent-context"><span>컨텍스트</span><strong>{project ? project.name : '프로젝트 없음'}</strong><small>{selectedFile?.name ?? '선택한 artifact 없음'}</small></div>
-    <div className="agent-scope" role="group" aria-label="분석 범위"><button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>현재 로그</button><button className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>프로젝트 Agent</button></div>
+    <div className="agent-scope" role="group" aria-label="분석 범위"><button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>로그</button><button className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>프로젝트</button></div>
     {scope === 'project' && project ? <div className="native-agent-toolbar">
       <button onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen}><History size={13} />{nativeSession?.title ?? '대화 선택'}</button>
-      <span className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`}>{(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장 Agent'}</span>
+      <span className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} aria-label={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode 연결' : '내장 분석'} />
       <button className="native-agent-new" onClick={() => void createNativeSession()} disabled={busy} aria-label="새 프로젝트 대화"><Plus size={14} /></button>
       {nativeHistoryOpen ? <div className="native-agent-history">{nativeSessions.map((item) => <button key={item.id} className={item.id === nativeSession?.id ? 'active' : ''} onClick={() => void openNativeSession(item.id)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleDateString('ko-KR')} · {item.backend === 'opencode' ? 'OpenCode' : '내장'}</span></button>)}{!nativeSessions.length ? <p>저장된 대화가 없습니다.</p> : null}</div> : null}
     </div> : null}
     <div className="agent-thread">
-      {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? '선택한 artifact의 판정을 분석합니다.' : '분석할 artifact를 선택하세요.') : '저장된 프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석 시작</button></div> : null}
-      {scope === 'project' && !nativeSession ? <div className="agent-empty"><p>{project ? (project.artifacts.length ? `로그 ${project.artifacts.length}개와 저장된 평가 이력을 함께 분석합니다.` : '프로젝트에 로그를 먼저 연결하세요.') : '저장된 프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
+      {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? selectedFile.name : '로그를 선택하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석</button></div> : null}
+      {scope === 'project' && !nativeSession ? <div className="agent-empty"><p>{project ? (project.artifacts.length ? `로그 ${project.artifacts.length}개` : '로그를 연결하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
       {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}>{choice}</button>)}</div> : null}</> : null}
       {scope === 'current' && run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
       {scope === 'current' && run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}
       {scope === 'current' && error ? <div className="agent-error" role="alert">{error}</div> : null}
       {scope === 'project' && nativeSession ? <>
-        {nativeSession.messages.map((message) => <div key={message.id} className={`native-agent-message ${message.role}`}><span>{message.role === 'user' ? '나' : message.role === 'assistant' ? 'Agent' : 'System'}</span><p>{message.content}</p>{message.evidenceSourceIds?.length ? <small>근거 로그 {message.evidenceSourceIds.length}개</small> : null}</div>)}
+        {nativeSession.messages.map((message) => <div key={message.id} className={`native-agent-message ${message.role}`}><span>{message.role === 'user' ? '나' : message.role === 'assistant' ? 'Agent' : '기록'}</span><p>{message.content}</p>{message.evidenceSourceIds?.length ? <small>근거 {message.evidenceSourceIds.length}</small> : null}</div>)}
         {nativeSession.tools.length ? <details className="native-agent-tools"><summary><Wrench size={12} />도구 실행 {nativeSession.tools.length}건</summary>{nativeSession.tools.slice(-12).map((tool) => <div key={tool.id} className={tool.state}><span>{tool.label}</span><small>{tool.state === 'running' ? '실행 중' : tool.summary ?? tool.state}</small></div>)}</details> : null}
         {nativeSession.status === 'idle' && nativeSession.messages.filter((item) => item.role === 'user').length === 0 ? <div className="native-agent-suggestions"><button onClick={() => void sendNativeText('새 로그에서 어떤 평가를 했고 온도, VDD, 자재, Sample, DQ 조건과 Pass/Fail이 무엇인지 확인해줘.')}>새 로그 평가 조건 확인</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')}>과거 사례와 다음 평가</button></div> : null}
       </> : null}
@@ -421,10 +419,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     {scope === 'project' && nativeSession && nativeSession.status !== 'idle' ? <div className="agent-stage" role="status">{nativeSession.status === 'queued' || nativeSession.status === 'running' ? <LoaderCircle size={12} className="wb-spin" /> : null}<span>{nativeSession.status === 'queued' ? '대기 중' : nativeSession.status === 'running' ? '도구 실행 및 분석 중' : nativeSession.failure ?? '분석이 멈췄습니다.'}</span>{nativeSession.status === 'paused' || nativeSession.status === 'failed' ? <button onClick={() => void retryNative()} disabled={busy}>재시도</button> : <button onClick={() => void cancelNative()}>중지</button>}</div> : null}
     {scope === 'current' ? <form className="agent-composer" onSubmit={send}>
       <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="짧은 메시지 입력" rows={2} disabled={!run || busy} />
-      <div><span>{run ? '분석 맥락에 추가' : '분석을 시작하면 입력할 수 있습니다'}</span><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
+      <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
     </form> : <form className="agent-composer native" onSubmit={(event) => { event.preventDefault(); void sendNativeText(input) }}>
-      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="평가 맥락이나 다음 실험을 질문하세요" rows={3} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
-      <div><span>{nativeSession ? '대화와 도구 근거가 프로젝트에 저장됩니다' : '새 대화가 자동으로 만들어집니다'}</span><button type="submit" aria-label="프로젝트 Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={15} /></button></div>
+      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="평가 목적이나 다음 조건 질문" rows={3} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
+      <div><span /><button type="submit" aria-label="프로젝트 Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={15} /></button></div>
     </form>}
   </aside>
 }

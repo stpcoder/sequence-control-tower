@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  NativeAgentBackendStatusView, NativeAgentSearchEventInput, NativeAgentSessionSummary,
-  NativeAgentSessionView
+  EngineerWorkflowMemoryView, NativeAgentBackendStatusView, NativeAgentCompleteEvaluationInput,
+  NativeAgentCompleteEvaluationResult, NativeAgentConfirmWorkflowInput, NativeAgentDismissWorkflowInput,
+  NativeAgentSearchEventInput, NativeAgentSessionSummary, NativeAgentSessionView
 } from '../shared/contracts'
 import type { OpenAiCompatibleClient } from './llm-service'
 import type { ProjectStore } from './project-store'
 import { NativeAgentStore, type StoredNativeAgentSession } from './native-agent-store'
 import {
   LPDDR_AGENT_TOOL_DESCRIPTIONS, type LpddrAgentToolCall, type LpddrAgentToolResult,
-  type LpddrAgentToolService
+  extractLpddrFilenameDimensions, type LpddrAgentToolService
 } from './lpddr-agent-tools'
 import type { OpenCodeHost } from './opencode-host'
 import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
@@ -24,7 +25,7 @@ function uniquePlan(calls: LpddrAgentToolCall[]): LpddrAgentToolCall[] {
     const key = `${call.name}:${JSON.stringify(call.args ?? {})}`
     if (seen.has(key)) return false
     seen.add(key); return true
-  }).slice(0, 6)
+  }).slice(0, 7)
 }
 
 /** Small built-in skill router used when OpenCode is not installed. It does
@@ -38,8 +39,12 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
     calls.push({ name: 'filename_dimensions_scan' })
   }
   if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
+  if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
   if (/(경향|집중|불량률|dq|bl|channel|채널|bank|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
   if (/(과거|이전|유사|lpddr5|다음|추천|어떻게|시도)/i.test(text)) calls.push({ name: 'similar_case_search', args: { query: content.slice(0, 240) } })
+  if (/(무슨 평가|어떤 평가|평가 목적|검색 기록|ctrl.?f|정규식|regex|찾아봤|분석 절차|boot|uefi|training|retest|\brt\b)/i.test(text)) {
+    calls.push({ name: 'engineer_workflow_memory_get' })
+  }
   if (/(검색 기록|ctrl.?f|정규식|regex|찾아봤)/i.test(text)) calls.push({ name: 'search_history_get' })
   const quoted = content.match(/[“"']([^”"']{2,120})[”"']/)?.[1]
   if (quoted && /(검색|찾|marker|문장|라인)/i.test(text)) calls.push({ name: 'log_search', args: { query: quoted, mode: /정규식|regex/i.test(text) ? 'regex' : 'literal' } })
@@ -87,16 +92,17 @@ export class NativeAgentService {
     if (project.artifacts.length) {
       const sourceIds = project.artifacts.slice(0, 100).map((item) => item.sourceId)
       try {
-        const [filenames, statuses] = await Promise.all([
+        const [filenames, statuses, workflows] = await Promise.all([
           this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
-          this.deps.tools.execute(project.id, { name: 'pass_fail_scan' }, sourceIds)
+          this.deps.tools.execute(project.id, { name: 'pass_fail_scan' }, sourceIds),
+          this.deps.tools.execute(project.id, { name: 'engineer_workflow_memory_get' }, sourceIds),
         ])
         session = await this.deps.store.update(session.id, (draft) => {
-          for (const result of [filenames, statuses]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
+          for (const result of [filenames, statuses, workflows]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
         })
         session = await this.deps.store.appendMessage(session.id, {
-          role: 'assistant', content: this.onboardingQuestion(filenames, statuses),
-          evidenceSourceIds: [...new Set([...filenames.evidenceSourceIds, ...statuses.evidenceSourceIds])]
+          role: 'assistant', content: this.onboardingQuestion(filenames, statuses, workflows),
+          evidenceSourceIds: [...new Set([...filenames.evidenceSourceIds, ...statuses.evidenceSourceIds, ...workflows.evidenceSourceIds])]
         })
       } catch {
         session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `프로젝트 로그 ${project.artifacts.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
@@ -153,7 +159,46 @@ export class NativeAgentService {
     if (!project) return
     const allowed = new Set(project.artifacts.map((item) => item.sourceId))
     if (input.sourceIds.some((item) => !allowed.has(item))) throw new Error('프로젝트 검색 범위가 올바르지 않습니다.')
+    if (input.activeSourceId && !allowed.has(input.activeSourceId)) throw new Error('현재 로그가 프로젝트 범위에 없습니다.')
+    if (input.matchedSourceIds?.some((item) => !allowed.has(item))) throw new Error('검색 결과 범위가 올바르지 않습니다.')
+    if (input.activeSourceId && !input.sourceIds.includes(input.activeSourceId)) throw new Error('현재 로그가 검색 범위에 없습니다.')
+    if (input.matchedSourceIds?.some((item) => !input.sourceIds.includes(item))) throw new Error('검색 결과가 검색 범위에 없습니다.')
     await this.deps.store.recordSearch(input)
+  }
+
+  async completeEvaluation(input: NativeAgentCompleteEvaluationInput): Promise<NativeAgentCompleteEvaluationResult> {
+    const project = await this.deps.projects.get(safe(input.projectId, 160))
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    const sourceId = safe(input.sourceId, 160)
+    const source = project.artifacts.find((item) => item.sourceId === sourceId)
+    if (!source) throw new Error('현재 로그가 프로젝트 범위에 없습니다.')
+    const results = new Set(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
+    if (!results.has(input.result)) throw new Error('판정 결과가 올바르지 않습니다.')
+    return this.deps.store.completeEvaluation({
+      projectId: project.id,
+      sourceId,
+      result: input.result,
+      evidenceLines: input.evidenceLines,
+      dimensions: extractLpddrFilenameDimensions(source.relativePath),
+    })
+  }
+
+  async confirmWorkflow(input: NativeAgentConfirmWorkflowInput): Promise<EngineerWorkflowMemoryView> {
+    const project = await this.deps.projects.get(safe(input.projectId, 160))
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    return this.deps.store.confirmWorkflow(project.id, input.reviewId, input.purpose)
+  }
+
+  async dismissWorkflow(input: NativeAgentDismissWorkflowInput): Promise<void> {
+    const project = await this.deps.projects.get(safe(input.projectId, 160))
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    await this.deps.store.dismissWorkflow(project.id, input.reviewId)
+  }
+
+  async listWorkflows(projectId: string): Promise<EngineerWorkflowMemoryView[]> {
+    const project = await this.deps.projects.get(safe(projectId, 160))
+    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    return this.deps.store.workflowMemories(project.id)
   }
 
   close(): void { this.controllers.forEach((controller) => controller.abort()); this.deps.opencode.close() }
@@ -266,7 +311,7 @@ export class NativeAgentService {
     return safe(raw, 300) || '에이전트 분석을 완료하지 못했습니다.'
   }
 
-  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult): string {
+  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult, workflows: LpddrAgentToolResult): string {
     const rows = (filenames.data as { rows?: Array<{ dimensions?: Record<string, unknown> }> })?.rows ?? []
     const dimensions = ['testMode', 'temperatureC', 'vdd', 'material', 'dq', 'pattern'] as const
     const leaders = dimensions.flatMap((dimension) => {
@@ -280,6 +325,7 @@ export class NativeAgentService {
       const label = dimension === 'temperatureC' ? `${first[0]}°C` : dimension === 'vdd' ? `VDD ${first[0]}V` : dimension === 'dq' ? `DQ${first[0]}` : first[0]
       return first[1] >= 2 ? [label] : []
     }).slice(0, 4)
-    return `파일명과 종료 marker를 먼저 확인했습니다.\n${filenames.summary}\n${statuses.summary || '확정 상태 없음'}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 이 조건을 중심으로 한 평가인가요?` : '반복되는 조건의 평가 목적을 확인할 수 없습니다.'} 맞다면 분석할 불량 또는 개선 목적을 선택하거나 짧게 적어주세요.`
+    const remembered = (workflows.data as { confirmed?: unknown[] })?.confirmed?.length ?? 0
+    return `파일명과 종료 marker를 확인했습니다.\n${filenames.summary}\n${statuses.summary || '확정 상태 없음'}${remembered ? `\n저장된 분석 절차 ${remembered}개를 함께 확인합니다.` : ''}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 어떤 목적의 평가인가요?` : '이번 평가 목적을 짧게 적어주세요.'}`
   }
 }

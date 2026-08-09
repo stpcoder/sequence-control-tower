@@ -30,9 +30,13 @@ import type {
   LlmConfigInput,
   LlmModelDiscoveryInput,
   NativeAgentCancelRequest,
+  NativeAgentCompleteEvaluationInput,
+  NativeAgentConfirmWorkflowInput,
   NativeAgentCreateRequest,
+  NativeAgentDismissWorkflowInput,
   NativeAgentGetRequest,
   NativeAgentListRequest,
+  NativeAgentListWorkflowsInput,
   NativeAgentRetryRequest,
   NativeAgentSearchEventInput,
   NativeAgentSendRequest,
@@ -494,6 +498,22 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentRecordSearch, (_event, input) => {
     if (!services.nativeAgent) return
     return services.nativeAgent.recordSearch(input as NativeAgentSearchEventInput)
+  })
+  handle(IPC_CHANNELS.nativeAgentCompleteEvaluation, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.completeEvaluation(input as NativeAgentCompleteEvaluationInput)
+  })
+  handle(IPC_CHANNELS.nativeAgentConfirmWorkflow, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.confirmWorkflow(input as NativeAgentConfirmWorkflowInput)
+  })
+  handle(IPC_CHANNELS.nativeAgentDismissWorkflow, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.dismissWorkflow(input as NativeAgentDismissWorkflowInput)
+  })
+  handle(IPC_CHANNELS.nativeAgentListWorkflows, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.listWorkflows((input as NativeAgentListWorkflowsInput).projectId)
   })
 
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())

@@ -171,7 +171,6 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
 
   return <>
     <div className="project-switcher">
-      <span className="eyebrow">CURRENT PROJECT</span>
       <button className="project-switch-button" onClick={() => { setOpen((value) => !value); void refresh() }} aria-expanded={open}><span>{project?.name ?? '프로젝트 선택'}</span><ChevronDown size={14} /></button>
     </div>
     {open ? <div className="project-popover" role="dialog" aria-label="프로젝트 관리">

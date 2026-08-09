@@ -38,10 +38,9 @@ const labels: Record<DemoPage, { selector: string; number: number; label: string
 }
 
 const agentLabels = [
-  { selector: '.agent-context', number: 1, label: '현재 검토 중인 평가 컨텍스트' },
-  { selector: '.quick-answers', number: 2, label: '부담이 적은 선택형 확인' },
-  { selector: '.agent-sources', number: 3, label: '근거와 캐시 상태' },
-  { selector: '.agent-composer', number: 4, label: '필요할 때만 자유 대화' },
+  { selector: '.agent-scope', number: 1, label: '로그 또는 프로젝트 범위' },
+  { selector: '.agent-thread', number: 2, label: '분석과 근거 기록' },
+  { selector: '.agent-composer', number: 3, label: '질문 입력' },
 ]
 
 export function GuideOverlay({ page }: { page: DemoPage }) {

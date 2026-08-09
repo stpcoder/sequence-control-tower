@@ -849,7 +849,42 @@ export interface NativeAgentCancelRequest { sessionId: string }
 export interface NativeAgentSearchEventInput {
   projectId: string; sourceIds: string[]; query: string; mode: ArtifactSearchMode
   caseSensitive: boolean; scope: 'current' | 'open' | 'project'; matchCount: number
+  /** The log the engineer was looking at. Search scope may include more logs. */
+  activeSourceId?: string
+  /** Sources with at least one match. Raw paths and log text are never stored here. */
+  matchedSourceIds?: string[]
+  /** Match count in activeSourceId; differs from matchCount for open/project scope. */
+  activeMatchCount?: number
 }
+export type EngineerEvaluationStage = 'power-on' | 'uefi' | 'training' | 'os' | 'memory-test' | 'halt' | 'reboot' | 'retest' | 'unknown'
+export type EngineerWorkflowExpected = 'present' | 'absent'
+export type EngineerWorkflowResult = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN' | 'EXCLUDED'
+export interface EngineerWorkflowCheckView {
+  query: string; mode: ArtifactSearchMode; caseSensitive: boolean
+  expected: EngineerWorkflowExpected; matchCount: number; stage: EngineerEvaluationStage; order: number
+}
+export interface EngineerWorkflowMemoryView {
+  id: string; projectId: string; name: string; purpose: string
+  stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]
+  result: EngineerWorkflowResult; sourceIds: string[]; evidenceLines: number[]
+  dimensions?: Partial<ProjectEvaluationDimensions>
+  confirmedCount: number; appliedCount: number; createdAt: string; updatedAt: string; lastUsedAt?: string
+}
+export interface EngineerWorkflowReviewView {
+  id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult
+  stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]; evidenceLines: number[]
+  suggestions: string[]; similarMemoryId?: string; state: 'pending' | 'confirmed' | 'dismissed'; createdAt: string
+}
+export interface NativeAgentCompleteEvaluationInput {
+  projectId: string; sourceId: string; result: EngineerWorkflowResult; evidenceLines?: number[]
+}
+export type NativeAgentCompleteEvaluationResult =
+  | { kind: 'review'; review: EngineerWorkflowReviewView }
+  | { kind: 'applied'; memory: EngineerWorkflowMemoryView }
+  | { kind: 'ignored' }
+export interface NativeAgentConfirmWorkflowInput { projectId: string; reviewId: string; purpose: string }
+export interface NativeAgentDismissWorkflowInput { projectId: string; reviewId: string }
+export interface NativeAgentListWorkflowsInput { projectId: string }
 export interface NativeAgentWorkspaceApi {
   backendStatus(): Promise<NativeAgentBackendStatusView>
   create(input: NativeAgentCreateRequest): Promise<NativeAgentSessionView>
@@ -859,6 +894,10 @@ export interface NativeAgentWorkspaceApi {
   retry(input: NativeAgentRetryRequest): Promise<NativeAgentSessionView>
   cancel(input: NativeAgentCancelRequest): Promise<NativeAgentSessionView>
   recordSearch(input: NativeAgentSearchEventInput): Promise<void>
+  completeEvaluation(input: NativeAgentCompleteEvaluationInput): Promise<NativeAgentCompleteEvaluationResult>
+  confirmWorkflow(input: NativeAgentConfirmWorkflowInput): Promise<EngineerWorkflowMemoryView>
+  dismissWorkflow(input: NativeAgentDismissWorkflowInput): Promise<void>
+  listWorkflows(input: NativeAgentListWorkflowsInput): Promise<EngineerWorkflowMemoryView[]>
   onUpdate(listener: (session: NativeAgentSessionView) => void): () => void
 }
 
@@ -989,5 +1028,7 @@ export const IPC_CHANNELS = {
   nativeAgentBackendStatus: 'native-agent:backend-status', nativeAgentCreate: 'native-agent:create',
   nativeAgentList: 'native-agent:list', nativeAgentGet: 'native-agent:get', nativeAgentSend: 'native-agent:send',
   nativeAgentRetry: 'native-agent:retry', nativeAgentCancel: 'native-agent:cancel', nativeAgentRecordSearch: 'native-agent:record-search',
+  nativeAgentCompleteEvaluation: 'native-agent:complete-evaluation', nativeAgentConfirmWorkflow: 'native-agent:confirm-workflow',
+  nativeAgentDismissWorkflow: 'native-agent:dismiss-workflow', nativeAgentListWorkflows: 'native-agent:list-workflows',
   nativeAgentUpdate: 'native-agent:update'
 } as const
