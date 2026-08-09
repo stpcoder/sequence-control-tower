@@ -275,8 +275,8 @@
   align-items: center;
   gap: 9px;
   padding: 0 11px;
-  border: 1px solid #3b414c;
-  border-radius: 8px;
+  border: 1px solid #454b56;
+  border-radius: 7px;
   color: var(--data-dim);
 }
 
@@ -304,8 +304,8 @@
 
 .data-filter-bar > label:not(.data-search),
 .pattern-control {
-  border-radius: 10px;
-  background: #171b22;
+  border-radius: 7px;
+  background: #1e2229;
 }
 
 .data-filter-bar > label:not(.data-search):focus-within,
@@ -611,11 +611,11 @@
 
 .pattern-toolbar button {
   display: inline-flex;
-  min-height: 30px;
+  min-height: 42px;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
-  border-radius: 5px;
+  padding: 0 12px;
+  border-radius: 8px;
   color: var(--data-muted);
 }
 
@@ -707,9 +707,10 @@
   align-items: center;
   gap: 9px;
   padding-left: 11px;
-  border: 1px solid #3b414c;
-  border-radius: 8px;
+  border: 1px solid #454b56;
+  border-radius: 7px;
   color: var(--data-dim);
+  background: #1e2229;
 }
 
 .pattern-section-heading select {
@@ -742,9 +743,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 7px 0;
-  border-top: 1px solid var(--data-line-soft);
-  border-bottom: 1px solid var(--data-line-soft);
+  padding: 4px 0;
 }
 
 .pattern-axis-controls > div > span {
@@ -761,9 +760,10 @@
   align-items: center;
   gap: 7px;
   padding: 0 9px;
-  border: 0;
-  border-bottom: 1px solid #3b414c;
+  border: 1px solid #454b56;
+  border-radius: 7px;
   color: var(--data-dim);
+  background: #1e2229;
 }
 
 .pattern-control span {

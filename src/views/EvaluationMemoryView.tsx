@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ArrowUp } from 'lucide-react'
 import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationPurpose, EvaluationStatus, EvidenceRecord, FailureHypothesis, ProductProject } from '../domain/evaluation-memory'
 import { flattenEvaluationMemory, inferEvaluationTrends } from '../domain/evaluation-memory'
 import { EvaluationLineage, displayEvaluationPurpose, evaluationPurposeLabel } from '../components/EvaluationLineage'
@@ -27,12 +28,12 @@ export interface EvaluationMemoryViewProps {
 }
 
 const dimensionFields: Array<[keyof EvaluationDimensions, string, 'text' | 'number']> = [
-  ['lot', 'Lot', 'text'], ['material', '자재', 'text'], ['die', 'Die', 'text'], ['sample', 'Sample', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['bank', 'Bank', 'text'], ['bankGroup', 'Bank group', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['skewPs', 'SKEW (ps)', 'number'], ['testMode', 'Mode', 'text'],
+  ['sku', 'SKU', 'text'], ['lot', 'Lot', 'text'], ['material', '자재', 'text'], ['die', 'Die', 'text'], ['sample', 'Sample', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['bank', 'Bank', 'text'], ['bankGroup', 'Bank group', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['skewPs', 'SKEW (ps)', 'number'], ['testMode', 'Mode', 'text'],
 ]
 
 const emptyDimensions = (): EvaluationDimensions => ({})
 const id = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`}`
-const trendDimensionLabel = (dimension: string) => ({ sku: 'SKEW', vdd: 'VDD', bl: 'BL', dq: 'DQ', frequencyMHz: 'MHz', socModel: 'SoC', channel: 'Channel', bank: 'Bank', bankGroup: 'Bank group', pattern: 'Pattern', temperatureC: '온도' }[dimension] ?? dimension)
+const trendDimensionLabel = (dimension: string) => ({ sku: 'SKU', skewPs: 'SKEW', vdd: 'VDD', bl: 'BL', dq: 'DQ', frequencyMHz: 'MHz', socModel: 'SoC', channel: 'Channel', bank: 'Bank', bankGroup: 'Bank group', pattern: 'Pattern', temperatureC: '온도' }[dimension] ?? dimension)
 
 export function addFailureHypothesis(memory: EvaluationMemory, draft: Pick<FailureHypothesis, 'title' | 'description' | 'origin'>): EvaluationMemory {
   const hypothesis: FailureHypothesis = { id: id('hyp'), projectId: memory.project.id, ...draft }
@@ -76,7 +77,7 @@ export function buildEvaluationContextMarkdown(memory: EvaluationMemory): string
   const failureEvidence = memory.evidence.filter((record) => record.status === 'fail')
   const projectContext = [
     memory.project.product && `Product: ${memory.project.product}`,
-    memory.project.sku && `SKEW: ${memory.project.sku}`,
+    memory.project.sku && `SKU: ${memory.project.sku}`,
     memory.project.customer && `Customer: ${memory.project.customer}`,
     memory.project.targetDevice && `Target device: ${memory.project.targetDevice}`,
     memory.project.densityGb !== undefined && `Density: ${memory.project.densityGb}Gb`,
@@ -125,20 +126,19 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     const request = agentRequest.trim()
     if (!request) return onNotify('정리할 평가 내용을 입력하세요.')
     if (!onAskAgent) return onNotify('Agent를 사용할 수 없습니다.')
-    onAskAgent(`다음 평가 내용을 분석해 평가 이력으로 정리해줘. 먼저 평가 목적을 불량 검출 강화, 개선 조건 확인, 동일 불량 재현, 불량 경향 파악, 개선 효과 검증 중 하나로 분류해줘. 온도, VDD, SKEW, 자재, Die, Sample, SoC, 부팅 단계, Pattern, DQ, BL, Channel과 단계별 Pass/Fail 근거를 확인하고 불확실한 핵심 항목만 질문해줘.\n\n${request}`)
+    onAskAgent(`다음 평가 내용을 분석해 평가 이력으로 정리해줘. 먼저 평가 목적을 불량 검출 강화, 개선 조건 확인, 동일 불량 재현, 불량 경향 파악, 개선 효과 검증 중 하나로 분류해줘. SKU, 온도, VDD, SKEW, 자재, Die, Sample, SoC, 부팅 단계, Pattern, DQ, BL, Channel과 단계별 Pass/Fail 근거를 확인하고 불확실한 핵심 항목만 질문해줘.\n\n${request}`)
   }
 
   return <div className="evaluation-memory-view">
     <header className="evaluation-memory-view__header"><h1>평가 이력</h1><div className="evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}>CSV</button><button onClick={() => void copyContext()}>AI 맥락</button></div></header>
-    <details className="evaluation-memory-view__project-context"><summary>조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.sku ?? ''} onChange={(event) => updateProjectDraft('sku', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void saveProjectConditions()}>{saving ? '저장 중…' : '저장'}</button></div></details>
+    <details className="evaluation-memory-view__project-context"><summary>조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKU<input value={projectDraft.sku ?? ''} onChange={(event) => updateProjectDraft('sku', event.target.value)} placeholder="예: SS · 16Gb · x16" /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void saveProjectConditions()}>{saving ? '저장 중…' : '저장'}</button></div></details>
     <div className="evaluation-memory-view__layout">
       <main>{purposeCounts.length ? <div className="evaluation-memory-view__purposes"><span>평가 목적</span>{purposeCounts.map((item) => <b key={item.purpose}>{item.label} <em>{item.count}</em></b>)}</div> : null}<EvaluationLineage memory={memory} selectedNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} />
         {trends.length ? <section className="evaluation-memory-view__signals"><div className="evaluation-memory-view__section-label">조건별 실패 집중</div>{trends.map((trend) => <div className="evaluation-memory-view__trend" key={`${trend.dimension}-${trend.value}`}><b>{trendDimensionLabel(trend.dimension)} = {trend.value}</b><span>{trend.failureCount}/{trend.evidenceCount} FAIL · {Math.round(trend.failureRate * 100)}%</span><em>{trend.origin === 'engineer-confirmed' ? '확정' : '제안'}</em></div>)}</section> : null}
       </main>
       <aside className="evaluation-memory-view__editor">
         <div className="evaluation-memory-view__section-label">Agent로 정리</div>
-        <textarea className="evaluation-memory-view__agent-input" value={agentRequest} onChange={(event) => setAgentRequest(event.target.value)} placeholder="예: 85°C, VDD 1.295V에서 DQ9 불량 개선 조건을 확인했습니다." rows={5} />
-        <button type="button" className="evaluation-memory-view__agent-button" onClick={askAgent}>Agent에게 정리 요청</button>
+        <div className="evaluation-memory-view__agent-composer"><textarea className="evaluation-memory-view__agent-input" value={agentRequest} onChange={(event) => setAgentRequest(event.target.value)} placeholder="예: 85°C, VDD 1.295V에서 DQ9 불량 개선 조건을 확인했습니다." rows={3} /><button type="button" onClick={askAgent} aria-label="Agent에게 정리 요청" title="Agent에게 정리 요청"><ArrowUp size={17} /></button></div>
         <details className="evaluation-memory-view__manual">
           <summary>직접 입력</summary>
           <div className="evaluation-memory-view__section-label">가설</div><input disabled={saving} value={hypothesis.title} onChange={(event) => setHypothesis({ ...hypothesis, title: event.target.value })} placeholder="가설 이름" /><textarea disabled={saving} value={hypothesis.description} onChange={(event) => setHypothesis({ ...hypothesis, description: event.target.value })} placeholder="근거 메모" /><label className="evaluation-memory-view__origin"><select disabled={saving} value={hypothesis.origin} onChange={(event) => setHypothesis({ ...hypothesis, origin: event.target.value as AssessmentOrigin })}><option value="ai-proposed">AI 제안</option><option value="engineer-confirmed">엔지니어 확인</option></select><button disabled={saving} onClick={() => void addHypothesis()}>{saving ? '저장 중…' : '추가'}</button></label>

@@ -290,7 +290,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const createNativeSession = async () => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return null
-    setBusy(true); setError(''); setSavedMessage('')
+    setBusy(true); setError(''); setSavedMessage(''); setNativeHistoryOpen(false)
     try {
       const next = await api.create({ projectId: project.id })
       setNativeSession(next)
@@ -315,7 +315,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     let target = nativeSession
     if (!target) target = await createNativeSession()
     if (!target) return
-    setBusy(true); setError(''); setInput('')
+    setBusy(true); setError(''); setInput(''); setNativeHistoryOpen(false)
     try { setNativeSession(await api.send({ sessionId: target.id, content: content.trim(), sourceIds: mentionedSourceIds.length ? mentionedSourceIds : undefined })); setMentionedSourceIds([]) }
     catch (reason) { setError(boundedError(reason)); setBusy(false) }
   }
@@ -464,8 +464,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
     </form> : <form className="agent-composer native" onSubmit={(event) => { event.preventDefault(); void sendNativeText(input) }}>
       {fileMentions.length ? <div className="agent-file-mentions" role="listbox" aria-label="파일 지정">{fileMentions.map((artifact) => { const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath; return <button type="button" role="option" key={artifact.sourceId} onClick={() => chooseFileMention(artifact.sourceId, name)}><span>{name}</span><small>{artifact.relativePath}</small></button> })}</div> : null}
-      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="질문 입력 · / 로 파일 지정" rows={3} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
-      <div className="agent-composer-footer"><span className="native-agent-controls"><button type="button" onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen} aria-label="대화 기록" title="대화 기록"><History size={14} /></button><i className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} /><button type="button" onClick={() => void createNativeSession()} disabled={busy} aria-label="새 대화" title="새 대화"><Plus size={14} /></button></span><button type="submit" aria-label="Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={15} /></button></div>
+      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="질문 입력 · / 로 파일 지정" rows={2} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
+      <div className="agent-composer-footer"><span className="native-agent-controls"><button type="button" onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen} aria-label="대화 기록" title="대화 기록"><History size={17} /></button><i className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} /><button type="button" onClick={() => void createNativeSession()} disabled={busy} aria-label="새 대화" title="새 대화"><Plus size={17} /></button></span><button type="submit" aria-label="Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={18} /></button></div>
       {nativeHistoryOpen ? <div className="native-agent-history">{nativeSessions.map((item) => <button type="button" key={item.id} className={item.id === nativeSession?.id ? 'active' : ''} onClick={() => void openNativeSession(item.id)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleDateString('ko-KR')}</span></button>)}{!nativeSessions.length ? <p>저장된 대화가 없습니다.</p> : null}</div> : null}
     </form>}
   </aside>

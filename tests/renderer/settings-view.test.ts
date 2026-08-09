@@ -3,7 +3,6 @@ import {
   apiKeyAction,
   apiKeyActionLabel,
   buildApiKeyClearRequest,
-  llmRateLimitHelpText,
   MIN_LLM_TOKENS_PER_MINUTE,
   isVertexBaseUrl,
   saveConfirmationMessage
@@ -86,11 +85,8 @@ describe('SettingsView API key action', () => {
 })
 
 describe('SettingsView LLM rate limits', () => {
-  it('uses a TPM minimum that can reserve completion tokens and a non-empty prompt', () => {
+  it('keeps a safe TPM minimum without exposing implementation details in the UI', () => {
     expect(MIN_LLM_TOKENS_PER_MINUTE).toBe(1_201)
-    expect(llmRateLimitHelpText()).toContain('최소 1,201')
-    expect(llmRateLimitHelpText()).toContain('응답 예약 1,200 토큰')
-    expect(llmRateLimitHelpText()).toContain('최소 프롬프트 1토큰')
   })
 })
 

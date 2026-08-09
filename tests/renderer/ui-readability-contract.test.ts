@@ -78,4 +78,29 @@ describe('UI readability contract', () => {
     expect(project).not.toContain('<summary>프로젝트 고급 설정</summary>')
     expect(project).not.toContain('>재검증</button>')
   })
+
+  it('keeps setup copy concise and separates SKU from timing SKEW', async () => {
+    const [settings, memory, tools] = (await Promise.all([
+      readFile(resolve(root, 'src/views/SettingsView.tsx'), 'utf8'),
+      readFile(resolve(root, 'src/views/EvaluationMemoryView.tsx'), 'utf8'),
+      readFile(resolve(root, 'electron/main/lpddr-agent-tools.ts'), 'utf8'),
+    ])).map(normalizeNewlines)
+    expect(settings).not.toContain('<small>sec</small>')
+    expect(settings).not.toContain('응답 예약 1,200 토큰')
+    expect(settings).toContain("? '연결됨' : '로컬 분석'")
+    expect(memory).toContain("['sku', 'SKU', 'text']")
+    expect(memory).toContain("['skewPs', 'SKEW (ps)', 'number']")
+    expect(tools).not.toContain("{ SKEW: sku }")
+  })
+
+  it('uses the log decision control palette for result organization and history inputs', async () => {
+    const [dataViews, memoryStyles] = (await Promise.all([
+      readFile(resolve(root, 'src/data-views.css'), 'utf8'),
+      readFile(resolve(root, 'src/views/evaluation-memory-view.css'), 'utf8'),
+    ])).map(normalizeNewlines)
+    expect(dataViews).toContain('border: 1px solid #454b56;')
+    expect(dataViews).toContain('background: #1e2229;')
+    expect(memoryStyles).toContain('border: 1px solid #454b56;')
+    expect(memoryStyles).toContain('background: #1e2229;')
+  })
 })
