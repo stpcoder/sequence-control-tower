@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { isVertexOpenAiBaseUrl, VertexAccessTokenProvider } from './vertex-auth'
 
 const VERTEX_URL = 'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/demo/locations/us-central1/endpoints/openapi'
+const GLOBAL_VERTEX_URL = 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/endpoints/openapi'
 
 describe('Vertex gcloud authentication', () => {
   it('recognizes only the official Vertex OpenAI-compatible endpoint shape', () => {
     expect(isVertexOpenAiBaseUrl(VERTEX_URL)).toBe(true)
+    expect(isVertexOpenAiBaseUrl(GLOBAL_VERTEX_URL)).toBe(true)
     expect(isVertexOpenAiBaseUrl('https://us-central1-aiplatform.googleapis.com/v1/projects/demo/locations/us-central1/models')).toBe(false)
+    expect(isVertexOpenAiBaseUrl('https://aiplatform.googleapis.com/v1/projects/demo/locations/global/models')).toBe(false)
     expect(isVertexOpenAiBaseUrl('http://us-central1-aiplatform.googleapis.com/v1beta1/projects/demo/locations/us-central1/endpoints/openapi')).toBe(false)
     expect(isVertexOpenAiBaseUrl('https://llm.internal.example/v1')).toBe(false)
   })
@@ -22,6 +25,9 @@ describe('Vertex gcloud authentication', () => {
     expect(runner.mock.calls[0]?.[1]).toEqual([
       'auth', 'application-default', 'print-access-token', '--quiet'
     ])
+
+    await expect(provider.token(GLOBAL_VERTEX_URL)).resolves.toBe('adc-access-token')
+    expect(runner).toHaveBeenCalledTimes(1)
 
     now += 36 * 60 * 1_000
     await expect(provider.token(VERTEX_URL)).resolves.toBe('adc-access-token')

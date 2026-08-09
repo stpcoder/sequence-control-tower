@@ -8,8 +8,10 @@ const GCLOUD_TIMEOUT_MS = 15_000
 export function isVertexOpenAiBaseUrl(baseUrl: string): boolean {
   try {
     const url = new URL(baseUrl)
+    const officialHost = url.hostname === 'aiplatform.googleapis.com' ||
+      url.hostname.endsWith('-aiplatform.googleapis.com')
     return url.protocol === 'https:' &&
-      url.hostname.endsWith('-aiplatform.googleapis.com') &&
+      officialHost &&
       /\/locations\/[^/]+\/endpoints\/openapi(?:\/|$)/.test(url.pathname)
   } catch {
     return false
