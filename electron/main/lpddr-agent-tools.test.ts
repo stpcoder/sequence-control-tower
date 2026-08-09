@@ -100,6 +100,8 @@ describe('LPDDR agent tools', () => {
     const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
     expect(data.denominator).toBe(3)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'temperatureC', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: 'X6' }))
+    expect(data.live.some((item) => item.dimension === 'sku')).toBe(false)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
     expect(result.summary).toContain('1/2 fail (50.0%)')
   })

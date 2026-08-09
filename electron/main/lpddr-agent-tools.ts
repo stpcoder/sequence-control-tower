@@ -31,13 +31,13 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
   engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
-  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKU, Die, Sample, 조건, Sequence signature와 명령 후보를 추출합니다.',
+  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKEW, Die, Sample, 조건, Sequence signature와 명령 후보를 추출합니다.',
   soc_boot_profile_scan: '파일명에서 선택한 Qualcomm/MediaTek profile의 단계 marker를 검사하고 로그가 도달한 부팅 구간을 반환합니다.',
   console_transcript_scan: '콘솔 prompt 뒤의 엔지니어 입력과 장비 출력·상태 marker를 분리하고, 프로젝트에서 확정한 prompt 규칙을 적용합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
   log_read_window: '검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
-  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 SKU, Die, Sample, 명령, DQ, BL, channel, pattern, 온도, VDD별 실패 집중도를 계산합니다.'
+  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 SKEW, Die, Sample, 명령, DQ, BL, channel, pattern, 온도, VDD별 실패 집중도를 계산합니다.'
 }
 
 const safe = (value: unknown, max = 500): string => typeof value === 'string'
@@ -48,6 +48,11 @@ const promptSafe = (value: unknown, max = 500): string => safe(value, max).repla
   '$1[REDACTED]',
 )
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const agentDimensionView = (dimensions: ProjectEvaluationDimensions | undefined) => {
+  const { sku, ...rest } = dimensions ?? {}
+  return { ...rest, ...(sku !== undefined ? { SKEW: sku } : {}) }
+}
+const agentDimensionName = (dimension: string) => dimension === 'sku' ? 'SKEW' : dimension
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const bootAliasPattern = (alias: string): string => {
   const body = regexEscape(alias).replace(/ +/g, '[ _-]*')
@@ -193,14 +198,15 @@ export class LpddrAgentToolService {
   }
 
   private context(project: ProjectSnapshot): LpddrAgentToolResult {
-    const data = { name: project.name, description: project.description, ...project.lpddrDevelopmentContext, onboarding: project.onboardingAnswers }
+    const { sku, ...developmentContext } = project.lpddrDevelopmentContext ?? {}
+    const data = { name: project.name, description: project.description, ...developmentContext, ...(sku !== undefined ? { SKEW: sku } : {}), onboarding: project.onboardingAnswers }
     return { name: 'project_context_get', label: '프로젝트 조건', summary: `${project.name} · 로그 ${project.artifacts.length}개 · 평가 ${project.evaluationNodes?.length ?? 0}건`, data, evidenceSourceIds: [] }
   }
 
   private history(project: ProjectSnapshot): LpddrAgentToolResult {
     const data = {
-      hypotheses: (project.failureHypotheses ?? []).slice(-50), nodes: (project.evaluationNodes ?? []).slice(-100),
-      evidence: (project.evidenceRecords ?? []).slice(-200).map((item) => ({ ...item, note: safe(item.note, 500) }))
+      hypotheses: (project.failureHypotheses ?? []).slice(-50), nodes: (project.evaluationNodes ?? []).slice(-100).map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions) })),
+      evidence: (project.evidenceRecords ?? []).slice(-200).map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions), note: safe(item.note, 500) }))
     }
     return { name: 'project_history_get', label: '평가 이력', summary: `가설 ${data.hypotheses.length}개 · 평가 ${data.nodes.length}개 · 근거 ${data.evidence.length}개`, data, evidenceSourceIds: [...new Set(data.evidence.flatMap((item) => item.sourceIds))] }
   }
@@ -214,7 +220,7 @@ export class LpddrAgentToolService {
       const score = tokens.reduce((sum, token) => sum + (text.includes(token) ? 1 : 0), 0)
       return { item, score }
     }).filter((value) => value.score > 0).sort((a, b) => b.score - a.score).slice(0, 5)
-    const data = candidates.map(({ item, score }) => ({ projectId: item.id, project: item.name, product: item.lpddrDevelopmentContext?.product, score, hypotheses: (item.failureHypotheses ?? []).slice(-5).map((value) => value.title), evaluations: (item.evaluationNodes ?? []).slice(-8).map((value) => ({ name: value.name, status: value.status, dimensions: value.dimensions })) }))
+    const data = candidates.map(({ item, score }) => ({ projectId: item.id, project: item.name, product: item.lpddrDevelopmentContext?.product, score, hypotheses: (item.failureHypotheses ?? []).slice(-5).map((value) => value.title), evaluations: (item.evaluationNodes ?? []).slice(-8).map((value) => ({ name: value.name, status: value.status, dimensions: agentDimensionView(value.dimensions) })) }))
     return { name: 'similar_case_search', label: '유사 사례', summary: data.length ? `과거 프로젝트 ${data.length}개에서 유사 사례 발견` : '저장된 과거 프로젝트에서 유사 사례 없음', data, evidenceSourceIds: [] }
   }
 
@@ -346,7 +352,7 @@ export class LpddrAgentToolService {
           && String(detected[dimension]) === String(memory.dimensions?.[dimension]))
         return matched.length ? [{ workflowId: memory.id, purpose: promptSafe(memory.purpose, 160), stages: memory.stages, matchedDimensions: matched }] : []
       }).sort((a, b) => b.matchedDimensions.length - a.matchedDimensions.length).slice(0, 3)
-      return { sourceId: source.sourceId, fileName: promptSafe(basename(source.relativePath), 240), dimensions: detected, sequenceSignature: context.sequenceSignature, commandSignatures: context.commandSignatures, explicitRetest: context.explicitRetest, filenameAttemptNo: context.filenameAttemptNo, workflowHints }
+      return { sourceId: source.sourceId, fileName: promptSafe(basename(source.relativePath), 240), dimensions: agentDimensionView(detected), sequenceSignature: context.sequenceSignature, commandSignatures: context.commandSignatures, explicitRetest: context.explicitRetest, filenameAttemptNo: context.filenameAttemptNo, workflowHints }
     })
     const detected = rows.filter((row) => Object.values(row.dimensions).some((value) => value !== undefined)).length
     return { name: 'filename_dimensions_scan', label: '파일명 조건 추출', summary: `${rows.length}개 중 ${detected}개에서 조건 후보 추출`, data: { project: project.name, rows }, evidenceSourceIds: rows.map((row) => row.sourceId) }
@@ -492,7 +498,7 @@ export class LpddrAgentToolService {
         if (raw === undefined || raw === '') return
         const value = String(raw)
         const key = `${dimension}:${value}`
-        const bucket = buckets.get(key) ?? { dimension, value, total: 0, failures: 0, sourceIds: [] }
+        const bucket = buckets.get(key) ?? { dimension: agentDimensionName(dimension), value, total: 0, failures: 0, sourceIds: [] }
         bucket.total += 1
         if (failureStatuses.has(status)) bucket.failures += 1
         bucket.sourceIds.push(row.sourceId)
@@ -519,7 +525,7 @@ export class LpddrAgentToolService {
       nodes: (project.evaluationNodes ?? []).map((item) => ({ ...item, projectId: project.id })),
       evidence: (project.evidenceRecords ?? []).map((item) => ({ ...item, projectId: project.id }))
     }
-    const saved = inferEvaluationTrends(memory).slice(0, 20)
+    const saved = inferEvaluationTrends(memory).slice(0, 20).map((item) => ({ ...item, dimension: agentDimensionName(item.dimension) }))
     const headline = (live.filter((item) => item.total >= 2).length ? live.filter((item) => item.total >= 2) : live).slice(0, 3)
     const summary = headline.length
       ? headline.map((item) => `${item.dimension} ${item.value} · ${item.failures}/${item.total} fail (${(item.failureRate * 100).toFixed(1)}%)`).join(' · ')

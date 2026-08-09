@@ -38,7 +38,7 @@ const labels: Record<DemoPage, { selector: string; number: number; label: string
 }
 
 const agentLabels = [
-  { selector: '.agent-scope', number: 1, label: '로그 또는 프로젝트 범위' },
+  { selector: '.agent-composer', number: 1, label: 'Agent 질문 입력' },
   { selector: '.agent-thread', number: 2, label: '분석과 근거 기록' },
   { selector: '.agent-composer', number: 3, label: '질문 입력' },
 ]

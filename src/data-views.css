@@ -590,14 +590,14 @@
 
 .pattern-toolbar {
   display: flex;
-  min-height: 46px;
+  min-height: 0;
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--data-line);
-  background: #15181e;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .pattern-toolbar button {

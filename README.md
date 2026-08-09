@@ -93,7 +93,7 @@ Evaluation DB에는 로그 원문, excerpt, 절대경로, secret을 저장하지
 - Windows: Authenticode code-signing certificate
 - macOS: Apple Developer ID Application signing과 notarization
 
-## v0.9.2
+## v0.9.3
 
 - OpenCode-compatible headless harness와 읽기 전용 SCT MCP 도구
 - 프로젝트별 영속 대화와 느린 LLM 대기·중지·재시도
@@ -102,7 +102,7 @@ Evaluation DB에는 로그 원문, excerpt, 절대경로, secret을 저장하지
 - 7,000줄 이상 로그 9개가 포함된 LPDDR6 Xiaomi 샘플과 LPDDR5 과거 사례
 - macOS Vertex OpenAI-compatible endpoint의 ADC·활성 `gcloud` 계정 자동 인증
 
-[v0.9.2 릴리스 노트](docs/manual/90-v0.9.2-release-notes.md)
+[v0.9.3 릴리스 노트](docs/manual/90-v0.9.3-release-notes.md)
 
 ## v0.7.0
 
@@ -144,8 +144,8 @@ npm run dist:mac
 tag는 `package.json` 버전과 같아야 합니다.
 
 ```bash
-git tag v0.9.2
-git push origin v0.9.2
+git tag v0.9.3
+git push origin v0.9.3
 ```
 
 코드 서명과 수동 배포 절차는 [Release 운영 가이드](docs/releasing.md)를 참고하세요.

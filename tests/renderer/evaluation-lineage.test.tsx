@@ -14,15 +14,16 @@ const memory: EvaluationMemory = {
 }
 
 describe('EvaluationLineage', () => {
-  it('renders lanes, confirmed/proposed relationships, and selected evaluation facts', () => {
+  it('renders confirmed/proposed relationships and only essential selected evaluation facts', () => {
     const markup = renderToStaticMarkup(<EvaluationLineage memory={memory} selectedNodeId="EV-02" />)
 
-    expect(markup).toContain('issue-10660')
     expect(markup).toContain('evaluation-lineage__edge--proposed')
     expect(markup).toContain('AI 제안')
     expect(markup).toContain('100%')
     expect(markup).toContain('실패율')
     expect(markup).not.toContain('불량률')
     expect(markup).toContain('ECC mismatch')
+    expect(markup).not.toContain('브랜치')
+    expect(markup).not.toContain('평가 흐름')
   })
 })

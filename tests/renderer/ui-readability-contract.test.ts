@@ -70,7 +70,7 @@ describe('UI readability contract', () => {
       readFile(resolve(root, 'src/views/EvaluationMemoryView.tsx'), 'utf8'),
       readFile(resolve(root, 'src/components/ProjectControl.tsx'), 'utf8'),
     ])).map(normalizeNewlines)
-    expect(patterns).not.toContain('<h1>결과 정리</h1>')
+    expect(patterns).toContain('<h1>결과 정리</h1>')
     expect(patterns).not.toContain('뚜렷한 집중 없음')
     expect(patterns).toContain('<span>세로</span>')
     expect(patterns).toContain('<span>가로</span>')

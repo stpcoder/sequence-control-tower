@@ -263,6 +263,7 @@ export default function App() {
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [agentDraft, setAgentDraft] = useState('')
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -656,7 +657,7 @@ export default function App() {
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : activePage === 'history' ? (
-    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} />
+    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} onAskAgent={(message) => { setAgentDraft(message); setAgentOpen(true) }} />
   ) : <SettingsView />
 
   return (
@@ -677,6 +678,8 @@ export default function App() {
         evaluationSnapshot={evaluationSnapshot}
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
         onProjectUpdated={projectUpdated}
+        draftMessage={agentDraft}
+        onDraftConsumed={() => setAgentDraft('')}
       />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

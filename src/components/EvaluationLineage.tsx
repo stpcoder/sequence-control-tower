@@ -17,7 +17,6 @@ interface DisplayNode {
   dominantDq?: string
   dominantPattern?: string
   dominantCondition?: string
-  timestamp?: string
 }
 
 export interface EvaluationLineageProps {
@@ -96,7 +95,7 @@ export function EvaluationLineage({
         dominantCondition: mode(dimensions.map((item) => {
           const parts = [item.temperatureC === undefined ? undefined : `${item.temperatureC}°C`, item.vdd === undefined ? undefined : `${item.vdd}V`, item.frequencyMHz === undefined ? undefined : `${item.frequencyMHz}MHz`].filter(Boolean)
           return parts.join(' · ') || undefined
-        })), timestamp: evidence.at(-1)?.occurredAt,
+        })),
       } satisfies DisplayNode
     })
   }, [memory])
@@ -113,19 +112,8 @@ export function EvaluationLineage({
 
   return (
     <section className={`evaluation-lineage ${className}`.trim()} aria-label={ariaLabel}>
-      <div className="evaluation-lineage__topline">
-        <span>평가 흐름</span>
-        <div className="evaluation-lineage__legend" aria-label="계보 상태 범례">
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--confirmed" />실선 확정
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--proposed" />점선 제안
-        </div>
-      </div>
-
       <div className="evaluation-lineage__body">
         <div className="evaluation-lineage__graph-wrap">
-          <div className="evaluation-lineage__lanes" aria-hidden="true">
-            {lanes.map((lane) => <span key={lane}>{lane}</span>)}
-          </div>
           <div className="evaluation-lineage__graph" style={{ '--lineage-height': `${graphHeight}px`, '--lineage-lanes': lanes.length } as CSSProperties}>
             <svg className="evaluation-lineage__wires" viewBox={`0 0 ${graphWidth} ${graphHeight}`} preserveAspectRatio="none" aria-hidden="true">
               {lanes.map((lane, index) => {
@@ -173,9 +161,7 @@ export function EvaluationLineage({
             <span className={`evaluation-lineage__confidence evaluation-lineage__confidence--${selected.confidence}`}>{selected.confidence === 'confirmed' ? '확정됨' : 'AI 제안'}</span>
           </div>
           <strong>{selected.node.name}</strong>
-          {selected.timestamp ? <small>{selected.timestamp}</small> : null}
           <dl>
-            <div><dt>브랜치</dt><dd>{selected.lane}</dd></div>
             <div><dt>근거</dt><dd>{selected.evidenceCount}건</dd></div>
             <div><dt>실패율</dt><dd>{rateLabel(selected.failureRate)}</dd></div>
             <div><dt>조건</dt><dd>{selected.dominantCondition || '—'}</dd></div>

@@ -165,7 +165,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }
 
   return <div className="data-view patterns-view">
-    <header className="pattern-toolbar"><button onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</header>
+    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="pattern-toolbar"><button onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</div></header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}

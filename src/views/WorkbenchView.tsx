@@ -2650,23 +2650,25 @@ export function WorkbenchView({
     >
       <aside className="workbench-sidebar">
         <header>
-          <div><strong>{sideMode === 'search' ? '검색 결과' : showBatchExceptions ? '예외 로그' : '로그'}</strong>{sideMode === 'search' ? null : <span>{showBatchExceptions ? `${batchPreview.exceptions}` : files.length}</span>}</div>
-          <button
+          <div><strong>{sideMode === 'search' ? '검색 결과' : showBatchExceptions ? '예외 로그' : '로그'}</strong></div>
+          {sideMode === 'search' || showBatchExceptions ? <button
             onClick={() => {
               if (sideMode === 'search') setSideMode('files')
-              else if (showBatchExceptions) setShowBatchExceptions(false)
-              else openSearch('workspace')
+              else setShowBatchExceptions(false)
             }}
-            aria-label={sideMode === 'search' || showBatchExceptions ? '로그 목록으로 돌아가기' : '모든 로그 검색'}
-            title={sideMode === 'search' || showBatchExceptions ? '로그 목록으로 돌아가기' : '모든 로그 검색'}
-          >{sideMode === 'search' || showBatchExceptions ? <X size={18} /> : <Search size={18} />}</button>
+            aria-label="로그 목록으로 돌아가기"
+            title="로그 목록으로 돌아가기"
+          ><X size={18} /></button> : null}
         </header>
 
         {sideMode === 'files' ? (
           <div className="folder-tree">
-            <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
-              {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span>
-            </button>
+            <div className="log-source-actions">
+              <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
+                {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span>
+              </button>
+              <button className="search-log-row" type="button" onClick={() => openSearch('workspace')} aria-label="모든 로그 검색" title="모든 로그 검색"><Search size={18} /></button>
+            </div>
             {groupedFiles.map((group) => {
               const expanded = expandedOrigins.has(group.key)
               return (
@@ -2847,7 +2849,7 @@ export function WorkbenchView({
                   <p>어떤 목적이었나요?</p>
                   <div className="workflow-purpose-options">
                     {workflowReview.suggestions.filter((item) => item !== '직접 입력').map((item) => (
-                      <button type="button" className={workflowPurpose === item ? 'active' : ''} onClick={() => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: item }))} key={item}>{item}</button>
+                      <button type="button" className={workflowPurpose === item ? 'active' : ''} aria-pressed={workflowPurpose === item} onClick={() => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: item }))} key={item}><i aria-hidden="true" />{item}</button>
                     ))}
                   </div>
                   <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
@@ -2943,16 +2945,16 @@ export function WorkbenchView({
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]
                       return <div className={selected ? 'selected' : ''} key={observation.id}>
-                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 pin 해제' : '판정 조건으로 pin'}><i>{selected ? <Check size={13} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '📌' : '＋'}</span></button>
-                        {selected ? <label>발생 <select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
-                          const value = event.target.value
-                          changeOccurrenceChoice(observation.id, value === 'zero' ? { kind: 'zero' } : value === 'exact' ? { kind: 'exact', count: occurrence?.kind === 'exact' ? occurrence.count : Math.max(1, observation.matchCount) } : { kind: 'atLeast' })
-                        }}><option value="zero">0개</option><option value="atLeast">1개 이상</option><option value="exact">정확히 N개</option></select>{occurrence?.kind === 'exact' ? <input aria-label={`${observation.query} 정확한 발생 횟수`} type="number" min={0} step={1} value={exactCountDraftByObservationId[observation.id] ?? String(occurrence.count)} onChange={(event) => changeExactCount(observation.id, event.target.value)} /> : null}</label> : null}
+                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i>{selected ? <Check size={12} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button>
                         {selected ? <div className="recipe-condition-editor">
-                          <input aria-label={`${observation.query} 검색 조건`} value={observation.query} onChange={(event) => updateRecipeObservation(observation.id, { query: event.target.value })} />
-                          <select aria-label={`${observation.query} 검색 방식`} value={observation.matcherKind} onChange={(event) => updateRecipeObservation(observation.id, { matcherKind: event.target.value as SearchObservation['matcherKind'] })}><option value="literal">문자</option><option value="regex">정규식</option></select>
-                          <select aria-label={`${observation.query} 검색 대상`} value={observation.target} onChange={(event) => updateRecipeObservation(observation.id, { target: event.target.value as SearchObservation['target'] })}><option value="content">본문</option><option value="file_name">파일명</option><option value="path">경로</option></select>
-                          <label><input type="checkbox" checked={observation.caseSensitive} onChange={(event) => updateRecipeObservation(observation.id, { caseSensitive: event.target.checked })} /> 대소문자</label>
+                          <label><span>검색어</span><input aria-label={`${observation.query} 검색 조건`} value={observation.query} onChange={(event) => updateRecipeObservation(observation.id, { query: event.target.value })} /></label>
+                          <label><span>발생</span><span className="recipe-inline-controls"><select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
+                            const value = event.target.value
+                            changeOccurrenceChoice(observation.id, value === 'zero' ? { kind: 'zero' } : value === 'exact' ? { kind: 'exact', count: occurrence?.kind === 'exact' ? occurrence.count : Math.max(1, observation.matchCount) } : { kind: 'atLeast' })
+                          }}><option value="zero">0개</option><option value="atLeast">1개 이상</option><option value="exact">정확히 N개</option></select>{occurrence?.kind === 'exact' ? <input aria-label={`${observation.query} 정확한 발생 횟수`} type="number" min={0} step={1} value={exactCountDraftByObservationId[observation.id] ?? String(occurrence.count)} onChange={(event) => changeExactCount(observation.id, event.target.value)} /> : null}</span></label>
+                          <label><span>방식</span><select aria-label={`${observation.query} 검색 방식`} value={observation.matcherKind} onChange={(event) => updateRecipeObservation(observation.id, { matcherKind: event.target.value as SearchObservation['matcherKind'] })}><option value="literal">문자</option><option value="regex">정규식</option></select></label>
+                          <label><span>대상</span><select aria-label={`${observation.query} 검색 대상`} value={observation.target} onChange={(event) => updateRecipeObservation(observation.id, { target: event.target.value as SearchObservation['target'] })}><option value="content">본문</option><option value="file_name">파일명</option><option value="path">경로</option></select></label>
+                          <button type="button" className={`recipe-case-toggle ${observation.caseSensitive ? 'active' : ''}`} aria-pressed={observation.caseSensitive} onClick={() => updateRecipeObservation(observation.id, { caseSensitive: !observation.caseSensitive })}><i aria-hidden="true" />대소문자 구분</button>
                         </div> : null}
                       </div>
                     })}

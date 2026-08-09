@@ -14,6 +14,7 @@ import type {
 } from '../../electron/shared/contracts'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 import { resolveProjectSource } from '../state/sourceIdentity'
+import { AgentMarkdown } from './AgentMarkdown'
 
 interface AgentPanelProps {
   open: boolean
@@ -24,6 +25,8 @@ interface AgentPanelProps {
   evaluationSnapshot: EvaluationProjectSnapshot | null
   onSnapshotSaved: (snapshot: EvaluationProjectSnapshot) => void
   onProjectUpdated: (project: ProjectSnapshot) => void
+  draftMessage?: string
+  onDraftConsumed?: () => void
 }
 
 export function mergeEvaluationAgentMemory(project: ProjectSnapshot, payload: EvaluationAgentMemoryPayloadView): ProjectSnapshot {
@@ -60,6 +63,24 @@ export function evaluationProposalTitle(proposal: EvaluationAgentSessionView['pr
 /** A revision bump is not a project switch: keep a slow native session alive. */
 export function shouldRetainAgentSession(previous: ProjectSnapshot | null, next: ProjectSnapshot | null): boolean {
   return previous?.id === next?.id
+}
+
+export function toolsForAssistantMessage(
+  message: NativeAgentSessionView['messages'][number],
+  messages: readonly NativeAgentSessionView['messages'][number][],
+  tools: readonly NativeAgentSessionView['tools'][number][],
+) {
+  if (message.role !== 'assistant') return []
+  const messageIndex = messages.findIndex((item) => item.id === message.id)
+  const previousMessage = messages.slice(0, messageIndex).reverse().find((item) => item.role === 'user' || item.role === 'assistant')
+  const from = previousMessage ? Date.parse(previousMessage.createdAt) : -Infinity
+  const until = Date.parse(message.createdAt)
+  const evidence = new Set(message.evidenceSourceIds ?? [])
+  return tools.filter((tool) => {
+    const started = Date.parse(tool.startedAt)
+    if (Number.isFinite(started)) return started >= from && started <= until
+    return Boolean(evidence.size && tool.evidenceSourceIds?.some((id) => evidence.has(id)))
+  })
 }
 
 export function buildAgentDecisionInput(
@@ -133,15 +154,15 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved, onProjectUpdated }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, draftMessage, onDraftConsumed }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [nativeSessions, setNativeSessions] = useState<NativeAgentSessionSummary[]>([])
   const [nativeSession, setNativeSession] = useState<NativeAgentSessionView | null>(null)
   const [nativeBackend, setNativeBackend] = useState<NativeAgentBackendStatusView | null>(null)
   const [nativeHistoryOpen, setNativeHistoryOpen] = useState(false)
-  const [scope, setScope] = useState<'current' | 'project'>(project ? 'project' : 'current')
   const [input, setInput] = useState('')
+  const [mentionedSourceIds, setMentionedSourceIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [savedMessage, setSavedMessage] = useState('')
@@ -175,7 +196,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setBusy(false)
     setError('')
     setSavedMessage('')
-    setScope(project ? 'project' : 'current')
+    setMentionedSourceIds([])
   }, [projectKey])
 
   useEffect(() => {
@@ -225,6 +246,13 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       window.removeEventListener('sequence-control-tower:command', onCommand)
     }
   }, [onClose, onOpen, open])
+
+  useEffect(() => {
+    if (!open || !draftMessage) return
+    setInput(draftMessage)
+    onDraftConsumed?.()
+    window.setTimeout(() => composerRef.current?.focus(), 0)
+  }, [draftMessage, onDraftConsumed, open])
 
   const invoke = async (action: () => Promise<AgentRun>, clearInput = false) => {
     if (busy || !activeRunId.current) return
@@ -288,7 +316,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     if (!target) target = await createNativeSession()
     if (!target) return
     setBusy(true); setError(''); setInput('')
-    try { setNativeSession(await api.send({ sessionId: target.id, content: content.trim() })) }
+    try { setNativeSession(await api.send({ sessionId: target.id, content: content.trim(), sourceIds: mentionedSourceIds.length ? mentionedSourceIds : undefined })); setMentionedSourceIds([]) }
     catch (reason) { setError(boundedError(reason)); setBusy(false) }
   }
 
@@ -387,31 +415,43 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
 
   const projectPending = evaluationRun?.status === 'running' || evaluationRun?.status === 'paused'
   const projectCanStart = Boolean(project && project.artifacts.length && window.sequenceIntelligence?.evaluationAgent)
-  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={16} /><span>Agent</span></button>
+  const scope = project ? 'project' as const : 'current' as const
+  const slashMatch = /(^|\s)\/([^\s/]*)$/.exec(input)
+  const fileMentions = slashMatch && project ? project.artifacts.filter((artifact) => {
+    const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath
+    return name.toLocaleLowerCase().includes(slashMatch[2].toLocaleLowerCase())
+  }).slice(0, 6) : []
+  const chooseFileMention = (sourceId: string, name: string) => {
+    if (!slashMatch) return
+    const start = slashMatch.index + slashMatch[1].length
+    setInput(`${input.slice(0, start)}/${name} ${input.slice(start + slashMatch[0].trimStart().length)}`)
+    setMentionedSourceIds((current) => [...new Set([...current, sourceId])])
+    window.setTimeout(() => composerRef.current?.focus(), 0)
+  }
+  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={17} /><span>Agent에게 묻기</span></button>
 
   return <aside className="agent-panel" aria-label="Agent">
     <div className="agent-panel-head">
-      <div><strong>Agent</strong><span title={`${project?.name ?? ''}${selectedFile?.name ? ` / ${selectedFile.name}` : ''}`}>{project?.name ?? '프로젝트 없음'}{selectedFile?.name ? ` / ${selectedFile.name}` : ''}</span></div>
+      <div><strong>Agent</strong>{project ? <span title={project.name}>{project.name}</span> : null}</div>
       <button className="icon-button small" onClick={onClose} aria-label="Agent 패널 닫기"><X size={15} /></button>
     </div>
-    <div className="agent-scope" role="group" aria-label="분석 범위"><button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>로그</button><button className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>프로젝트</button></div>
-    {scope === 'project' && project ? <div className="native-agent-toolbar">
-      <button onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen}><History size={13} />{nativeSession?.title ?? '대화 선택'}</button>
-      <span className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} aria-label={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode 연결' : '내장 분석'} />
-      <button className="native-agent-new" onClick={() => void createNativeSession()} disabled={busy} aria-label="새 프로젝트 대화"><Plus size={14} /></button>
-      {nativeHistoryOpen ? <div className="native-agent-history">{nativeSessions.map((item) => <button key={item.id} className={item.id === nativeSession?.id ? 'active' : ''} onClick={() => void openNativeSession(item.id)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleDateString('ko-KR')}</span></button>)}{!nativeSessions.length ? <p>저장된 대화가 없습니다.</p> : null}</div> : null}
-    </div> : null}
     <div className="agent-thread">
       {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? selectedFile.name : '로그를 선택하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석</button></div> : null}
       {scope === 'project' && !nativeSession ? <div className="agent-empty"><p>{project ? (project.artifacts.length ? `로그 ${project.artifacts.length}개` : '로그를 연결하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
-      {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}>{choice}</button>)}</div> : null}</> : null}
+      {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div> : null}</> : null}
       {scope === 'current' && run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
       {scope === 'current' && run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}
       {scope === 'current' && error ? <div className="agent-error" role="alert">{error}</div> : null}
       {scope === 'project' && nativeSession ? <>
-        {nativeSession.messages.map((message) => <div key={message.id} className={`native-agent-message ${message.role}`} aria-label={message.role === 'user' ? '내 메시지' : message.role === 'assistant' ? 'Agent 응답' : '기록'}><p>{message.content}</p>{message.evidenceSourceIds?.length ? <small>근거 {message.evidenceSourceIds.length}</small> : null}</div>)}
-        {nativeSession.question ? <div className="native-agent-question"><p>{nativeSession.question.prompt}</p><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}>{choice}</button>)}</div></div> : null}
-        {nativeSession.tools.length ? <details className="native-agent-tools"><summary><Wrench size={12} />근거 {nativeSession.tools.length}</summary>{nativeSession.tools.slice(-12).map((tool) => <div key={tool.id} className={tool.state}><span>{tool.label}</span><small>{tool.state === 'running' ? '확인 중' : tool.summary ?? tool.state}</small></div>)}</details> : null}
+        {nativeSession.messages.map((message) => {
+          const evidenceTools = toolsForAssistantMessage(message, nativeSession.messages, nativeSession.tools)
+          return <div key={message.id} className="native-agent-turn">
+            {message.role === 'assistant' && evidenceTools.length ? <details className="native-agent-tools"><summary><Wrench size={12} />근거 {evidenceTools.length}</summary>{evidenceTools.map((tool) => <div key={tool.id} className={tool.state}><span>{tool.label}</span><small>{tool.state === 'running' ? '확인 중' : tool.summary ?? tool.state}</small></div>)}</details> : null}
+            <div className={`native-agent-message ${message.role}`} aria-label={message.role === 'user' ? '내 메시지' : message.role === 'assistant' ? 'Agent 응답' : '기록'}>{message.role === 'assistant' ? <AgentMarkdown>{message.content}</AgentMarkdown> : <p>{message.content}</p>}</div>
+          </div>
+        })}
+        {nativeSession.question ? <div className="native-agent-question"><AgentMarkdown>{nativeSession.question.prompt}</AgentMarkdown><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div></div> : null}
+        {nativeSession.status === 'running' && nativeSession.tools.some((tool) => tool.state === 'running') ? <div className="native-agent-running-tools">{nativeSession.tools.filter((tool) => tool.state === 'running').at(-1)?.label} 확인 중</div> : null}
         {nativeSession.status === 'idle' && nativeSession.messages.filter((item) => item.role === 'user').length === 0 ? <div className="native-agent-suggestions"><button onClick={() => void sendNativeText('새 로그에서 어떤 평가를 했고 온도, VDD, 자재, Sample, DQ 조건과 Pass/Fail이 무엇인지 확인해줘.')}>새 로그 평가 조건 확인</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')}>과거 사례와 다음 평가</button></div> : null}
       </> : null}
       {scope === 'project' && error ? <div className="agent-error" role="alert">{error}</div> : null}
@@ -423,8 +463,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="짧은 메시지 입력" rows={2} disabled={!run || busy} />
       <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
     </form> : <form className="agent-composer native" onSubmit={(event) => { event.preventDefault(); void sendNativeText(input) }}>
-      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="평가 목적이나 다음 조건 질문" rows={3} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
-      <div><span /><button type="submit" aria-label="프로젝트 Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={15} /></button></div>
+      {fileMentions.length ? <div className="agent-file-mentions" role="listbox" aria-label="파일 지정">{fileMentions.map((artifact) => { const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath; return <button type="button" role="option" key={artifact.sourceId} onClick={() => chooseFileMention(artifact.sourceId, name)}><span>{name}</span><small>{artifact.relativePath}</small></button> })}</div> : null}
+      <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="질문 입력 · / 로 파일 지정" rows={3} disabled={!project || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
+      <div className="agent-composer-footer"><span className="native-agent-controls"><button type="button" onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen} aria-label="대화 기록" title="대화 기록"><History size={14} /></button><i className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} /><button type="button" onClick={() => void createNativeSession()} disabled={busy} aria-label="새 대화" title="새 대화"><Plus size={14} /></button></span><button type="submit" aria-label="Agent에 메시지 보내기" disabled={!project || busy || !input.trim()}><ArrowUp size={15} /></button></div>
+      {nativeHistoryOpen ? <div className="native-agent-history">{nativeSessions.map((item) => <button type="button" key={item.id} className={item.id === nativeSession?.id ? 'active' : ''} onClick={() => void openNativeSession(item.id)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleDateString('ko-KR')}</span></button>)}{!nativeSessions.length ? <p>저장된 대화가 없습니다.</p> : null}</div> : null}
     </form>}
   </aside>
 }

@@ -2,6 +2,7 @@
 
 ## 설치
 
+- [v0.9.3 릴리스 노트](90-v0.9.3-release-notes.md) — 화면 정리와 Agent·평가 이력 사용 변경 사항입니다.
 - [v0.7.0 릴리스 노트](90-v0.7.0-release-notes.md) — v0.7.0 변경 사항과 Windows/macOS 다운로드 링크입니다.
 - [Windows 설치 및 제거](windows-installation.md) — Windows 설치형·Portable 설치와 제거 방법입니다.
 - [macOS 설치 및 제거](macos-installation.md) — macOS Universal DMG 설치와 SHA-256 확인 방법입니다.
