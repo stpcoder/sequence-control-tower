@@ -24,6 +24,8 @@ export interface SequenceFingerprint {
   blockCount: number
   commandCount: number
   commandTokens: string[]
+  /** Normalized family:executable pairs used for project-scoped command learning. */
+  commandSignatures?: string[]
   structuralHash: string
   facts: SequenceFact[]
 }
@@ -742,7 +744,11 @@ export type ProjectFolderStatus = 'available' | 'missing' | 'permission-denied'
 /** Renderer-safe project folder identity. The canonical path is main-process only. */
 export interface ProjectFolderRef { rootId: string; displayLabel: string; status: ProjectFolderStatus; connectedAt: string }
 export interface ProjectArtifactSourceRef { sourceId: string; rootId: string; artifactRootId?: string; artifactId: string; relativePath: string }
-export interface ProjectEquipmentProfile { alias: string; profileId: string; updatedAt: string }
+export type ProjectSocVendor = 'qualcomm' | 'mediatek' | 'unknown'
+export interface ProjectEquipmentProfile {
+  alias: string; profileId: string; updatedAt: string
+  vendor?: ProjectSocVendor; socModels?: string[]; filenameAliases?: string[]
+}
 export interface ProjectTemplatePin { templateId: string; revision: number; pinnedAt: string }
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 export interface ProjectExportPreset {
@@ -763,7 +769,8 @@ export interface ProjectLpddrDevelopmentContext {
   densityGb?: number; nominalVoltage?: number
 }
 export interface ProjectEvaluationDimensions {
-  sku?: string; lot?: string; material?: string; sample?: string; bl?: string | number; dq?: string | number
+  sku?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor
+  socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number
   channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number
   frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string
 }
@@ -773,6 +780,7 @@ export interface ProjectFailureHypothesis {
 export interface ProjectEvaluationNode {
   id: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string
   dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
+  sequenceSignature?: string; attemptNo?: number; retestOf?: string
 }
 export interface ProjectEvidenceRecord {
   id: string; evaluationNodeId: string; occurredAt?: string; status: ProjectEvaluationStatus; result?: string
@@ -834,7 +842,7 @@ export interface NativeAgentSessionSummary {
   lastMessage?: string; failure?: string
 }
 export interface NativeAgentSessionView extends NativeAgentSessionSummary {
-  messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]
+  messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]; question?: NativeAgentQuestionView
 }
 export interface NativeAgentBackendStatusView {
   preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
@@ -856,7 +864,7 @@ export interface NativeAgentSearchEventInput {
   /** Match count in activeSourceId; differs from matchCount for open/project scope. */
   activeMatchCount?: number
 }
-export type EngineerEvaluationStage = 'power-on' | 'uefi' | 'training' | 'os' | 'memory-test' | 'halt' | 'reboot' | 'retest' | 'unknown'
+export type EngineerEvaluationStage = 'power-on' | 'pbl' | 'xbl' | 'abl' | 'uefi' | 'exit-boot' | 'post-pbl' | 'lk' | 'lk2' | 'training' | 'os' | 'memory-test' | 'halt' | 'reboot' | 'unknown'
 export type EngineerWorkflowExpected = 'present' | 'absent'
 export type EngineerWorkflowResult = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN' | 'EXCLUDED'
 export interface EngineerWorkflowCheckView {
@@ -870,6 +878,23 @@ export interface EngineerWorkflowMemoryView {
   dimensions?: Partial<ProjectEvaluationDimensions>
   confirmedCount: number; appliedCount: number; createdAt: string; updatedAt: string; lastUsedAt?: string
 }
+export type EngineerAttemptRelation = 'initial' | 'repeat' | 'retest' | 'unresolved-retest'
+export interface EngineerEvaluationAttemptView {
+  id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult; occurredAt: string
+  dimensions: Partial<ProjectEvaluationDimensions>; sequenceSignature?: string; attemptNo: number
+  relation: EngineerAttemptRelation; retestOf?: string
+}
+export interface EngineerCommandKnowledgeView {
+  id: string; projectId: string; command: string; purpose: string; bootProfileId?: string; socModel?: string
+  confirmedCount: number; createdAt: string; updatedAt: string
+}
+export interface EngineerBootProfileBindingView {
+  id: string; projectId: string; vendor: Exclude<ProjectSocVendor, 'unknown'>; profileId: string
+  sourceIds: string[]; confirmedAt: string
+}
+export type NativeAgentQuestionView =
+  | { id: string; kind: 'command-purpose'; prompt: string; choices: string[]; command: string; bootProfileId?: string; socModel?: string }
+  | { id: string; kind: 'boot-profile'; prompt: string; choices: string[]; sourceIds: string[] }
 export interface EngineerWorkflowReviewView {
   id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult
   stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]; evidenceLines: number[]
@@ -879,9 +904,9 @@ export interface NativeAgentCompleteEvaluationInput {
   projectId: string; sourceId: string; result: EngineerWorkflowResult; evidenceLines?: number[]
 }
 export type NativeAgentCompleteEvaluationResult =
-  | { kind: 'review'; review: EngineerWorkflowReviewView }
-  | { kind: 'applied'; memory: EngineerWorkflowMemoryView }
-  | { kind: 'ignored' }
+  | { kind: 'review'; review: EngineerWorkflowReviewView; attempt: EngineerEvaluationAttemptView }
+  | { kind: 'applied'; memory: EngineerWorkflowMemoryView; attempt: EngineerEvaluationAttemptView }
+  | { kind: 'ignored'; attempt?: EngineerEvaluationAttemptView }
 export interface NativeAgentConfirmWorkflowInput { projectId: string; reviewId: string; purpose: string }
 export interface NativeAgentDismissWorkflowInput { projectId: string; reviewId: string }
 export interface NativeAgentListWorkflowsInput { projectId: string }
@@ -907,7 +932,7 @@ export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'prefere
 export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
 export type EvaluationAgentPublicOutcome = 'PASS' | 'FAIL' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
-export interface EvaluationAgentDimensions { sku?: string; lot?: string; material?: string; sample?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
+export interface EvaluationAgentDimensions { sku?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }

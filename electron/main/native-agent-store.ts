@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type {
-  EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
+  EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerEvaluationAttemptView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
   NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentMessageView, NativeAgentSearchEventInput,
   NativeAgentSessionStatus, NativeAgentSessionSummary, NativeAgentSessionView,
   NativeAgentToolTraceView, ProjectEvaluationDimensions
@@ -22,11 +22,14 @@ interface StoredEngineerWorkflowReview extends EngineerWorkflowReviewView {
   searchEventIds: string[]
 }
 interface NativeAgentDatabase {
-  schemaVersion: 2
+  schemaVersion: 4
   sessions: Record<string, StoredNativeAgentSession>
   searches: Record<string, SearchEvent[]>
   workflows: Record<string, StoredEngineerWorkflow[]>
   reviews: Record<string, StoredEngineerWorkflowReview[]>
+  attempts: Record<string, EngineerEvaluationAttemptView[]>
+  commandKnowledge: Record<string, EngineerCommandKnowledgeView[]>
+  profileBindings: Record<string, EngineerBootProfileBindingView[]>
 }
 
 const MAX_SESSIONS_PER_PROJECT = 100
@@ -35,6 +38,9 @@ const MAX_TOOLS = 300
 const MAX_SEARCHES = 500
 const MAX_WORKFLOWS = 100
 const MAX_REVIEWS = 200
+const MAX_ATTEMPTS = 5_000
+const MAX_COMMAND_KNOWLEDGE = 500
+const FAILURE_RESULTS = new Set<EngineerWorkflowResult>(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const clean = (value: unknown, max: number): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
   : ''
@@ -45,11 +51,14 @@ export class NativeAgentStore {
 
   constructor(dataRoot: string, private readonly id: () => string = randomUUID) {
     this.store = new AtomicJsonStore(join(dataRoot, 'metadata', 'native-agent.json'), {
-      schemaVersion: 2,
+      schemaVersion: 4,
       sessions: {},
       searches: {},
       workflows: {},
-      reviews: {}
+      reviews: {},
+      attempts: {},
+      commandKnowledge: {},
+      profileBindings: {}
     })
   }
 
@@ -62,13 +71,19 @@ export class NativeAgentStore {
         searches?: NativeAgentDatabase['searches']
         workflows?: NativeAgentDatabase['workflows']
         reviews?: NativeAgentDatabase['reviews']
+        attempts?: NativeAgentDatabase['attempts']
+        commandKnowledge?: NativeAgentDatabase['commandKnowledge']
+        profileBindings?: NativeAgentDatabase['profileBindings']
       }
-      if ((legacy.schemaVersion !== 1 && legacy.schemaVersion !== 2) || !legacy.sessions || !legacy.searches) {
-        return { schemaVersion: 2, sessions: {}, searches: {}, workflows: {}, reviews: {} }
+      if ((legacy.schemaVersion !== 1 && legacy.schemaVersion !== 2 && legacy.schemaVersion !== 3 && legacy.schemaVersion !== 4) || !legacy.sessions || !legacy.searches) {
+        return { schemaVersion: 4, sessions: {}, searches: {}, workflows: {}, reviews: {}, attempts: {}, commandKnowledge: {}, profileBindings: {} }
       }
-      database.schemaVersion = 2
+      database.schemaVersion = 4
       database.workflows = legacy.workflows && typeof legacy.workflows === 'object' ? legacy.workflows : {}
       database.reviews = legacy.reviews && typeof legacy.reviews === 'object' ? legacy.reviews : {}
+      database.attempts = legacy.attempts && typeof legacy.attempts === 'object' ? legacy.attempts : {}
+      database.commandKnowledge = legacy.commandKnowledge && typeof legacy.commandKnowledge === 'object' ? legacy.commandKnowledge : {}
+      database.profileBindings = legacy.profileBindings && typeof legacy.profileBindings === 'object' ? legacy.profileBindings : {}
       for (const session of Object.values(database.sessions)) {
         if (session.status === 'queued' || session.status === 'running') {
           session.status = 'paused'
@@ -102,7 +117,7 @@ export class NativeAgentStore {
     return Object.values(database.sessions)
       .filter((session) => session.projectId === wanted)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(({ messages, tools, externalSessionId, lastRequest, ...summary }) => summary)
+      .map(({ messages, tools, question: _question, externalSessionId, lastRequest, ...summary }) => summary)
   }
 
   async get(sessionId: string): Promise<StoredNativeAgentSession | null> {
@@ -123,6 +138,16 @@ export class NativeAgentStore {
       session.failure = session.failure ? clean(session.failure, 500) : undefined
       session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
       session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
+      if (session.question) session.question = session.question.kind === 'boot-profile' ? {
+        id: clean(session.question.id, 160), kind: 'boot-profile', prompt: clean(session.question.prompt, 500),
+        choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8),
+        sourceIds: [...new Set(session.question.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))].slice(0, 100),
+      } : {
+        id: clean(session.question.id, 160), kind: 'command-purpose', prompt: clean(session.question.prompt, 500),
+        choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8), command: clean(session.question.command, 160),
+        ...(session.question.bootProfileId ? { bootProfileId: clean(session.question.bootProfileId, 160) } : {}),
+        ...(session.question.socModel ? { socModel: clean(session.question.socModel, 160) } : {}),
+      }
       session.updatedAt = now()
       session.lastMessage = [...session.messages].reverse().find((item) => item.role !== 'tool')?.content.slice(0, 160)
       result = structuredClone(session)
@@ -182,11 +207,15 @@ export class NativeAgentStore {
     result: EngineerWorkflowResult
     evidenceLines?: number[]
     dimensions?: Partial<ProjectEvaluationDimensions>
+    sequenceSignature?: string
+    explicitRetest?: boolean
+    filenameAttemptNo?: number
   }): Promise<NativeAgentCompleteEvaluationResult> {
     const projectId = clean(input.projectId, 160)
     const sourceId = clean(input.sourceId, 160)
     if (!projectId || !sourceId) return { kind: 'ignored' }
-    let result: NativeAgentCompleteEvaluationResult = { kind: 'ignored' }
+    const attempt = await this.recordAttempt({ ...input, projectId, sourceId })
+    let result: NativeAgentCompleteEvaluationResult = { kind: 'ignored', attempt }
     await this.store.update((database) => {
       const projectReviews = database.reviews[projectId] ?? []
       const latestReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId)
@@ -199,7 +228,7 @@ export class NativeAgentStore {
         return relevant && Date.parse(event.occurredAt) >= Date.now() - 8 * 60 * 60 * 1_000
       })
       if (!searches.length && latestReview?.state === 'pending') {
-        result = { kind: 'review', review: this.review(latestReview) }
+        result = { kind: 'review', review: this.review(latestReview), attempt }
         return
       }
       const candidate = buildEngineerWorkflowCandidate(searches, input.result, input.dimensions)
@@ -213,12 +242,12 @@ export class NativeAgentStore {
         exact.lastUsedAt = stamp
         exact.updatedAt = stamp
         exact.sourceIds = [...new Set([...exact.sourceIds, sourceId])].slice(-100)
-        result = { kind: 'applied', memory: this.workflow(exact) }
+        result = { kind: 'applied', memory: this.workflow(exact), attempt }
         return
       }
       const priorReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId && item.fingerprint === fingerprint)
       if (priorReview) {
-        if (priorReview.state === 'pending') result = { kind: 'review', review: this.review(priorReview) }
+        if (priorReview.state === 'pending') result = { kind: 'review', review: this.review(priorReview), attempt }
         if (priorReview.state !== 'dismissed' || Date.now() - Date.parse(priorReview.createdAt) < 7 * 24 * 60 * 60 * 1_000) return
       }
       const similar = workflows
@@ -235,7 +264,7 @@ export class NativeAgentStore {
         ...(input.dimensions ? { dimensions: structuredClone(input.dimensions) } : {}),
       }
       database.reviews[projectId] = [...projectReviews, review].slice(-MAX_REVIEWS)
-      result = { kind: 'review', review: this.review(review) }
+      result = { kind: 'review', review: this.review(review), attempt }
     })
     return result
   }
@@ -301,6 +330,90 @@ export class NativeAgentStore {
         : []))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(-Math.min(Math.max(limit, 1), 50))
+  }
+
+  async attemptHistory(projectId: string, limit = 200): Promise<EngineerEvaluationAttemptView[]> {
+    const rows = (await this.store.read()).attempts[clean(projectId, 160)] ?? []
+    return rows.slice(-Math.min(Math.max(limit, 1), 500)).reverse().map((item) => structuredClone(item))
+  }
+
+  async commandKnowledge(projectId: string, limit = 200): Promise<EngineerCommandKnowledgeView[]> {
+    const rows = (await this.store.read()).commandKnowledge[clean(projectId, 160)] ?? []
+    return rows.slice(-Math.min(Math.max(limit, 1), 500)).reverse().map((item) => structuredClone(item))
+  }
+
+  async profileBindings(projectId: string): Promise<EngineerBootProfileBindingView[]> {
+    return structuredClone((await this.store.read()).profileBindings[clean(projectId, 160)] ?? [])
+  }
+
+  async confirmProfileBinding(input: { projectId: string; sourceIds: string[]; vendor: 'qualcomm' | 'mediatek'; profileId: string }): Promise<EngineerBootProfileBindingView> {
+    const projectId = clean(input.projectId, 160); const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100)
+    const profileId = clean(input.profileId, 160)
+    if (!projectId || !sourceIds.length || !profileId) throw new Error('SoC profile 확인 범위가 올바르지 않습니다.')
+    let result: EngineerBootProfileBindingView | undefined
+    await this.store.update((database) => {
+      const rows = database.profileBindings[projectId] ?? []
+      const retained = rows.filter((item) => !item.sourceIds.some((sourceId) => sourceIds.includes(sourceId)))
+      result = { id: this.id(), projectId, vendor: input.vendor, profileId, sourceIds, confirmedAt: now() }
+      database.profileBindings[projectId] = [...retained, result].slice(-200)
+    })
+    return result!
+  }
+
+  async confirmCommandKnowledge(input: { projectId: string; command: string; purpose: string; bootProfileId?: string; socModel?: string }): Promise<EngineerCommandKnowledgeView> {
+    const projectId = clean(input.projectId, 160); const command = clean(input.command, 160); const purpose = clean(input.purpose, 240)
+    if (!projectId || !command || !purpose) throw new Error('명령 목적을 입력해 주세요.')
+    let result: EngineerCommandKnowledgeView | undefined
+    await this.store.update((database) => {
+      const rows = database.commandKnowledge[projectId] ?? []
+      const scope = `${clean(input.bootProfileId, 160)}:${clean(input.socModel, 160)}`
+      const existing = rows.find((item) => item.command.toLowerCase() === command.toLowerCase()
+        && `${item.bootProfileId ?? ''}:${item.socModel ?? ''}` === scope)
+      const stamp = now()
+      if (existing) {
+        existing.purpose = purpose; existing.confirmedCount += 1; existing.updatedAt = stamp; result = structuredClone(existing)
+      } else {
+        result = { id: this.id(), projectId, command, purpose, confirmedCount: 1, createdAt: stamp, updatedAt: stamp,
+          ...(clean(input.bootProfileId, 160) ? { bootProfileId: clean(input.bootProfileId, 160) } : {}),
+          ...(clean(input.socModel, 160) ? { socModel: clean(input.socModel, 160) } : {}) }
+        database.commandKnowledge[projectId] = [...rows, result].slice(-MAX_COMMAND_KNOWLEDGE)
+      }
+    })
+    return result!
+  }
+
+  private async recordAttempt(input: {
+    projectId: string; sourceId: string; result: EngineerWorkflowResult; dimensions?: Partial<ProjectEvaluationDimensions>
+    sequenceSignature?: string; explicitRetest?: boolean; filenameAttemptNo?: number
+  }): Promise<EngineerEvaluationAttemptView> {
+    let result: EngineerEvaluationAttemptView | undefined
+    await this.store.update((database) => {
+      const rows = database.attempts[input.projectId] ?? []
+      const existingIndex = rows.findIndex((item) => item.sourceId === input.sourceId)
+      const dimensions = structuredClone(input.dimensions ?? {})
+      const signature = clean(input.sequenceSignature, 200)
+      const identityKeys: Array<keyof ProjectEvaluationDimensions> = ['sku', 'lot', 'material', 'die']
+      const related = rows.filter((item) => item.sourceId !== input.sourceId && signature && item.sequenceSignature === signature
+        && Boolean(dimensions.sample) && item.dimensions.sample === dimensions.sample
+        && identityKeys.every((key) => dimensions[key] === undefined || item.dimensions[key] === undefined || String(dimensions[key]) === String(item.dimensions[key])))
+      const previous = related.at(-1)
+      const requestedAttempt = Number.isSafeInteger(input.filenameAttemptNo) && input.filenameAttemptNo! > 0 ? input.filenameAttemptNo! : undefined
+      const attemptNo = requestedAttempt ?? ((previous?.attemptNo ?? 0) + 1)
+      const relation = input.explicitRetest
+        ? previous && FAILURE_RESULTS.has(previous.result) ? 'retest' as const : 'unresolved-retest' as const
+        : previous ? FAILURE_RESULTS.has(previous.result) ? 'retest' as const : 'repeat' as const : 'initial' as const
+      const attempt: EngineerEvaluationAttemptView = {
+        id: existingIndex >= 0 ? rows[existingIndex].id : this.id(), projectId: input.projectId, sourceId: input.sourceId,
+        result: input.result, occurredAt: existingIndex >= 0 ? rows[existingIndex].occurredAt : now(), dimensions,
+        ...(signature ? { sequenceSignature: signature } : {}), attemptNo, relation,
+        ...(relation === 'retest' && previous ? { retestOf: previous.id } : {}),
+      }
+      if (existingIndex >= 0) rows[existingIndex] = attempt
+      else rows.push(attempt)
+      database.attempts[input.projectId] = rows.slice(-MAX_ATTEMPTS)
+      result = structuredClone(attempt)
+    })
+    return result!
   }
 
   public(session: StoredNativeAgentSession): NativeAgentSessionView {

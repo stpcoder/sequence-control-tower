@@ -59,6 +59,16 @@ const optionalPositiveNumber = (value: unknown, name: string): number | undefine
   if (result !== undefined && result <= 0) throw new Error(`${name}이(가) 올바르지 않습니다.`)
   return result
 }
+const optionalPositiveInteger = (value: unknown, name: string): number | undefined => {
+  if (value === undefined) return undefined
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return value as number
+}
+const optionalVendor = (value: unknown, name: string): 'qualcomm' | 'mediatek' | 'unknown' | undefined => {
+  if (value === undefined) return undefined
+  if (value === 'qualcomm' || value === 'mediatek' || value === 'unknown') return value
+  throw new Error(`${name}이(가) 올바르지 않습니다.`)
+}
 const optionalDimension = (value: unknown, name: string): string | number | undefined => typeof value === 'number' ? optionalNumber(value, name) : optionalText(value, name)
 const status = (value: unknown, name: string): 'pass' | 'fail' | 'inconclusive' | 'running' => {
   if (value === 'pass' || value === 'fail' || value === 'inconclusive' || value === 'running') return value
@@ -174,7 +184,7 @@ export class ProjectStore {
   private public(project: StoredProject): ProjectSnapshot { this.defaults(project); return { schemaVersion: 2, ...structuredClone(project) } }
   private async status(path: string | undefined): Promise<ProjectFolderStatus> { if (!path) return 'missing'; try { await stat(path); await access(path); return 'available' } catch (error) { const code = (error as NodeJS.ErrnoException).code; return code === 'EACCES' || code === 'EPERM' ? 'permission-denied' : 'missing' } }
   private pathError(error: unknown): Error { const code = (error as NodeJS.ErrnoException).code; return new Error(code === 'EACCES' || code === 'EPERM' ? '선택한 폴더에 접근할 권한이 없습니다.' : '선택한 폴더를 찾을 수 없습니다.') }
-  private profiles(value: ProjectEquipmentProfile[]): ProjectEquipmentProfile[] { if (!Array.isArray(value)) throw new Error('장비 profile이 올바르지 않습니다.'); return value.map((p) => ({ alias: text(p.alias, '장비 alias', 120), profileId: id(p.profileId, 'profileId'), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
+  private profiles(value: ProjectEquipmentProfile[]): ProjectEquipmentProfile[] { if (!Array.isArray(value)) throw new Error('장비 profile이 올바르지 않습니다.'); return value.map((p) => ({ alias: text(p.alias, '장비 alias', 120), profileId: id(p.profileId, 'profileId'), updatedAt: text(p.updatedAt, 'updatedAt', 80), ...(p.vendor === undefined ? {} : { vendor: optionalVendor(p.vendor, 'vendor') }), ...(p.socModels === undefined ? {} : { socModels: this.texts(p.socModels, 'socModels', 40) }), ...(p.filenameAliases === undefined ? {} : { filenameAliases: this.texts(p.filenameAliases, 'filenameAliases', 80) }) })) }
   private pins(value: ProjectTemplatePin[]): ProjectTemplatePin[] { if (!Array.isArray(value)) throw new Error('template pin이 올바르지 않습니다.'); return value.map((p) => ({ templateId: id(p.templateId, 'templateId'), revision: revision(p.revision), pinnedAt: text(p.pinnedAt, 'pinnedAt', 80) })) }
   private presets(value: ProjectExportPreset[]): ProjectExportPreset[] { if (!Array.isArray(value)) throw new Error('export preset이 올바르지 않습니다.'); return value.map((p) => ({ ...p, id: id(p.id, 'presetId'), name: text(p.name, 'preset 이름'), format: p.format, options: presetOptions(p.options), createdAt: text(p.createdAt, 'createdAt', 80), updatedAt: text(p.updatedAt, 'updatedAt', 80) })) }
   private defaults(project: StoredProject): void {
@@ -182,6 +192,7 @@ export class ProjectStore {
     // otherwise survive until an unrelated partial save combines it with new
     // input. Normalize all memory fields as one transaction: a broken graph
     // must never leave a partially trusted hypothesis/node/evidence set.
+    try { project.equipmentProfiles = this.profiles(project.equipmentProfiles ?? []) } catch { project.equipmentProfiles = [] }
     try {
       project.lpddrDevelopmentContext = project.lpddrDevelopmentContext === undefined
         ? {}
@@ -214,19 +225,20 @@ export class ProjectStore {
   private dimensions(value: unknown): ProjectEvaluationDimensions {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('평가 조건이 올바르지 않습니다.')
     const v = value as Record<string, unknown>
-    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), material: optionalText(v.material, 'material', 120), sample: optionalText(v.sample, 'sample', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
+    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), material: optionalText(v.material, 'material', 120), die: optionalText(v.die, 'die', 120), sample: optionalText(v.sample, 'sample', 120), socVendor: optionalVendor(v.socVendor, 'socVendor'), socModel: optionalText(v.socModel, 'socModel', 120), bootProfileId: optionalText(v.bootProfileId, 'bootProfileId', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
   }
   private memory(hypothesesValue: unknown, nodesValue: unknown, evidenceValue: unknown, artifacts: ProjectArtifactSourceRef[]): { hypotheses: ProjectFailureHypothesis[]; nodes: ProjectEvaluationNode[]; evidence: ProjectEvidenceRecord[] } {
     if (!Array.isArray(hypothesesValue) || !Array.isArray(nodesValue) || !Array.isArray(evidenceValue) || hypothesesValue.length > 200 || nodesValue.length > 1_000 || evidenceValue.length > 5_000) throw new Error('평가 메모리 크기가 올바르지 않습니다.')
     const hypotheses = hypothesesValue.map((value): ProjectFailureHypothesis => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('failure hypothesis가 올바르지 않습니다.'); return { id: id(v.id, 'hypothesisId'), title: text(v.title, 'hypothesis title', 240), ...(v.description === undefined ? {} : { description: text(v.description, 'hypothesis description', 2_000) }), origin: origin(v.origin, 'hypothesis origin'), ...(v.evaluationNodeIds === undefined ? {} : { evaluationNodeIds: this.ids(v.evaluationNodeIds, 'evaluationNodeIds', 1_000) }) } })
-    const nodes = nodesValue.map((value): ProjectEvaluationNode => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evaluation node가 올바르지 않습니다.'); return { id: id(v.id, 'nodeId'), ...(v.hypothesisId === undefined ? {} : { hypothesisId: id(v.hypothesisId, 'hypothesisId') }), ...(v.parentId === undefined ? {} : { parentId: id(v.parentId, 'parentId') }), ...(v.branchId === undefined ? {} : { branchId: id(v.branchId, 'branchId') }), name: text(v.name, 'node name', 240), dimensions: this.dimensions(v.dimensions), ...(v.status === undefined ? {} : { status: status(v.status, 'node status') }) } })
+    const nodes = nodesValue.map((value): ProjectEvaluationNode => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evaluation node가 올바르지 않습니다.'); return { id: id(v.id, 'nodeId'), ...(v.hypothesisId === undefined ? {} : { hypothesisId: id(v.hypothesisId, 'hypothesisId') }), ...(v.parentId === undefined ? {} : { parentId: id(v.parentId, 'parentId') }), ...(v.branchId === undefined ? {} : { branchId: id(v.branchId, 'branchId') }), name: text(v.name, 'node name', 240), dimensions: this.dimensions(v.dimensions), ...(v.status === undefined ? {} : { status: status(v.status, 'node status') }), ...(v.sequenceSignature === undefined ? {} : { sequenceSignature: text(v.sequenceSignature, 'sequenceSignature', 200) }), ...(v.attemptNo === undefined ? {} : { attemptNo: optionalPositiveInteger(v.attemptNo, 'attemptNo') }), ...(v.retestOf === undefined ? {} : { retestOf: id(v.retestOf, 'retestOf') }) } })
     const nodeIds = new Set(nodes.map((node) => node.id)); const hypothesisIds = new Set(hypotheses.map((hypothesis) => hypothesis.id)); const sourceIds = new Set(artifacts.map((artifact) => artifact.sourceId)); this.unique(hypothesisIds, hypotheses.length, 'hypothesisId'); this.unique(nodeIds, nodes.length, 'nodeId')
-    if (nodes.some((node) => (node.parentId && !nodeIds.has(node.parentId)) || (node.hypothesisId && !hypothesisIds.has(node.hypothesisId)))) throw new Error('evaluation node 참조가 올바르지 않습니다.')
+    if (nodes.some((node) => (node.parentId && !nodeIds.has(node.parentId)) || (node.retestOf && (node.retestOf === node.id || !nodeIds.has(node.retestOf))) || (node.hypothesisId && !hypothesisIds.has(node.hypothesisId)))) throw new Error('evaluation node 참조가 올바르지 않습니다.')
     if (hypotheses.some((hypothesis) => hypothesis.evaluationNodeIds?.some((nodeId) => !nodeIds.has(nodeId)))) throw new Error('failure hypothesis 참조가 올바르지 않습니다.')
     const evidence = evidenceValue.map((value): ProjectEvidenceRecord => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evidence record가 올바르지 않습니다.'); const record = { id: id(v.id, 'evidenceId'), evaluationNodeId: id(v.evaluationNodeId, 'evaluationNodeId'), status: status(v.status, 'evidence status'), sourceIds: this.ids(v.sourceIds, 'sourceIds', 200), ...(v.occurredAt === undefined ? {} : { occurredAt: text(v.occurredAt, 'occurredAt', 80) }), ...(v.result === undefined ? {} : { result: text(v.result, 'result', 2_000) }), ...(v.dimensions === undefined ? {} : { dimensions: this.dimensions(v.dimensions) }), ...(v.note === undefined ? {} : { note: text(v.note, 'note', 4_000) }), ...(v.origin === undefined ? {} : { origin: origin(v.origin, 'evidence origin') }) }; if (!nodeIds.has(record.evaluationNodeId) || record.sourceIds.some((sourceId) => !sourceIds.has(sourceId))) throw new Error('evidence record 참조가 올바르지 않습니다.'); return record })
     this.unique(new Set(evidence.map((record) => record.id)), evidence.length, 'evidenceId')
     return { hypotheses, nodes, evidence }
   }
   private ids(value: unknown, name: string, max: number): string[] { if (!Array.isArray(value) || value.length > max) throw new Error(`${name}이(가) 올바르지 않습니다.`); const values = value.map((item) => id(item, name)); this.unique(new Set(values), values.length, name); return values }
+  private texts(value: unknown, name: string, max: number): string[] { if (!Array.isArray(value) || value.length > max) throw new Error(`${name}이(가) 올바르지 않습니다.`); const values = value.map((item) => text(item, name, 160)); this.unique(new Set(values), values.length, name); return values }
   private unique(values: Set<string>, expected: number, name: string): void { if (values.size !== expected) throw new Error(`${name}이(가) 중복되었습니다.`) }
 }

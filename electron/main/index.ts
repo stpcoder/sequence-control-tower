@@ -143,7 +143,7 @@ async function bootstrap(): Promise<void> {
   const mcp = await startSctMcpServer(nativeTools)
   const skillRoot = app.isPackaged ? join(process.resourcesPath, 'agent-skills') : join(app.getAppPath(), 'agent-skills')
   const opencode = new OpenCodeHost({ dataRoot, skillRoot, mcpUrl: mcp.url, mcpToken: mcp.token, effectiveLlm: () => llmConfig.effective() })
-  const nativeAgent = new NativeAgentService({ store: nativeAgentStore, tools: nativeTools, projects, llm, opencode })
+  const nativeAgent = new NativeAgentService({ store: nativeAgentStore, tools: nativeTools, projects, artifacts, llm, opencode })
   const samples = new SampleProjectService(dataRoot, { artifacts, projects })
   nativeAgentForShutdown = nativeAgent
   mcpForShutdown = mcp

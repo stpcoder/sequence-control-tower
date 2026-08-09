@@ -69,4 +69,32 @@ describe('NativeAgentStore', () => {
     expect(repeated).toMatchObject({ kind: 'applied', memory: { purpose: '부팅 후 OS Memory Test 확인', appliedCount: 1 } })
     expect(await store.workflowMemories('p')).toHaveLength(1)
   })
+
+  it('stores RT as a same-sample same-sequence attempt relation after FAIL', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-attempt-memory-'))
+    const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
+    await store.initialize()
+    const first = await store.completeEvaluation({ projectId: 'p', sourceId: 's1', result: 'TEST_FAIL', dimensions: { sample: 'A', sku: 'X', die: '03' }, sequenceSignature: 'seq:same' })
+    const second = await store.completeEvaluation({ projectId: 'p', sourceId: 's2', result: 'PASS', dimensions: { sample: 'A', sku: 'X', die: '03' }, sequenceSignature: 'seq:same' })
+    expect(first.attempt).toMatchObject({ relation: 'initial', attemptNo: 1 })
+    expect(second.attempt).toMatchObject({ relation: 'retest', attemptNo: 2, retestOf: first.attempt?.id })
+    const unrelated = await store.completeEvaluation({ projectId: 'p', sourceId: 's3', result: 'PASS', dimensions: { sample: 'B' }, sequenceSignature: 'seq:same', explicitRetest: true, filenameAttemptNo: 2 })
+    expect(unrelated.attempt).toMatchObject({ relation: 'unresolved-retest', attemptNo: 2 })
+  })
+
+  it('persists engineer-confirmed command purpose in SoC scope', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-command-memory-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    await store.confirmCommandKnowledge({ projectId: 'p', command: 'voltage-control:set_rail', purpose: 'VDD 경계 확인', bootProfileId: 'mediatek-default', socModel: 'MTK-24D' })
+    expect(await store.commandKnowledge('p')).toEqual([expect.objectContaining({ command: 'voltage-control:set_rail', purpose: 'VDD 경계 확인', socModel: 'MTK-24D' })])
+  })
+
+  it('stores an engineer-confirmed boot profile only for the questioned sources', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-profile-binding-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    await store.confirmProfileBinding({ projectId: 'p', sourceIds: ['s1', 's2'], vendor: 'mediatek', profileId: 'mediatek-default' })
+    expect(await store.profileBindings('p')).toEqual([expect.objectContaining({ vendor: 'mediatek', profileId: 'mediatek-default', sourceIds: ['s1', 's2'] })])
+  })
 })

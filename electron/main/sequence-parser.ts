@@ -72,6 +72,10 @@ export function parseSequence(text: string, fileName = 'artifact.seq'): Sequence
       .flatMap((item) => [item.family, item.executable])
       .filter((item, index, all) => all.indexOf(item) === index)
       .slice(0, 40),
+    commandSignatures: (dna.commandFamilies.value ?? [])
+      .map((item) => `${item.family}:${item.executable}`)
+      .filter((item, index, all) => all.indexOf(item) === index)
+      .slice(0, 40),
     structuralHash: fingerprint.structuralHash,
     facts
   }

@@ -2289,6 +2289,8 @@ export function WorkbenchView({
         void api.nativeAgent.completeEvaluation({
           projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
         }).then((completed) => {
+          if (completed.attempt?.relation === 'retest') onNotify?.(`RT 연결됨 · 동일 Sample/Sequence의 이전 FAIL 평가 #${completed.attempt.attemptNo - 1}`, 'success')
+          else if (completed.attempt?.relation === 'unresolved-retest') onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
           if (completed.kind === 'review') {
             setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
             setWorkflowPurposes((current) => ({

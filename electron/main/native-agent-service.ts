@@ -6,10 +6,11 @@ import type {
 } from '../shared/contracts'
 import type { OpenAiCompatibleClient } from './llm-service'
 import type { ProjectStore } from './project-store'
+import type { ArtifactService } from './artifact-service'
 import { NativeAgentStore, type StoredNativeAgentSession } from './native-agent-store'
 import {
   LPDDR_AGENT_TOOL_DESCRIPTIONS, type LpddrAgentToolCall, type LpddrAgentToolResult,
-  extractLpddrFilenameDimensions, type LpddrAgentToolService
+  sourceEngineeringContext, type LpddrAgentToolService
 } from './lpddr-agent-tools'
 import type { OpenCodeHost } from './opencode-host'
 import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
@@ -25,7 +26,7 @@ function uniquePlan(calls: LpddrAgentToolCall[]): LpddrAgentToolCall[] {
     const key = `${call.name}:${JSON.stringify(call.args ?? {})}`
     if (seen.has(key)) return false
     seen.add(key); return true
-  }).slice(0, 7)
+  }).slice(0, 8)
 }
 
 /** Small built-in skill router used when OpenCode is not installed. It does
@@ -38,6 +39,7 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|sku|주파수|skew|tm|mode)/i.test(text)) {
     calls.push({ name: 'filename_dimensions_scan' })
   }
+  if (/(새 로그|이 로그|무슨 평가|어떤 평가|soc|퀄컴|qualcomm|미디어텍|mediatek|mtk|sm[-_ ]?\d|부팅|boot|pbl|xbl|abl|uefi|post.?pbl|lk2?)/i.test(text)) calls.push({ name: 'soc_boot_profile_scan' })
   if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
   if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
   if (/(경향|집중|불량률|dq|bl|channel|채널|bank|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
@@ -64,6 +66,7 @@ export class NativeAgentService {
     store: NativeAgentStore
     tools: LpddrAgentToolService
     projects: Pick<ProjectStore, 'get'>
+    artifacts: Pick<ArtifactService, 'list'>
     llm: Pick<OpenAiCompatibleClient, 'complete'>
     opencode: OpenCodeHost
   }) {}
@@ -92,18 +95,21 @@ export class NativeAgentService {
     if (project.artifacts.length) {
       const sourceIds = project.artifacts.slice(0, 100).map((item) => item.sourceId)
       try {
-        const [filenames, statuses, workflows] = await Promise.all([
+        const [filenames, statuses, workflows, boot] = await Promise.all([
           this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
           this.deps.tools.execute(project.id, { name: 'pass_fail_scan' }, sourceIds),
           this.deps.tools.execute(project.id, { name: 'engineer_workflow_memory_get' }, sourceIds),
+          this.deps.tools.execute(project.id, { name: 'soc_boot_profile_scan' }, sourceIds),
         ])
         session = await this.deps.store.update(session.id, (draft) => {
-          for (const result of [filenames, statuses, workflows]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
+          for (const result of [filenames, statuses, workflows, boot]) draft.tools.push({ id: randomUUID(), name: result.name, label: result.label, state: 'completed', startedAt: now(), completedAt: now(), summary: result.summary, evidenceSourceIds: result.evidenceSourceIds })
         })
         session = await this.deps.store.appendMessage(session.id, {
-          role: 'assistant', content: this.onboardingQuestion(filenames, statuses, workflows),
+          role: 'assistant', content: this.onboardingQuestion(filenames, statuses, workflows, boot),
           evidenceSourceIds: [...new Set([...filenames.evidenceSourceIds, ...statuses.evidenceSourceIds, ...workflows.evidenceSourceIds])]
         })
+        const question = this.profileQuestion(filenames) ?? await this.commandQuestion(project.id, filenames)
+        if (question) session = await this.deps.store.update(session.id, (draft) => { draft.question = question })
       } catch {
         session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `프로젝트 로그 ${project.artifacts.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
       }
@@ -125,6 +131,35 @@ export class NativeAgentService {
     if (session.status === 'queued' || session.status === 'running') throw new Error('현재 분석이 끝난 후 다시 보내 주세요.')
     const message = safe(content, 4_000)
     if (!message) throw new Error('메시지를 입력해 주세요.')
+    if (session.question?.kind === 'boot-profile') {
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      if (message === '미확인으로 유지' || message === '건너뛰기') {
+        next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+        next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: 'SoC profile을 확정하지 않았습니다. 해당 로그는 미확인 상태로 유지합니다.' })
+        this.emit(next); return this.public(next)
+      }
+      const vendor = message.startsWith('Qualcomm') ? 'qualcomm' : message.startsWith('MediaTek') ? 'mediatek' : null
+      if (!vendor) throw new Error('Qualcomm 또는 MediaTek profile을 선택해 주세요.')
+      await this.deps.store.confirmProfileBinding({ projectId: session.projectId, sourceIds: session.question.sourceIds, vendor, profileId: vendor === 'qualcomm' ? 'qualcomm-default' : 'mediatek-default' })
+      next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+      next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `${vendor === 'qualcomm' ? 'Qualcomm · UEFI' : 'MediaTek · Post-PBL/LK'} profile로 저장했습니다. 다음 분석부터 해당 부팅 단계를 사용합니다.` })
+      this.emit(next); return this.public(next)
+    }
+    if (session.question?.kind === 'command-purpose') {
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      if (message === '건너뛰기') {
+        next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+        next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: '명령 목적을 저장하지 않았습니다.' })
+        this.emit(next); return this.public(next)
+      }
+      const knowledge = await this.deps.store.confirmCommandKnowledge({
+        projectId: session.projectId, command: session.question.command, purpose: message,
+        bootProfileId: session.question.bootProfileId, socModel: session.question.socModel,
+      })
+      next = await this.deps.store.update(session.id, (draft) => { draft.question = undefined })
+      next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `${knowledge.command} 목적을 “${knowledge.purpose}”로 저장했습니다. 같은 프로젝트와 SoC 조건에서 다음 분석에 재사용합니다.` })
+      this.emit(next); return this.public(next)
+    }
     const sourceIds = await this.authorize(session.projectId, requestedSourceIds)
     let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
     next = await this.deps.store.update(session.id, (draft) => {
@@ -174,12 +209,17 @@ export class NativeAgentService {
     if (!source) throw new Error('현재 로그가 프로젝트 범위에 없습니다.')
     const results = new Set(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
     if (!results.has(input.result)) throw new Error('판정 결과가 올바르지 않습니다.')
+    const artifact = (await this.deps.artifacts.list()).find((item) => item.id === source.artifactId)
+    const context = sourceEngineeringContext(source.relativePath, artifact, project.equipmentProfiles)
     return this.deps.store.completeEvaluation({
       projectId: project.id,
       sourceId,
       result: input.result,
       evidenceLines: input.evidenceLines,
-      dimensions: extractLpddrFilenameDimensions(source.relativePath),
+      dimensions: context.dimensions,
+      sequenceSignature: context.sequenceSignature,
+      explicitRetest: context.explicitRetest,
+      filenameAttemptNo: context.filenameAttemptNo,
     })
   }
 
@@ -311,7 +351,7 @@ export class NativeAgentService {
     return safe(raw, 300) || '에이전트 분석을 완료하지 못했습니다.'
   }
 
-  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult, workflows: LpddrAgentToolResult): string {
+  private onboardingQuestion(filenames: LpddrAgentToolResult, statuses: LpddrAgentToolResult, workflows: LpddrAgentToolResult, boot: LpddrAgentToolResult): string {
     const rows = (filenames.data as { rows?: Array<{ dimensions?: Record<string, unknown> }> })?.rows ?? []
     const dimensions = ['testMode', 'temperatureC', 'vdd', 'material', 'dq', 'pattern'] as const
     const leaders = dimensions.flatMap((dimension) => {
@@ -326,6 +366,37 @@ export class NativeAgentService {
       return first[1] >= 2 ? [label] : []
     }).slice(0, 4)
     const remembered = (workflows.data as { confirmed?: unknown[] })?.confirmed?.length ?? 0
-    return `파일명과 종료 marker를 확인했습니다.\n${filenames.summary}\n${statuses.summary || '확정 상태 없음'}${remembered ? `\n저장된 분석 절차 ${remembered}개를 함께 확인합니다.` : ''}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 어떤 목적의 평가인가요?` : '이번 평가 목적을 짧게 적어주세요.'}`
+    return `파일명, SoC 부팅 구간과 종료 marker를 확인했습니다.\n${filenames.summary}\n${boot.summary}\n${statuses.summary || '확정 상태 없음'}${remembered ? `\n저장된 분석 절차 ${remembered}개를 함께 확인합니다.` : ''}\n\n${leaders.length ? `${leaders.join(' · ')} 조건이 반복됩니다. 어떤 목적의 평가인가요?` : '이번 평가 목적을 짧게 적어주세요.'}`
+  }
+
+  private async commandQuestion(projectId: string, filenames: LpddrAgentToolResult): Promise<NativeAgentSessionView['question'] | undefined> {
+    const known = await this.deps.store.commandKnowledge(projectId, 500)
+    const keys = new Set(known.map((item) => `${item.command.toLowerCase()}:${item.bootProfileId ?? ''}:${item.socModel ?? ''}`))
+    const rows = (filenames.data as { rows?: Array<{ commandSignatures?: string[]; dimensions?: { bootProfileId?: string; socModel?: string } }> })?.rows ?? []
+    for (const row of rows) {
+      for (const command of row.commandSignatures ?? []) {
+        const key = `${command.toLowerCase()}:${row.dimensions?.bootProfileId ?? ''}:${row.dimensions?.socModel ?? ''}`
+        if (keys.has(key) || /^unclassified:/i.test(command) || /^shell:(?:unknown|\[?\d)/i.test(command)) continue
+        return {
+          id: `command-${randomUUID()}`, kind: 'command-purpose', command,
+          prompt: `${command} 명령이 처음 확인되었습니다. 어떤 목적으로 사용했나요?`,
+          choices: ['부팅 단계 확인', 'Training 조건 설정', '불량 가속 조건 탐색', '개선 조건 검증', 'Screening', '직접 입력', '건너뛰기'],
+          ...(row.dimensions?.bootProfileId ? { bootProfileId: row.dimensions.bootProfileId } : {}),
+          ...(row.dimensions?.socModel ? { socModel: row.dimensions.socModel } : {}),
+        }
+      }
+    }
+    return undefined
+  }
+
+  private profileQuestion(filenames: LpddrAgentToolResult): NativeAgentSessionView['question'] | undefined {
+    const rows = (filenames.data as { rows?: Array<{ sourceId?: string; dimensions?: { socVendor?: string } }> })?.rows ?? []
+    const unknown = rows.filter((row) => !row.dimensions?.socVendor).flatMap((row) => row.sourceId ? [row.sourceId] : []).slice(0, 100)
+    if (!unknown.length) return undefined
+    return {
+      id: `profile-${randomUUID()}`, kind: 'boot-profile', sourceIds: unknown,
+      prompt: `SoC profile을 확인하지 못한 로그 ${unknown.length}개가 있습니다. 어떤 부팅 계열인가요?`,
+      choices: ['Qualcomm · UEFI', 'MediaTek · Post-PBL/LK', '미확인으로 유지'],
+    }
   }
 }

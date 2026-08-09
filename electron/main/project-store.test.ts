@@ -62,15 +62,17 @@ describe('ProjectStore', () => {
     const payload = {
       projectId: project.id, expectedRevision: connected.revision,
       lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'H9L6', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
+      equipmentProfiles: [{ alias: 'SM-8975 실장기', profileId: 'qualcomm-default', vendor: 'qualcomm' as const, socModels: ['SM-8975'], filenameAliases: ['SM8975'], updatedAt: '2026-08-10T00:00:00.000Z' }],
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [
-        { id: 'base', name: 'baseline', dimensions: { bl: 16, temperatureC: 85 } },
-        { id: 'dq9', parentId: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9', dimensions: { dq: 9, testMode: 'VPERI' }, status: 'fail' as const },
+        { id: 'base', name: 'baseline', dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
+        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9 RT', dimensions: { dq: 9, testMode: 'VPERI' }, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
       ],
       evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
     }
     const saved = await store.save(payload)
     expect(saved.lpddrDevelopmentContext).toEqual(payload.lpddrDevelopmentContext)
+    expect(saved.equipmentProfiles).toEqual(payload.equipmentProfiles)
     expect(saved.evidenceRecords).toEqual(payload.evidenceRecords)
     expect((await new ProjectStore(dataRoot).get(project.id))?.evaluationNodes).toEqual(payload.evaluationNodes)
     await expect(store.save({ ...payload, expectedRevision: saved.revision, evidenceRecords: [{ ...payload.evidenceRecords[0], id: 'bad', sourceIds: ['not-connected'] }] })).rejects.toThrow('evidence record')

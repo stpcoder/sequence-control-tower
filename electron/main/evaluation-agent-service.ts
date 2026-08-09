@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { EvaluationAgentRuntime, proposalToEvaluationMemory, type EvaluationAgentSession, type EvaluationFile, type LogReader } from '../../src/domain/evaluation-agent'
 import type { AssessmentOrigin, EvidenceRecord, EvaluationNode, FailureHypothesis } from '../../src/domain/evaluation-memory'
 import { parseFilenameMetadata } from '../../src/domain/workbench/filenameMetadata'
+import { detectSocFilenameContext } from '../../src/domain/soc-profile'
 import type { ArtifactRecord, ProjectSnapshot } from '../shared/contracts'
 import type { ArtifactService } from './artifact-service'
 import type { OpenAiCompatibleClient } from './llm-service'
@@ -36,16 +37,19 @@ function safeEvidence(value: string): string {
 function numeric(value: string | null): number | undefined { if (!value) return undefined; const found = Number(value.replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]); return Number.isFinite(found) ? found : undefined }
 function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
   const parsed = parseFilenameMetadata(fileName); const name = fileName
+  const soc = detectSocFilenameContext(fileName)
   const capture = (expression: RegExp): string | undefined => expression.exec(name)?.[1]
   const numberCapture = (expression: RegExp): number | undefined => numeric(capture(expression) ?? null)
   return {
     material: capture(/(?:^|[_\-.])(?:MAT|MATERIAL)[=:_-]?([A-Z0-9-]+)/i),
+    die: capture(/(?:^|[_\-.])DIE[=:_-]?([A-Z0-9-]+)/i),
     temperatureC: numeric(parsed.temperature.value),
     testMode: parsed.mode.value ?? undefined,
     bl: capture(/(?:^|[_\-.])BL[=:_-]?(\d+)/i), dq: capture(/(?:^|[_\-.])DQ[=:_-]?(\d+)/i),
     channel: capture(/(?:^|[_\-.])(?:CH|CHANNEL)[=:_-]?(\d+)/i), bank: capture(/(?:^|[_\-.])BANK[=:_-]?(\d+)/i), bankGroup: capture(/(?:^|[_\-.])(?:BG|BANKGROUP)[=:_-]?(\d+)/i),
     pattern: capture(/(?:^|[_\-.])PATTERN[=:_-]?([A-Z0-9-]+)/i), frequencyMHz: numberCapture(/(?:^|[_\-.])(?:FREQ|FREQUENCY)[=:_-]?(\d+(?:\.\d+)?)/i) ?? numberCapture(/(?:^|[_\-.])(\d{3,5})MT/i),
-    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:\.\d+)?)/i), skewPs: numberCapture(/(?:^|[_\-.])SKEW[=:_-]?(\d+(?:\.\d+)?)/i)
+    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:\.\d+)?)/i), skewPs: numberCapture(/(?:^|[_\-.])SKEW[=:_-]?(\d+(?:\.\d+)?)/i),
+    ...(soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId })
   }
 }
 

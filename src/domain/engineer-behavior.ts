@@ -22,8 +22,14 @@ export interface EngineerWorkflowCandidate {
 }
 
 const STAGES: Array<{ stage: EngineerEvaluationStage; pattern: RegExp }> = [
-  { stage: 'retest', pattern: /(?:^|[^a-z0-9])(?:rt|retest|re-test)(?:[^a-z0-9]|$)/i },
-  { stage: 'power-on', pattern: /power[ _-]*on|platform[ _-]*init|\b(?:pbl|xbl|abl)\b|\bboot\b/i },
+  { stage: 'post-pbl', pattern: /post[ _-]*pbl/i },
+  { stage: 'lk2', pattern: /(?:^|[^a-z0-9])lk[ _-]*2(?:[^a-z0-9]|$)/i },
+  { stage: 'lk', pattern: /(?:^|[^a-z0-9])(?:lk|little[ _-]*kernel)(?:[^a-z0-9]|$)/i },
+  { stage: 'exit-boot', pattern: /exit[ _-]*boot[ _-]*services|uefi[ _-]*exit/i },
+  { stage: 'xbl', pattern: /(?:^|[^a-z0-9])xbl(?:[^a-z0-9]|$)/i },
+  { stage: 'abl', pattern: /(?:^|[^a-z0-9])abl(?:[^a-z0-9]|$)/i },
+  { stage: 'pbl', pattern: /(?:^|[^a-z0-9])pbl(?:[^a-z0-9]|$)/i },
+  { stage: 'power-on', pattern: /power[ _-]*on|platform[ _-]*init|\bboot\b/i },
   { stage: 'uefi', pattern: /uefi|edk2|exit[ _-]*boot[ _-]*services|\b(?:dxe|bds)\b/i },
   { stage: 'training', pattern: /train(?:ing)?|write[ _-]*level|read[ _-]*gate|wck[ _-]*sync|dqs[ _-]*osc/i },
   { stage: 'reboot', pattern: /reboot|watchdog|warm[ _-]*reset|reset[ _-]*reason/i },
@@ -40,8 +46,9 @@ export function classifyEngineerSearchStage(query: string): EngineerEvaluationSt
 
 export function engineerStageLabel(stage: EngineerEvaluationStage): string {
   const labels: Record<EngineerEvaluationStage, string> = {
-    'power-on': 'Power on', uefi: 'UEFI', training: 'Training', os: 'OS',
-    'memory-test': 'Memory test', halt: 'Halt', reboot: 'Reboot', retest: 'RT', unknown: '기타',
+    'power-on': 'Power on', pbl: 'PBL', xbl: 'XBL', abl: 'ABL', uefi: 'UEFI', 'exit-boot': 'Exit boot',
+    'post-pbl': 'Post-PBL', lk: 'LK', lk2: 'LK2', training: 'Training', os: 'OS',
+    'memory-test': 'Memory test', halt: 'Halt', reboot: 'Reboot', unknown: '기타',
   }
   return labels[stage]
 }
@@ -56,7 +63,6 @@ function purposeSuggestions(
   if (result === 'SYSTEM_REBOOT' || result === 'SYSTEM_HALT' || stages.some((stage) => stage === 'reboot' || stage === 'halt')) values.push('부팅 중단 원인 확인')
   if (stages.includes('memory-test')) values.push('OS Memory Test 판정')
   else if (stages.some((stage) => stage === 'power-on' || stage === 'uefi' || stage === 'os')) values.push('부팅 경로 확인')
-  if (stages.includes('retest')) values.push('RT 재현성 확인')
   if ((dimensions.temperatureC !== undefined || dimensions.vdd !== undefined || dimensions.frequencyMHz !== undefined)
     && result !== 'PASS' && result !== 'EXCLUDED') values.push('불량 가속 조건 확인')
   if (result === 'PASS') values.push('개선 조건 유효성 확인')

@@ -1,15 +1,17 @@
 import { basename } from 'node:path'
 import type {
-  ArtifactEvidenceSpec, ProjectEvaluationDimensions, ProjectSnapshot
+  ArtifactEvidenceSpec, ArtifactRecord, EngineerBootProfileBindingView, ProjectEquipmentProfile, ProjectEvaluationDimensions, ProjectSnapshot
 } from '../shared/contracts'
 import { inferEvaluationTrends, type EvaluationMemory } from '../../src/domain/evaluation-memory'
+import { stableHash } from '../../src/domain/fingerprint'
+import { bootProfile, detectSocFilenameContext, normalizedEvaluationStem, type SocFilenameContext } from '../../src/domain/soc-profile'
 import type { ArtifactService } from './artifact-service'
 import type { NativeAgentStore } from './native-agent-store'
 import type { ProjectStore } from './project-store'
 
 export type LpddrAgentToolName =
   | 'project_context_get' | 'project_history_get' | 'similar_case_search'
-  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'pass_fail_scan'
+  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'pass_fail_scan'
   | 'log_search' | 'log_read_window' | 'failure_trends_get'
 
 export interface LpddrAgentToolCall { name: LpddrAgentToolName; args?: Record<string, unknown> }
@@ -28,11 +30,12 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
   engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
-  filename_dimensions_scan: '로그 파일명에서 자재, Sample, Lot, 온도, VDD, 주파수, TM, DQ, BL 후보를 추출합니다.',
+  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKU, Die, Sample, 조건, Sequence signature와 명령 후보를 추출합니다.',
+  soc_boot_profile_scan: '파일명에서 선택한 Qualcomm/MediaTek profile의 단계 marker를 검사하고 로그가 도달한 부팅 구간을 반환합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
   log_read_window: '검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
-  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 DQ, BL, channel, pattern, 온도, VDD별 실패 집중도를 계산합니다.'
+  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 SKU, Die, Sample, 명령, DQ, BL, channel, pattern, 온도, VDD별 실패 집중도를 계산합니다.'
 }
 
 const safe = (value: unknown, max = 500): string => typeof value === 'string'
@@ -43,6 +46,11 @@ const promptSafe = (value: unknown, max = 500): string => safe(value, max).repla
   '$1[REDACTED]',
 )
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const bootAliasPattern = (alias: string): string => {
+  const body = regexEscape(alias).replace(/ +/g, '[ _-]*')
+  return `(?:^|[^A-Z0-9])${body}(?:[^A-Z0-9]|$)`
+}
 const capture = (name: string, expression: RegExp): string | undefined => expression.exec(name)?.[1]
 const decimal = (value: string | undefined): number | undefined => {
   if (!value) return undefined
@@ -50,7 +58,17 @@ const decimal = (value: string | undefined): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-export function extractLpddrFilenameDimensions(fileName: string): ProjectEvaluationDimensions {
+function projectSocContext(fileName: string, profiles: readonly ProjectEquipmentProfile[] = []): SocFilenameContext {
+  const detected = detectSocFilenameContext(fileName)
+  if (detected.vendor !== 'unknown') return detected
+  const lower = basename(fileName).toLowerCase()
+  const matched = profiles.find((profile) => [profile.alias, ...(profile.filenameAliases ?? []), ...(profile.socModels ?? [])]
+    .some((alias) => alias.length >= 2 && lower.includes(alias.toLowerCase())))
+  if (!matched || (matched.vendor !== 'qualcomm' && matched.vendor !== 'mediatek')) return detected
+  return { vendor: matched.vendor, socModel: matched.socModels?.[0], bootProfileId: matched.profileId as 'qualcomm-default' | 'mediatek-default', confidence: 0.95, evidence: matched.alias, explicitRetest: detected.explicitRetest, ...(detected.attemptNo ? { attemptNo: detected.attemptNo } : {}) }
+}
+
+export function extractLpddrFilenameDimensions(fileName: string, profiles: readonly ProjectEquipmentProfile[] = []): ProjectEvaluationDimensions {
   const name = safe(basename(fileName), 240)
   const temperature = capture(name, /(?:^|[_\-.])(?:TEMP|T)(?:=|_)?(-?\d{1,3})(?:C)?(?:[_\-.]|$)/i)
   const vdd = capture(name, /(?:^|[_\-.])VDD(?:=|_|-)?(\d+(?:[p.]\d+)?)(?:V)?(?:[_\-.]|$)/i)
@@ -61,6 +79,7 @@ export function extractLpddrFilenameDimensions(fileName: string): ProjectEvaluat
     sku: capture(name, /(?:^|[_\-.])SKU(?:=|_|-)?([A-Z0-9-]+)/i),
     lot: capture(name, /(?:^|[_\-.])LOT(?:=|_|-)?([A-Z0-9-]+)/i),
     material: capture(name, /(?:^|[_\-.])(?:MAT|MATERIAL)(?:=|_|-)?([A-Z0-9-]+)/i),
+    die: capture(name, /(?:^|[_\-.])DIE(?:=|_|-)?([A-Z0-9-]+)/i),
     sample: capture(name, /(?:^|[_\-.])(?:SAMPLE|SMP)(?:=|_|-)?([A-Z0-9-]+)/i),
     bl: capture(name, /(?:^|[_\-.])BL(?:=|_|-)?(\d+)/i),
     dq: capture(name, /(?:^|[_\-.])DQ(?:=|_|-)?(\d+)/i),
@@ -70,8 +89,39 @@ export function extractLpddrFilenameDimensions(fileName: string): ProjectEvaluat
     pattern,
     frequencyMHz: decimal(frequency), temperatureC: decimal(temperature), vdd: decimal(vdd),
     skewPs: decimal(capture(name, /(?:^|[_\-.])SKEW(?:=|_|-)?(-?\d+(?:[p.]\d+)?)(?:PS)?/i)),
-    testMode: capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i)
+    testMode: capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i),
+    ...(() => {
+      const soc = projectSocContext(name, profiles)
+      return soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId }
+    })(),
   }
+}
+
+export interface LpddrSourceEngineeringContext {
+  dimensions: ProjectEvaluationDimensions
+  sequenceSignature: string
+  commandSignatures: string[]
+  explicitRetest: boolean
+  filenameAttemptNo?: number
+}
+
+export function sourceEngineeringContext(fileName: string, artifact?: ArtifactRecord, profiles: readonly ProjectEquipmentProfile[] = []): LpddrSourceEngineeringContext {
+  const soc = projectSocContext(fileName, profiles)
+  const parsedSignature = artifact?.fingerprint?.structuralHash
+  const fallback = normalizedEvaluationStem(fileName)
+  return {
+    dimensions: extractLpddrFilenameDimensions(fileName, profiles),
+    sequenceSignature: parsedSignature ? `seq:${parsedSignature}` : `name:${stableHash(fallback)}`,
+    commandSignatures: [...new Set(artifact?.fingerprint?.commandSignatures ?? [])].slice(0, 40),
+    explicitRetest: soc.explicitRetest,
+    ...(soc.attemptNo ? { filenameAttemptNo: soc.attemptNo } : {}),
+  }
+}
+
+function sourceContextWithBinding(fileName: string, artifact: ArtifactRecord | undefined, profiles: readonly ProjectEquipmentProfile[], binding?: EngineerBootProfileBindingView): LpddrSourceEngineeringContext {
+  const context = sourceEngineeringContext(fileName, artifact, profiles)
+  if (context.dimensions.socVendor || !binding) return context
+  return { ...context, dimensions: { ...context.dimensions, socVendor: binding.vendor, bootProfileId: binding.profileId } }
 }
 
 const STATUS_SPECS: ArtifactEvidenceSpec[] = [
@@ -103,7 +153,7 @@ export class LpddrAgentToolService {
   constructor(private readonly deps: {
     artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow' | 'inspectEvidence'>
     projects: Pick<ProjectStore, 'get' | 'list'>
-    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory'>
+    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings'>
   }) {}
 
   async execute(projectId: string, call: LpddrAgentToolCall, allowedSourceIds?: string[]): Promise<LpddrAgentToolResult> {
@@ -117,6 +167,7 @@ export class LpddrAgentToolService {
       case 'engineer_workflow_memory_get': return this.workflowMemory(project)
       case 'engineer_workflow_apply': return this.applyWorkflow(project, allowed, call.args)
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
+      case 'soc_boot_profile_scan': return this.bootProfiles(project, allowed)
       case 'pass_fail_scan': return this.statuses(allowed)
       case 'log_search': return this.search(allowed, call.args)
       case 'log_read_window': return this.window(allowed, call.args)
@@ -170,10 +221,13 @@ export class LpddrAgentToolService {
   }
 
   private async workflowMemory(project: ProjectSnapshot): Promise<LpddrAgentToolResult> {
-    const [workflows, recentSearches, conversation] = await Promise.all([
+    const [workflows, recentSearches, conversation, attempts, commandKnowledge, profileBindings] = await Promise.all([
       this.deps.agentStore.workflowMemories(project.id, 50),
       this.deps.agentStore.searchHistory(project.id, 20),
       this.deps.agentStore.conversationHistory(project.id, 20),
+      this.deps.agentStore.attemptHistory(project.id, 100),
+      this.deps.agentStore.commandKnowledge(project.id, 100),
+      this.deps.agentStore.profileBindings(project.id),
     ])
     const data = {
       confirmed: workflows.map((item) => ({
@@ -187,11 +241,14 @@ export class LpddrAgentToolService {
         activeMatchCount: item.activeMatchCount, matchCount: item.matchCount, occurredAt: item.occurredAt,
       })),
       conversation: conversation.map((item) => ({ ...item, content: promptSafe(item.content, 4_000) })),
+      attempts,
+      commandKnowledge,
+      profileBindings,
     }
     const applied = workflows.reduce((sum, item) => sum + item.appliedCount, 0)
     return {
       name: 'engineer_workflow_memory_get', label: '분석 절차 기억',
-      summary: `확정 절차 ${workflows.length}개 · 재사용 ${applied}회 · 최근 검색 ${recentSearches.length}건 · 이전 대화 ${conversation.length}건`,
+      summary: `확정 절차 ${workflows.length}개 · RT ${attempts.filter((item) => item.relation === 'retest').length}건 · 명령 지식 ${commandKnowledge.length}개 · 최근 검색 ${recentSearches.length}건`,
       data, evidenceSourceIds: [...new Set([
         ...workflows.flatMap((item) => item.sourceIds),
         ...conversation.flatMap((item) => item.evidenceSourceIds ?? []),
@@ -205,7 +262,8 @@ export class LpddrAgentToolService {
     args: Record<string, unknown> | undefined,
   ): Promise<LpddrAgentToolResult> {
     const requestedId = safe(args?.workflowId, 160)
-    const memories = (await this.deps.agentStore.workflowMemories(project.id, 50))
+    const [storedMemories, bindings] = await Promise.all([this.deps.agentStore.workflowMemories(project.id, 50), this.deps.agentStore.profileBindings(project.id)])
+    const memories = storedMemories
       .filter((item) => !requestedId || item.id === requestedId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, requestedId ? 1 : 3)
@@ -215,11 +273,12 @@ export class LpddrAgentToolService {
       data: { rows: [] }, evidenceSourceIds: [],
     }
     const dimensionKeys: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'sku', 'lot', 'sample',
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId',
       'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
     ]
     const selectedBySource = new Map(sources.map((source) => {
-      const detected = extractLpddrFilenameDimensions(source.relativePath)
+      const binding = bindings.find((item) => item.sourceIds.includes(source.sourceId))
+      const detected = sourceContextWithBinding(source.relativePath, undefined, project.equipmentProfiles, binding).dimensions
       const ranked = memories.map((memory) => ({
         memory,
         score: dimensionKeys.filter((key) => detected[key] !== undefined && memory.dimensions?.[key] !== undefined
@@ -266,23 +325,62 @@ export class LpddrAgentToolService {
   }
 
   private async filenames(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
-    const workflows = await this.deps.agentStore.workflowMemories(project.id, 50)
+    const [workflows, artifacts, bindings] = await Promise.all([this.deps.agentStore.workflowMemories(project.id, 50), this.deps.artifacts.list(), this.deps.agentStore.profileBindings(project.id)])
+    const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'sku', 'lot', 'sample',
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId',
       'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
     ]
     const rows = sources.map((source) => {
-      const detected = extractLpddrFilenameDimensions(source.relativePath)
+      const binding = bindings.find((item) => item.sourceIds.includes(source.sourceId))
+      const context = sourceContextWithBinding(source.relativePath, artifactById.get(source.artifactId), project.equipmentProfiles, binding)
+      const detected = context.dimensions
       const workflowHints = workflows.flatMap((memory) => {
         const matched = dimensions.filter((dimension) => detected[dimension] !== undefined
           && memory.dimensions?.[dimension] !== undefined
           && String(detected[dimension]) === String(memory.dimensions?.[dimension]))
         return matched.length ? [{ workflowId: memory.id, purpose: promptSafe(memory.purpose, 160), stages: memory.stages, matchedDimensions: matched }] : []
       }).sort((a, b) => b.matchedDimensions.length - a.matchedDimensions.length).slice(0, 3)
-      return { sourceId: source.sourceId, fileName: promptSafe(basename(source.relativePath), 240), dimensions: detected, workflowHints }
+      return { sourceId: source.sourceId, fileName: promptSafe(basename(source.relativePath), 240), dimensions: detected, sequenceSignature: context.sequenceSignature, commandSignatures: context.commandSignatures, explicitRetest: context.explicitRetest, filenameAttemptNo: context.filenameAttemptNo, workflowHints }
     })
     const detected = rows.filter((row) => Object.values(row.dimensions).some((value) => value !== undefined)).length
     return { name: 'filename_dimensions_scan', label: '파일명 조건 추출', summary: `${rows.length}개 중 ${detected}개에서 조건 후보 추출`, data: { project: project.name, rows }, evidenceSourceIds: rows.map((row) => row.sourceId) }
+  }
+
+  private async bootProfiles(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    const bindings = await this.deps.agentStore.profileBindings(project.id)
+    const contexts = sources.map((source) => {
+      const detected = projectSocContext(source.relativePath, project.equipmentProfiles)
+      const binding = bindings.find((item) => item.sourceIds.includes(source.sourceId))
+      const soc = detected.vendor !== 'unknown' || !binding ? detected : { ...detected, vendor: binding.vendor, bootProfileId: binding.profileId as 'qualcomm-default' | 'mediatek-default', confidence: 1, evidence: 'engineer-confirmed project binding' }
+      return { source, soc }
+    })
+    const specs: ArtifactEvidenceSpec[] = []
+    const specProfiles = new Map<string, { profileId: string; stageId: string; order: number }>()
+    for (const profileId of [...new Set(contexts.flatMap((item) => item.soc.bootProfileId ? [item.soc.bootProfileId] : []))]) {
+      const profile = bootProfile(profileId)
+      profile?.stages.forEach((stage, order) => {
+        const id = `boot-${profile.id}-${stage.id}`
+        specs.push({ id, query: stage.aliases.map(bootAliasPattern).join('|'), mode: 'regex', caseSensitive: false })
+        specProfiles.set(id, { profileId: profile.id, stageId: stage.id, order })
+      })
+    }
+    const inspected = specs.length ? await this.deps.artifacts.inspectEvidence({
+      sources: sources.map((source) => ({ sourceId: source.sourceId, artifactId: source.artifactId, rootId: source.artifactRootId ?? source.rootId, relativePath: source.relativePath })), specs,
+    }) : { sources: [] }
+    const evidenceBySource = new Map(inspected.sources.map((source) => [source.sourceId, source.evidence]))
+    const rows = contexts.map(({ source, soc }) => {
+      const profile = bootProfile(soc.bootProfileId)
+      const found = (evidenceBySource.get(source.sourceId) ?? []).flatMap((item) => {
+        const meta = specProfiles.get(item.specId)
+        return meta && meta.profileId === profile?.id && (item.occurrenceCount ?? 0) > 0
+          ? [{ stage: meta.stageId, order: meta.order, count: item.occurrenceCount ?? 0, firstLine: item.firstOccurrence?.lineNumber }]
+          : []
+      }).sort((a, b) => a.order - b.order)
+      return { sourceId: source.sourceId, vendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId, confidence: soc.confidence, stages: found, lastStage: found.at(-1)?.stage, explicitRetest: soc.explicitRetest }
+    })
+    const identified = rows.filter((row) => row.bootProfileId).length
+    return { name: 'soc_boot_profile_scan', label: 'SoC · 부팅 구간', summary: `${rows.length}개 중 SoC profile ${identified}개 식별`, data: { rows }, evidenceSourceIds: rows.filter((row) => row.stages.length).map((row) => row.sourceId) }
   }
 
   private async statuses(sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
@@ -323,9 +421,11 @@ export class LpddrAgentToolService {
   }
 
   private async trends(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    const [artifacts, bindings] = await Promise.all([this.deps.artifacts.list(), this.deps.agentStore.profileBindings(project.id)])
+    const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
     const filenameRows = sources.map((source) => ({
       sourceId: source.sourceId,
-      dimensions: extractLpddrFilenameDimensions(source.relativePath)
+      ...sourceContextWithBinding(source.relativePath, artifactById.get(source.artifactId), project.equipmentProfiles, bindings.find((item) => item.sourceIds.includes(source.sourceId))),
     }))
     const statusResult = await this.statuses(sources)
     const statusRows = (statusResult.data as { rows?: Array<{ sourceId: string; status: string }> }).rows ?? []
@@ -334,7 +434,7 @@ export class LpddrAgentToolService {
     const definitiveStatuses = new Set(['PASS', ...failureStatuses])
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
       'temperatureC', 'vdd', 'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern',
-      'frequencyMHz', 'skewPs', 'testMode', 'material', 'sku', 'lot', 'sample'
+      'frequencyMHz', 'skewPs', 'testMode', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId'
     ]
     const buckets = new Map<string, { dimension: string; value: string; total: number; failures: number; sourceIds: string[] }>()
     filenameRows.forEach((row) => {
@@ -346,6 +446,14 @@ export class LpddrAgentToolService {
         const value = String(raw)
         const key = `${dimension}:${value}`
         const bucket = buckets.get(key) ?? { dimension, value, total: 0, failures: 0, sourceIds: [] }
+        bucket.total += 1
+        if (failureStatuses.has(status)) bucket.failures += 1
+        bucket.sourceIds.push(row.sourceId)
+        buckets.set(key, bucket)
+      })
+      row.commandSignatures.forEach((command) => {
+        const key = `command:${command}`
+        const bucket = buckets.get(key) ?? { dimension: 'command', value: command, total: 0, failures: 0, sourceIds: [] }
         bucket.total += 1
         if (failureStatuses.has(status)) bucket.failures += 1
         bucket.sourceIds.push(row.sourceId)

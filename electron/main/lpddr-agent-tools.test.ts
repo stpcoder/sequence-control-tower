@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EngineerWorkflowMemoryView } from '../shared/contracts'
-import { extractLpddrFilenameDimensions, LpddrAgentToolService } from './lpddr-agent-tools'
+import { extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
@@ -16,6 +16,31 @@ describe('LPDDR agent tools', () => {
       vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR', dq: '9', bl: '16', channel: '0'
     })
     expect(extractLpddrFilenameDimensions(project.artifacts[1].relativePath).temperatureC).toBe(-20)
+    expect(extractLpddrFilenameDimensions('LPDDR6_SM-8975_SKU-X6_DIE03_SMP-01.log')).toMatchObject({
+      socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', die: '03', sample: '01',
+    })
+    expect(sourceEngineeringContext('MTK-24D_SMP-01_RT2.log', { fingerprint: { structuralHash: 'same', commandSignatures: ['voltage-control:set_rail'] } } as never)).toMatchObject({
+      sequenceSignature: 'seq:same', explicitRetest: true, filenameAttemptNo: 2, commandSignatures: ['voltage-control:set_rail'],
+    })
+    expect(extractLpddrFilenameDimensions('CUSTOM_BOARD_A_SMP-01.log', [{ alias: 'Board A', profileId: 'mediatek-default', vendor: 'mediatek', socModels: ['MTK-5D'], filenameAliases: ['CUSTOM_BOARD_A'], updatedAt: '' }])).toMatchObject({ socVendor: 'mediatek', socModel: 'MTK-5D', bootProfileId: 'mediatek-default' })
+  })
+
+  it('applies the MediaTek boot profile instead of UEFI stages', async () => {
+    const mtkProject = { ...project, artifacts: [{ ...project.artifacts[0], relativePath: 'LPDDR6_MTK-24D_SKU-X6_DIE03_SMP-01.log' }] }
+    const inspectEvidence = vi.fn(async (input: { specs: Array<{ id: string }> }) => ({ sources: [{
+      sourceId: 's1', artifactId: project.artifacts[0].artifactId, fileName: 'mtk.log',
+      evidence: input.specs.map((spec) => ({ specId: spec.id, occurrenceCount: /post-pbl|\-lk$|\-os$/.test(spec.id) ? 1 : 0, firstOccurrence: { lineNumber: spec.id.includes('post-pbl') ? 5 : spec.id.endsWith('-lk') ? 10 : 20 } })),
+    }] }))
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence, list: vi.fn(async () => []), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => mtkProject), list: vi.fn(async () => [mtkProject]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'soc_boot_profile_scan' })
+    const rows = (result.data as { rows: Array<{ bootProfileId: string; stages: Array<{ stage: string }> }> }).rows
+    expect(rows[0].bootProfileId).toBe('mediatek-default')
+    expect(rows[0].stages.map((item) => item.stage)).toEqual(expect.arrayContaining(['post-pbl', 'lk', 'os']))
+    expect(rows[0].stages.map((item) => item.stage)).not.toContain('uefi')
   })
 
   it('classifies marker precedence locally and returns the denominator', async () => {
@@ -36,7 +61,7 @@ describe('LPDDR agent tools', () => {
     const tools = new LpddrAgentToolService({
       artifacts: { inspectEvidence, list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
       projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
-      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []) }
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'pass_fail_scan' })
     expect(result.summary).toContain('FAST_FAIL 1')
@@ -66,15 +91,16 @@ describe('LPDDR agent tools', () => {
     const tools = new LpddrAgentToolService({
       artifacts: {
         inspectEvidence: vi.fn(async () => ({ sources: [evidence('s1', 'fail'), evidence('s2', 'pass'), evidence('s3', 'pass')] })),
-        list: vi.fn(), search: vi.fn(), lineWindow: vi.fn()
+        list: vi.fn(async () => trendProject.artifacts.map((source) => ({ id: source.artifactId, fingerprint: { structuralHash: source.sourceId, commandSignatures: source.sourceId === 's2' ? ['training:train'] : ['diagnostic:hdiag'] } }))), search: vi.fn(), lineWindow: vi.fn()
       } as never,
       projects: { get: vi.fn(async () => trendProject), list: vi.fn(async () => [trendProject]) } as never,
-      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []) }
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'failure_trends_get' })
     const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
     expect(data.denominator).toBe(3)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'temperatureC', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
     expect(result.summary).toContain('1/2 fail (50.0%)')
   })
 
@@ -106,6 +132,7 @@ describe('LPDDR agent tools', () => {
       agentStore: {
         searchHistory: vi.fn(async () => []), conversationHistory: vi.fn(async () => []),
         workflowMemories: vi.fn(async () => [workflow]),
+        attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []),
       },
     })
     const result = await tools.execute('p', { name: 'engineer_workflow_apply' }, ['s1'])

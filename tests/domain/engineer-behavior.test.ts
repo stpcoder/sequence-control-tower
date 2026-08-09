@@ -22,9 +22,11 @@ describe('engineer behavior workflow', () => {
   })
 
   it('recognizes Qualcomm-style evaluation stages and scores similar procedures', () => {
-    expect(classifyEngineerSearchStage('ExitBootServices')).toBe('uefi')
+    expect(classifyEngineerSearchStage('ExitBootServices')).toBe('exit-boot')
     expect(classifyEngineerSearchStage('WATCHDOG_RESET')).toBe('reboot')
-    expect(classifyEngineerSearchStage('RT-2')).toBe('retest')
+    expect(classifyEngineerSearchStage('Post-PBL ready')).toBe('post-pbl')
+    expect(classifyEngineerSearchStage('LK2 enter')).toBe('lk2')
+    expect(classifyEngineerSearchStage('RT-2')).toBe('unknown')
     const first = buildEngineerWorkflowCandidate([
       { query: 'stressapp start', mode: 'literal', caseSensitive: false, matchCount: 1, occurredAt: '1' },
       { query: '@PASS', mode: 'literal', caseSensitive: false, matchCount: 1, occurredAt: '2' },

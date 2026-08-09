@@ -9,7 +9,11 @@ export interface EvaluationDimensions {
   sku?: string;
   lot?: string;
   material?: string;
+  die?: string;
   sample?: string;
+  socVendor?: "qualcomm" | "mediatek" | "unknown";
+  socModel?: string;
+  bootProfileId?: string;
   bl?: string | number;
   dq?: string | number;
   channel?: string | number;
@@ -55,6 +59,10 @@ export interface EvaluationNode {
   name: string;
   dimensions: EvaluationDimensions;
   status?: EvaluationStatus;
+  sequenceSignature?: string;
+  attemptNo?: number;
+  /** The previous failed evaluation node repeated with the same sample and sequence. */
+  retestOf?: string;
 }
 
 export interface EvidenceRecord {
@@ -80,7 +88,7 @@ export interface EvaluationMemory {
 }
 
 export const DOMINANCE_DIMENSIONS = [
-  "dq", "bl", "pattern", "channel", "bank", "frequencyMHz", "temperatureC", "vdd", "skewPs",
+  "sku", "lot", "material", "die", "sample", "socModel", "dq", "bl", "pattern", "channel", "bank", "bankGroup", "frequencyMHz", "temperatureC", "vdd", "skewPs", "testMode",
 ] as const;
 export type DominanceDimension = (typeof DOMINANCE_DIMENSIONS)[number];
 
@@ -172,9 +180,9 @@ export function inferEvaluationTrends(memory: EvaluationMemory): DominanceFindin
 export interface EvaluationExportRow {
   projectId: string; projectName: string; product: string; projectSku: string; customer: string; targetDevice: string; densityGb: string; nominalVoltage: string; program: string; phase: string;
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
-  nodeId: string; parentNodeId: string; branchId: string; nodeName: string; nodeStatus: string;
+  nodeId: string; parentNodeId: string; branchId: string; nodeName: string; nodeStatus: string; sequenceSignature: string; attemptNo: string; retestOf: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
-  sku: string; lot: string; material: string; sample: string; bl: string; dq: string; channel: string; bank: string; bankGroup: string;
+  sku: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; bl: string; dq: string; channel: string; bank: string; bankGroup: string;
   pattern: string; frequencyMHz: string; temperatureC: string; vdd: string; skewPs: string; testMode: string;
 }
 
@@ -191,9 +199,9 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
     return {
       projectId: memory.project.id, projectName: memory.project.name, product: text(memory.project.product), projectSku: text(memory.project.sku), customer: text(memory.project.customer), targetDevice: text(memory.project.targetDevice), densityGb: text(memory.project.densityGb), nominalVoltage: text(memory.project.nominalVoltage), program: text(memory.project.program), phase: text(memory.project.phase),
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
-      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), nodeName: node.name, nodeStatus: text(node.status),
+      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), nodeName: node.name, nodeStatus: text(node.status), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
-      sku: text(d.sku), lot: text(d.lot), material: text(d.material), sample: text(d.sample), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), bank: text(d.bank), bankGroup: text(d.bankGroup), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), skewPs: text(d.skewPs), testMode: text(d.testMode),
+      sku: text(d.sku), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), bank: text(d.bank), bankGroup: text(d.bankGroup), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), skewPs: text(d.skewPs), testMode: text(d.testMode),
     };
   });
 }
