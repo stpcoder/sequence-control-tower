@@ -45,6 +45,12 @@ export function applyValidatedFolders(project: ProjectSnapshot, folders: Project
   return { ...project, folders }
 }
 
+export function projectListSecondary(project: ProjectSnapshot): string {
+  const target = project.onboardingAnswers?.evaluationTarget?.trim() || project.description?.trim()
+  const scope = `로그 ${project.artifacts.length} · 폴더 ${project.folders.length}`
+  return target ? `${target} · ${scope}` : `${scope} · ${new Date(project.updatedAt).toLocaleDateString('ko-KR')}`
+}
+
 interface ProjectControlProps {
   project: ProjectSnapshot | null
   onLoaded: (result: ProjectLoadResult) => void
@@ -71,7 +77,6 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
   const [metaCustom, setMetaCustom] = useState('')
   const [equipmentAlias, setEquipmentAlias] = useState('')
   const [templateRevision, setTemplateRevision] = useState('')
-  const [presetName, setPresetName] = useState('')
 
   useEffect(() => {
     setMetaName(project?.name ?? '')
@@ -81,7 +86,6 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     setMetaAnswerItems(parsed.items); setMetaCustom(parsed.custom)
     setEquipmentAlias(project?.equipmentProfiles[0]?.alias ?? '')
     setTemplateRevision(project?.templatePins[0]?.revision.toString() ?? '')
-    setPresetName(project?.exportPresets.find((preset) => !preset.archived)?.name ?? '')
   }, [project])
 
   const refresh = async () => {
@@ -111,6 +115,8 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
         if (source) {
           try { created = await api.projects.save({ projectId: created.id, expectedRevision: created.revision, ...buildProjectClonePlan(source) }) }
           catch (error) { onError(`프로젝트는 만들어졌지만 설정 재사용에 실패했습니다: ${error instanceof Error ? error.message : '저장 오류'}`) }
+          try { await api.nativeAgent.reuseConfirmedKnowledge({ sourceProjectId: source.id, targetProjectId: created.id }) }
+          catch (error) { onError(`프로젝트는 만들어졌지만 확정된 분석 절차를 가져오지 못했습니다: ${error instanceof Error ? error.message : '저장 오류'}`) }
         }
       }
       const result = await api.projects.load({ projectId: created.id })
@@ -181,7 +187,6 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
         if (!latest) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
         next = await persist(latest)
       }
-      if (presetName) next = await api.projects.saveExportPreset({ projectId: next.id, expectedRevision: next.revision, preset: { id: next.exportPresets[0]?.id, name: presetName, format: next.exportPresets[0]?.format ?? 'csv', options: next.exportPresets[0]?.options ?? {} } })
       onProjectUpdated(next)
     } catch (error) { onError(error instanceof Error ? error.message : '프로젝트 설정을 저장하지 못했습니다.') }
     finally { setBusy(false) }
@@ -196,15 +201,15 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     </div>
     {open ? <div className="project-popover" role="dialog" aria-label="프로젝트 관리">
       <div className="project-popover-head"><strong>프로젝트</strong><button className="modal-close" onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></button></div>
-      <div className="project-list">{projects.map((item) => <button className={`project-list-item ${item.id === project?.id ? 'active' : ''}`} key={item.id} onClick={() => void load(item.id)} disabled={busy}><span>{item.name}</span></button>)}{!projects.length ? <p className="project-empty">아직 프로젝트가 없습니다.</p> : null}</div>
+      <div className="project-list">{projects.map((item) => <button className={`project-list-item ${item.id === project?.id ? 'active' : ''}`} key={item.id} onClick={() => void load(item.id)} disabled={busy} title={`${item.name}\n${projectListSecondary(item)}`}><strong>{item.name}</strong><small>{projectListSecondary(item)}</small></button>)}{!projects.length ? <p className="project-empty">아직 프로젝트가 없습니다.</p> : null}</div>
       {showNew ? <div className="project-form">
         <div className="project-step-head"><span>새 프로젝트 · {step}/3</span><button onClick={() => { setShowNew(false); setStep(1); setDraft(blankDraft()) }}>취소</button></div>
         {step === 1 ? <><input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="프로젝트 이름" aria-label="프로젝트 이름" /><textarea value={draft.purpose} onChange={(event) => setDraft({ ...draft, purpose: event.target.value })} placeholder="짧은 목적 (선택)" aria-label="프로젝트 목적" rows={2} /></> : null}
         {step === 2 ? <><div className="project-question">무엇을 추출·결정할까요?</div><div className="project-chips">{PROJECT_INIT_ITEMS.map((item) => <button type="button" className={draft.items.includes(item) ? 'selected' : ''} key={item} onClick={() => toggleItem(item, draft.items, (items) => setDraft({ ...draft, items }))}>{item}</button>)}</div><input value={draft.custom} onChange={(event) => setDraft({ ...draft, custom: event.target.value })} placeholder="직접 입력 (선택)" aria-label="추출 또는 결정할 항목 직접 입력" /></> : null}
-        {step === 3 ? <><div className="project-question">설정 시작점</div><div className="project-choice-row"><button className={!draft.reuseProjectId ? 'selected' : ''} onClick={() => setDraft({ ...draft, reuseProjectId: '' })}>빈 프로젝트</button><select value={draft.reuseProjectId} onChange={(event) => setDraft({ ...draft, reuseProjectId: event.target.value })} aria-label="재사용할 기존 프로젝트"><option value="">기존 설정 재사용…</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></> : null}
+        {step === 3 ? <><div className="project-question">설정 시작점</div><div className="project-choice-row"><button className={!draft.reuseProjectId ? 'selected' : ''} onClick={() => setDraft({ ...draft, reuseProjectId: '' })}>빈 프로젝트</button><select value={draft.reuseProjectId} onChange={(event) => setDraft({ ...draft, reuseProjectId: event.target.value })} aria-label="재사용할 기존 프로젝트"><option value="">기존 설정 재사용…</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name} — {projectListSecondary(item)}</option>)}</select></div></> : null}
         <div className="project-step-actions">{step > 1 ? <button onClick={() => setStep((step - 1) as ProjectInitStep)}>이전</button> : <span />}{step < 3 ? <button className="project-primary-action" onClick={() => canAdvance && setStep((step + 1) as ProjectInitStep)} disabled={!canAdvance}>다음</button> : <button className="project-primary-action" onClick={() => void create()} disabled={busy || !canAdvance}>{busy ? <LoaderCircle className="wb-spin" size={14} /> : <Plus size={14} />}프로젝트 만들기</button>}</div>
       </div> : <div className="project-create-actions"><button className="project-add-action" onClick={() => { setShowNew(true); setStep(1) }}><Plus size={15} />새 프로젝트</button>{project ? <button className="project-folder-action" onClick={() => void attach()} disabled={busy}><FolderPlus size={14} />폴더 추가</button> : null}<button className="project-sample-action" onClick={() => void createSample()} disabled={busy} aria-label="LPDDR6 샘플 열기" title="LPDDR6 샘플 열기">{busy ? <LoaderCircle className="wb-spin" size={14} /> : <Beaker size={14} />}</button></div>}
-      {project ? <div className="project-settings-block">
+      {project && !showNew ? <div className="project-settings-block">
         <details className="project-folders"><summary>폴더 <span>{project.folders.length}</span></summary><div className="project-folder-content">
           {project.folders.length ? project.folders.map((folder) => <div className="folder-status-line" key={folder.rootId}><span>{folder.displayLabel}<small>{folder.status === 'available' ? '연결됨' : folder.status === 'permission-denied' ? '권한 없음' : '없음'}</small></span><button onClick={() => void detach(folder.rootId)} disabled={busy} aria-label={`${folder.displayLabel} 해제`}><Unplug size={13} /></button></div>) : <p className="project-empty">연결된 폴더가 없습니다.</p>}
           <button className="project-validate-action" onClick={() => void validate()} disabled={busy}><RefreshCw size={13} />상태 확인</button>
@@ -213,7 +218,7 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
         <details><summary>설정</summary><div className="project-advanced-content">
           <input className="project-meta-input" value={metaName} onChange={(event) => setMetaName(event.target.value)} aria-label="현재 프로젝트 이름" /><textarea className="project-meta-input" value={metaDescription} onChange={(event) => setMetaDescription(event.target.value)} placeholder="짧은 목적" aria-label="현재 프로젝트 설명" rows={2} />
           <div className="project-section-label">분석 항목</div><div className="project-chips">{PROJECT_INIT_ITEMS.map((item) => <button type="button" className={metaAnswerItems.includes(item) ? 'selected' : ''} key={item} onClick={() => toggleItem(item, metaAnswerItems, setMetaAnswerItems)}>{item}</button>)}</div><input className="project-meta-input" value={metaCustom} onChange={(event) => setMetaCustom(event.target.value)} placeholder="직접 입력" aria-label="현재 프로젝트 항목 직접 입력" />
-          <div className="project-section-label">장비와 내보내기</div><input className="project-meta-input" value={equipmentAlias} onChange={(event) => setEquipmentAlias(event.target.value)} placeholder="장비 별칭" aria-label="장비 별칭" /><input className="project-meta-input" value={templateRevision} onChange={(event) => setTemplateRevision(event.target.value)} placeholder="템플릿 버전" aria-label="템플릿 버전" inputMode="numeric" /><input className="project-meta-input" value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="내보내기 설정 이름" aria-label="내보내기 설정 이름" /><button className="project-primary-action" onClick={() => void saveMeta()} disabled={busy}>저장</button>
+          <div className="project-section-label">장비</div><input className="project-meta-input" value={equipmentAlias} onChange={(event) => setEquipmentAlias(event.target.value)} placeholder="장비 별칭" aria-label="장비 별칭" /><input className="project-meta-input" value={templateRevision} onChange={(event) => setTemplateRevision(event.target.value)} placeholder="템플릿 버전" aria-label="템플릿 버전" inputMode="numeric" /><button className="project-primary-action" onClick={() => void saveMeta()} disabled={busy}>저장</button>
         </div></details>
       </div> : null}
     </div> : null}

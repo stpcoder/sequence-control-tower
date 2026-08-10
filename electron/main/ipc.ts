@@ -38,6 +38,7 @@ import type {
   NativeAgentListRequest,
   NativeAgentListWorkflowsInput,
   NativeAgentRetryRequest,
+  NativeAgentReuseKnowledgeInput,
   NativeAgentSearchEventInput,
   NativeAgentSendRequest,
   StartAnalysisInput,
@@ -539,6 +540,10 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentListWorkflows, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
     return services.nativeAgent.listWorkflows((input as NativeAgentListWorkflowsInput).projectId)
+  })
+  handle(IPC_CHANNELS.nativeAgentReuseKnowledge, (_event, input) => {
+    if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
+    return services.nativeAgent.reuseConfirmedKnowledge(input as NativeAgentReuseKnowledgeInput)
   })
 
   handle(IPC_CHANNELS.settingsGetLlm, () => services.llmConfig.summary())

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   EngineerWorkflowMemoryView, NativeAgentBackendStatusView, NativeAgentCompleteEvaluationInput,
   NativeAgentCompleteEvaluationResult, NativeAgentConfirmWorkflowInput, NativeAgentDismissWorkflowInput,
+  NativeAgentReuseKnowledgeInput, NativeAgentReuseKnowledgeResult,
   NativeAgentSearchEventInput, NativeAgentSessionSummary, NativeAgentSessionView
 } from '../shared/contracts'
 import type { OpenAiCompatibleClient } from './llm-service'
@@ -267,7 +268,7 @@ export class NativeAgentService {
   async confirmWorkflow(input: NativeAgentConfirmWorkflowInput): Promise<EngineerWorkflowMemoryView> {
     const project = await this.deps.projects.get(safe(input.projectId, 160))
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
-    return this.deps.store.confirmWorkflow(project.id, input.reviewId, input.purpose)
+    return this.deps.store.confirmWorkflow(project.id, input.reviewId, input.purpose, input.checks)
   }
 
   async dismissWorkflow(input: NativeAgentDismissWorkflowInput): Promise<void> {
@@ -280,6 +281,15 @@ export class NativeAgentService {
     const project = await this.deps.projects.get(safe(projectId, 160))
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
     return this.deps.store.workflowMemories(project.id)
+  }
+
+  async reuseConfirmedKnowledge(input: NativeAgentReuseKnowledgeInput): Promise<NativeAgentReuseKnowledgeResult> {
+    const [source, target] = await Promise.all([
+      this.deps.projects.get(safe(input.sourceProjectId, 160)),
+      this.deps.projects.get(safe(input.targetProjectId, 160)),
+    ])
+    if (!source || !target) throw new Error('재사용할 프로젝트를 찾을 수 없습니다.')
+    return this.deps.store.reuseConfirmedKnowledge(source.id, target.id)
   }
 
   close(): void { this.controllers.forEach((controller) => controller.abort()); this.deps.opencode.close() }

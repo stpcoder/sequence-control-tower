@@ -105,6 +105,15 @@ OpenCode가 설치되고 LLM이 연결되면 앱이 OpenCode headless sidecar를
 - 검색 행동, 확정 분석 절차, RT 시도 관계
 - console prompt 규칙, 명령 목적 지식, SoC profile binding
 
+새 프로젝트의 `설정 시작점`에서 기존 프로젝트를 선택하면 다음 확정 지식만 가져옵니다.
+
+- 엔지니어가 저장한 검색 절차와 순서
+- 엔지니어가 확정한 명령 목적
+- 엔지니어가 확정한 console prompt 입력·출력 규칙
+- 결과 Export 열과 결과 정리 축 같은 프로젝트 설정
+
+원시 대화, 개별 Ctrl-F 기록, 평가 시도, 원본 로그 연결, source별 SoC binding은 복사하지 않습니다. 새 프로젝트의 실제 로그 근거와 섞이지 않게 하기 위한 범위 분리입니다.
+
 저장 또는 전송하지 않음:
 
 - API key와 token

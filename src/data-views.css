@@ -258,6 +258,17 @@
   gap: 2px;
 }
 
+.export-columns-save {
+  min-height: 34px;
+  margin-top: 5px;
+  border-top: 1px solid var(--data-line-soft) !important;
+  border-radius: 0 !important;
+  color: #75a7ff !important;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+}
+
 .data-filter-bar {
   display: flex;
   min-height: 64px;

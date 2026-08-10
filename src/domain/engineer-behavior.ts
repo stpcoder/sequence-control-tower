@@ -40,6 +40,20 @@ const STAGES: Array<{ stage: EngineerEvaluationStage; pattern: RegExp }> = [
 
 const normalized = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 500)
 
+export function engineerWorkflowSignature(
+  checks: readonly EngineerWorkflowCheckView[],
+  result: EngineerWorkflowResult,
+): string {
+  return checks.map((check, index) => [
+    index + 1,
+    check.mode,
+    check.caseSensitive ? 1 : 0,
+    normalized(check.query),
+    check.expected,
+    check.stage,
+  ].join(':')).join('|') + `|result:${result}`
+}
+
 export function classifyEngineerSearchStage(query: string): EngineerEvaluationStage {
   return STAGES.find((item) => item.pattern.test(query))?.stage ?? 'unknown'
 }
@@ -104,9 +118,7 @@ export function buildEngineerWorkflowCandidate(
   // One search is ordinary navigation, not enough evidence of a workflow.
   if (checks.length < 2) return null
   const stages = [...new Set(checks.map((check) => check.stage))]
-  const signature = checks.map((check) => [
-    check.order, check.mode, check.caseSensitive ? 1 : 0, normalized(check.query), check.expected, check.stage,
-  ].join(':')).join('|') + `|result:${result}`
+  const signature = engineerWorkflowSignature(checks, result)
   return { checks, stages, suggestions: purposeSuggestions(stages, result, dimensions), signature }
 }
 

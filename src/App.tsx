@@ -809,7 +809,7 @@ export default function App() {
       projectSources={project?.artifacts ?? []}
     />
   ) : activePage === 'results' ? (
-    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} />
+    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} />
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : activePage === 'history' ? (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
+import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
   filterLogRecords,
   buildLogRecordExportPreview,
@@ -30,6 +31,11 @@ import {
   type ResultStageGroup,
   type EvaluationStageStatus,
 } from '../state/logRecords'
+import {
+  RESULT_EXPORT_PRESET_ID,
+  resultExportLayoutFromPreset,
+  resultExportLayoutPreset,
+} from '../state/resultExportLayout'
 
 interface ResultsViewProps {
   records: readonly LogResultRecord[]
@@ -38,6 +44,8 @@ interface ResultsViewProps {
   onEditMetadata?: (record: LogResultRecord, field: PatternAxis, value: string) => void | Promise<void>
   onResetMetadata?: (record: LogResultRecord, field: PatternAxis) => void | Promise<void>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
+  project: ProjectSnapshot | null
+  onProjectUpdated: (project: ProjectSnapshot) => void
 }
 
 const PAGE_SIZE = 200
@@ -79,7 +87,7 @@ function candidateLabel(field: CandidateValue, suffix = '', onOpen?: () => void)
   return <button className={`candidate-value candidate-action ${field.state}`} title="값 검토" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
 }
 
-export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMetadata, onResetMetadata, onNotify }: ResultsViewProps) {
+export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMetadata, onResetMetadata, onNotify, project, onProjectUpdated }: ResultsViewProps) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<ResultLabel | 'all'>('all')
   const [review, setReview] = useState<ReviewState | 'all'>('all')
@@ -97,6 +105,12 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: PatternAxis } | null>(null)
   const [editingValue, setEditingValue] = useState('')
   const [savingMetadata, setSavingMetadata] = useState(false)
+  const [savingExportLayout, setSavingExportLayout] = useState(false)
+
+  useEffect(() => {
+    const layout = resultExportLayoutFromPreset(project?.exportPresets.find((item) => item.id === RESULT_EXPORT_PRESET_ID && !item.archived))
+    setSelectedExportColumnKeys(new Set(layout.columns))
+  }, [project?.id])
 
   const filtered = useMemo(() => sortLogRecords(filterLogRecords(records, { query, result, review, folder: 'all' }).filter((row) => {
     const checkpoints = resultStageCheckpoints(row.stageResults, row.fileName, row.result)
@@ -222,6 +236,35 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     })
   }
 
+  const saveExportLayout = async () => {
+    if (!project || !window.sequenceIntelligence?.projects || savingExportLayout || !exportColumns.length) return
+    setSavingExportLayout(true)
+    try {
+      const api = window.sequenceIntelligence.projects
+      const persist = (target: ProjectSnapshot) => api.saveExportPreset({
+        projectId: target.id,
+        expectedRevision: target.revision,
+        preset: resultExportLayoutPreset(
+          { columns: exportColumns },
+          target.exportPresets.find((item) => item.id === RESULT_EXPORT_PRESET_ID),
+        ),
+      })
+      let next: ProjectSnapshot
+      try { next = await persist(project) }
+      catch (error) {
+        const conflict = error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
+        if (!conflict) throw error
+        const refreshed = await api.get({ projectId: project.id })
+        if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        next = await persist(refreshed)
+      }
+      onProjectUpdated(next)
+      onNotify?.('내보내기 열을 프로젝트에 저장했습니다.', 'success')
+    } catch (error) {
+      onNotify?.(error instanceof Error ? `내보내기 열을 저장하지 못했습니다: ${error.message}` : '내보내기 열을 저장하지 못했습니다.', 'error')
+    } finally { setSavingExportLayout(false) }
+  }
+
   return (
     <div className="data-view results-view">
       <header className="data-view-header">
@@ -250,6 +293,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
                   <span>{column.label}</span>
                 </label>
               ))}
+              <button className="export-columns-save" type="button" onClick={() => void saveExportLayout()} disabled={!project || savingExportLayout || !exportColumns.length}>{savingExportLayout ? '저장 중…' : '프로젝트 기본값 저장'}</button>
             </div>
           </details>
           <button onClick={() => beginExport('tsv')} disabled={!exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>

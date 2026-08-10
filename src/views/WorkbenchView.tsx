@@ -37,6 +37,7 @@ import type {
   ArtifactEvidenceSourceResult,
   ArtifactSearchInput,
   ArtifactSearchResult,
+  EngineerWorkflowCheckView,
   EngineerWorkflowReviewView,
   ProjectSnapshot,
   RendererCommand,
@@ -963,6 +964,35 @@ function optionLabel(option: keyof SearchOptions): string {
   return '정규식 사용'
 }
 
+export function engineerWorkflowCheckKey(check: EngineerWorkflowCheckView): string {
+  return [check.mode, check.caseSensitive ? '1' : '0', check.query.trim().toLowerCase(), check.expected, check.stage].join('\u001f')
+}
+
+export function toggleEngineerWorkflowCheck(
+  selected: readonly EngineerWorkflowCheckView[],
+  check: EngineerWorkflowCheckView,
+): EngineerWorkflowCheckView[] {
+  const key = engineerWorkflowCheckKey(check)
+  const exists = selected.some((item) => engineerWorkflowCheckKey(item) === key)
+  const next = exists ? selected.filter((item) => engineerWorkflowCheckKey(item) !== key) : [...selected, check]
+  return next.map((item, index) => ({ ...item, order: index + 1 }))
+}
+
+export function moveEngineerWorkflowCheck(
+  selected: readonly EngineerWorkflowCheckView[],
+  key: string,
+  direction: -1 | 1,
+): EngineerWorkflowCheckView[] {
+  const from = selected.findIndex((item) => engineerWorkflowCheckKey(item) === key)
+  const to = from + direction
+  if (from < 0 || to < 0 || to >= selected.length) return [...selected]
+  const next = [...selected]
+  const moved = next[from]
+  next[from] = next[to]
+  next[to] = moved
+  return next.map((item, index) => ({ ...item, order: index + 1 }))
+}
+
 export function WorkbenchView({
   files: controlledFiles,
   durableRules,
@@ -1033,6 +1063,7 @@ export function WorkbenchView({
   const [patternReview, setPatternReview] = useState<PatternReviewState>({ status: 'idle' })
   const [workflowReviews, setWorkflowReviews] = useState<Record<string, EngineerWorkflowReviewView>>({})
   const [workflowPurposes, setWorkflowPurposes] = useState<Record<string, string>>({})
+  const [workflowCheckDrafts, setWorkflowCheckDrafts] = useState<Record<string, EngineerWorkflowCheckView[]>>({})
   const [workflowSaving, setWorkflowSaving] = useState(false)
   const [paneWidths, setPaneWidths] = useState<WorkbenchPaneWidths>(() => readWorkbenchPaneWidths(
     typeof window === 'undefined' ? undefined : workbenchStorage(),
@@ -1191,6 +1222,8 @@ export function WorkbenchView({
   const activeProjectSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
   const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
   const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
+  const workflowChecks = workflowReview ? workflowCheckDrafts[workflowReview.id] ?? workflowReview.checks : []
+  const workflowStages = [...new Set(workflowChecks.map((check) => check.stage))]
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeSourceLines = useMemo(() => {
     if (!activeFile) return []
@@ -1308,11 +1341,7 @@ export function WorkbenchView({
     const observations = searchHistory[activeFile.id] ?? []
     const latest = new Map<string, SearchObservation>()
     observations.forEach((item) => latest.set(`${item.matcherKind}:${item.caseSensitive}:${item.query}`, item))
-    const unique = [...latest.values()]
-    return [
-      ...unique.filter((item) => item.matched),
-      ...unique.filter((item) => !item.matched),
-    ]
+    return [...latest.values()]
   }, [activeFile, searchHistory])
 
   const selectedRecipeObservations = useMemo(() => {
@@ -2076,6 +2105,7 @@ export function WorkbenchView({
       }
     }
     setSearching(true)
+    const observedAt = new Date().toISOString()
     const timer = window.setTimeout(() => {
       const compiled = backendQuery(query, options)
       void searchArtifactsBatched(api, artifactIds, {
@@ -2118,6 +2148,7 @@ export function WorkbenchView({
             caseSensitive: options.caseSensitive,
             scope: searchScope === 'file' ? 'current' : searchScope === 'open' ? 'open' : 'project',
             matchCount: total,
+            observedAt,
             ...(activeSource ? { activeSourceId: activeSource.sourceId, activeMatchCount: successfulCounts[activeFile!.id] ?? 0 } : {}),
             matchedSourceIds: [...new Set(matchedSourceIds)],
           }).catch(() => undefined)
@@ -2323,6 +2354,7 @@ export function WorkbenchView({
           else if (completed.attempt?.relation === 'unresolved-retest') onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
           if (completed.kind === 'review') {
             setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
+            setWorkflowCheckDrafts((current) => ({ ...current, [completed.review.id]: completed.review.checks }))
             setWorkflowPurposes((current) => ({
               ...current,
               [completed.review.id]: current[completed.review.id] ?? completed.review.suggestions.find((item) => item !== '직접 입력') ?? '',
@@ -2350,12 +2382,15 @@ export function WorkbenchView({
     setWorkflowSaving(true)
     try {
       const memory = await api.nativeAgent.confirmWorkflow({
-        projectId, reviewId: workflowReview.id, purpose: workflowPurpose.trim(),
+        projectId, reviewId: workflowReview.id, purpose: workflowPurpose.trim(), checks: workflowChecks,
       })
       setWorkflowReviews((current) => {
         const next = { ...current }; delete next[workflowReview.sourceId]; return next
       })
       setWorkflowPurposes((current) => {
+        const next = { ...current }; delete next[workflowReview.id]; return next
+      })
+      setWorkflowCheckDrafts((current) => {
         const next = { ...current }; delete next[workflowReview.id]; return next
       })
       onNotify?.(`분석 절차 저장 · ${memory.purpose}`, 'success')
@@ -2375,6 +2410,9 @@ export function WorkbenchView({
     })
     setWorkflowPurposes((current) => {
       const next = { ...current }; delete next[workflowReview.id]; return next
+    })
+    setWorkflowCheckDrafts((current) => {
+      const next = { ...current }; delete next[reviewId]; return next
     })
     if (api?.nativeAgent) void api.nativeAgent.dismissWorkflow({ projectId, reviewId }).catch(() => undefined)
   }
@@ -2875,7 +2913,19 @@ export function WorkbenchView({
 
               {workflowReview ? (
                 <section className="workflow-confirmation" aria-label="이번 분석 목적 확인">
-                  <div><strong>이번 분석</strong><span>{workflowReview.stages.map(engineerStageLabel).join(' → ')}</span></div>
+                  <div><strong>이번 분석</strong><span>{workflowStages.map(engineerStageLabel).join(' → ') || '검색 선택 필요'}</span></div>
+                  <div className="workflow-checks" aria-label="기억할 검색 순서">
+                    <span>기억할 검색 · 위에서 아래 순서</span>
+                    {workflowReview.checks.map((check) => {
+                      const key = engineerWorkflowCheckKey(check)
+                      const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
+                      const selected = selectedIndex >= 0
+                      return <div className={selected ? 'selected' : ''} key={key}>
+                        <button type="button" aria-pressed={selected} onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))}><i aria-hidden="true">{selected ? <Check size={11} /> : null}</i><code>{check.query}</code><small>{check.matchCount > 0 ? `${check.matchCount}회` : '없음'}</small></button>
+                        {selected ? <span><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}>↑</button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}>↓</button></span> : null}
+                      </div>
+                    })}
+                  </div>
                   <p>어떤 목적이었나요?</p>
                   <div className="workflow-purpose-options">
                     {workflowReview.suggestions.filter((item) => item !== '직접 입력').map((item) => (
@@ -2883,7 +2933,7 @@ export function WorkbenchView({
                     ))}
                   </div>
                   <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
-                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim()}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
+                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
                 </section>
               ) : null}
 

@@ -883,6 +883,9 @@ export interface NativeAgentCancelRequest { sessionId: string }
 export interface NativeAgentSearchEventInput {
   projectId: string; sourceIds: string[]; query: string; mode: ArtifactSearchMode
   caseSensitive: boolean; scope: 'current' | 'open' | 'project'; matchCount: number
+  /** Renderer timestamp captured when this search request began. It keeps
+   * completed IPC calls in the same order as the engineer's actions. */
+  observedAt?: string
   /** The log the engineer was looking at. Search scope may include more logs. */
   activeSourceId?: string
   /** Sources with at least one match. Raw paths and log text are never stored here. */
@@ -938,9 +941,15 @@ export type NativeAgentCompleteEvaluationResult =
   | { kind: 'review'; review: EngineerWorkflowReviewView; attempt: EngineerEvaluationAttemptView }
   | { kind: 'applied'; memory: EngineerWorkflowMemoryView; attempt: EngineerEvaluationAttemptView }
   | { kind: 'ignored'; attempt?: EngineerEvaluationAttemptView }
-export interface NativeAgentConfirmWorkflowInput { projectId: string; reviewId: string; purpose: string }
+export interface NativeAgentConfirmWorkflowInput {
+  projectId: string; reviewId: string; purpose: string
+  /** Engineer-selected search checks in the exact order to remember. */
+  checks?: EngineerWorkflowCheckView[]
+}
 export interface NativeAgentDismissWorkflowInput { projectId: string; reviewId: string }
 export interface NativeAgentListWorkflowsInput { projectId: string }
+export interface NativeAgentReuseKnowledgeInput { sourceProjectId: string; targetProjectId: string }
+export interface NativeAgentReuseKnowledgeResult { workflows: number; commandKnowledge: number; consolePromptRules: number }
 export interface NativeAgentWorkspaceApi {
   backendStatus(): Promise<NativeAgentBackendStatusView>
   create(input: NativeAgentCreateRequest): Promise<NativeAgentSessionView>
@@ -954,6 +963,7 @@ export interface NativeAgentWorkspaceApi {
   confirmWorkflow(input: NativeAgentConfirmWorkflowInput): Promise<EngineerWorkflowMemoryView>
   dismissWorkflow(input: NativeAgentDismissWorkflowInput): Promise<void>
   listWorkflows(input: NativeAgentListWorkflowsInput): Promise<EngineerWorkflowMemoryView[]>
+  reuseConfirmedKnowledge(input: NativeAgentReuseKnowledgeInput): Promise<NativeAgentReuseKnowledgeResult>
   onUpdate(listener: (session: NativeAgentSessionView) => void): () => void
 }
 
@@ -1089,5 +1099,6 @@ export const IPC_CHANNELS = {
   nativeAgentRetry: 'native-agent:retry', nativeAgentCancel: 'native-agent:cancel', nativeAgentRecordSearch: 'native-agent:record-search',
   nativeAgentCompleteEvaluation: 'native-agent:complete-evaluation', nativeAgentConfirmWorkflow: 'native-agent:confirm-workflow',
   nativeAgentDismissWorkflow: 'native-agent:dismiss-workflow', nativeAgentListWorkflows: 'native-agent:list-workflows',
+  nativeAgentReuseKnowledge: 'native-agent:reuse-knowledge',
   nativeAgentUpdate: 'native-agent:update'
 } as const

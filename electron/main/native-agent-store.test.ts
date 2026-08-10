@@ -34,6 +34,43 @@ describe('NativeAgentStore', () => {
     expect(await store.searchHistory('p')).toHaveLength(1)
   })
 
+  it('does not leak a late-arriving pre-decision search into the next evaluation cycle', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-search-boundary-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    const search = (query: string, observedAt?: string) => store.recordSearch({
+      projectId: 'p', sourceIds: ['s'], activeSourceId: 's', query, mode: 'literal', caseSensitive: false,
+      scope: 'current', matchCount: 1, activeMatchCount: 1, ...(observedAt ? { observedAt } : {}),
+    })
+    await search('UEFI'); await search('@PASS')
+    const first = await store.completeEvaluation({ projectId: 'p', sourceId: 's', result: 'PASS' })
+    expect(first.kind).toBe('review')
+    if (first.kind !== 'review') throw new Error('review expected')
+    await search('late old marker', new Date(Date.parse(first.review.createdAt) - 500).toISOString())
+    await search('new marker', new Date(Date.parse(first.review.createdAt) + 2_000).toISOString())
+    const next = await store.completeEvaluation({ projectId: 'p', sourceId: 's', result: 'PASS' })
+    expect(next.kind).toBe('ignored')
+  })
+
+  it('returns search history by engineer action time even when IPC writes arrive out of order', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-search-order-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    const base = Date.now() - 5_000
+    const input = (query: string, observedAt: number) => ({
+      projectId: 'p', sourceIds: ['s'], activeSourceId: 's', query, mode: 'literal' as const,
+      caseSensitive: false, scope: 'current' as const, matchCount: 1, activeMatchCount: 1,
+      observedAt: new Date(observedAt).toISOString(),
+    })
+    await store.recordSearch(input('second', base + 2_000))
+    await store.recordSearch(input('first', base + 1_000))
+    expect((await store.searchHistory('p')).map((item) => item.query)).toEqual(['second', 'first'])
+    const completed = await store.completeEvaluation({ projectId: 'p', sourceId: 's', result: 'PASS' })
+    expect(completed.kind).toBe('review')
+    if (completed.kind !== 'review') throw new Error('review expected')
+    expect(completed.review.checks.map((item) => item.query)).toEqual(['first', 'second'])
+  })
+
   it('migrates v1 chats and searches without clearing them', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-native-agent-v1-'))
     await mkdir(join(root, 'metadata'), { recursive: true })
@@ -55,6 +92,7 @@ describe('NativeAgentStore', () => {
     const search = async (query: string, activeMatchCount: number) => store.recordSearch({
       projectId: 'p', sourceIds: ['s1'], activeSourceId: 's1', matchedSourceIds: activeMatchCount ? ['s1'] : [],
       query, mode: 'literal', caseSensitive: false, scope: 'current', matchCount: activeMatchCount, activeMatchCount,
+      observedAt: new Date().toISOString(),
     })
     await search('UEFI', 1); await search('TRAINING_FAIL', 0); await search('@PASS', 1)
     const first = await store.completeEvaluation({ projectId: 'p', sourceId: 's1', result: 'PASS', evidenceLines: [8, 12] })
@@ -68,6 +106,48 @@ describe('NativeAgentStore', () => {
     const repeated = await store.completeEvaluation({ projectId: 'p', sourceId: 's1', result: 'PASS' })
     expect(repeated).toMatchObject({ kind: 'applied', memory: { purpose: '부팅 후 OS Memory Test 확인', appliedCount: 1 } })
     expect(await store.workflowMemories('p')).toHaveLength(1)
+  })
+
+  it('stores only the engineer-selected checks in the exact confirmed order', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-workflow-selection-'))
+    const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
+    await store.initialize()
+    for (const [query, count] of [['POST_PBL', 1], ['obsolete marker', 0], ['LK:', 1], ['@PASS', 1]] as const) {
+      await store.recordSearch({ projectId: 'p', sourceIds: ['s1'], activeSourceId: 's1', query, mode: 'literal', caseSensitive: false, scope: 'current', matchCount: count, activeMatchCount: count })
+    }
+    const completed = await store.completeEvaluation({ projectId: 'p', sourceId: 's1', result: 'PASS' })
+    expect(completed.kind).toBe('review')
+    if (completed.kind !== 'review') throw new Error('review expected')
+    const pick = [completed.review.checks[2], completed.review.checks[0], completed.review.checks[3]]
+    const memory = await store.confirmWorkflow('p', completed.review.id, 'MTK 부팅 후 테스트 확인', pick)
+    expect(memory.checks.map((item) => [item.query, item.order])).toEqual([['LK:', 1], ['POST_PBL', 2], ['@PASS', 3]])
+    expect(memory.checks.some((item) => item.query === 'obsolete marker')).toBe(false)
+  })
+
+  it('reuses only confirmed procedures and knowledge across projects', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-workflow-reuse-'))
+    const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
+    await store.initialize()
+    const chat = await store.create('source', 'source chat', 'internal')
+    await store.appendMessage(chat.id, { role: 'user', content: 'DQ9를 확인해줘' })
+    for (const query of ['UEFI', '@PASS']) await store.recordSearch({ projectId: 'source', sourceIds: ['s1'], activeSourceId: 's1', query, mode: 'literal', caseSensitive: false, scope: 'current', matchCount: 1, activeMatchCount: 1 })
+    const completed = await store.completeEvaluation({ projectId: 'source', sourceId: 's1', result: 'PASS' })
+    if (completed.kind !== 'review') throw new Error('review expected')
+    await store.confirmWorkflow('source', completed.review.id, '부팅 완료 확인')
+    await store.confirmCommandKnowledge({ projectId: 'source', command: 'sleep 20', purpose: '안정화 대기' })
+    await store.confirmConsolePromptRule({ projectId: 'source', promptSignature: 'root-hash', promptKind: 'bare-root', role: 'input' })
+    await store.confirmProfileBinding({ projectId: 'source', sourceIds: ['s1'], vendor: 'qualcomm', profileId: 'qualcomm-default' })
+
+    await expect(store.reuseConfirmedKnowledge('source', 'target')).resolves.toEqual({ workflows: 1, commandKnowledge: 1, consolePromptRules: 1 })
+    const copied = await store.workflowMemories('target')
+    expect(copied[0]).toMatchObject({ purpose: '부팅 완료 확인', sourceIds: [], evidenceLines: [], appliedCount: 0 })
+    expect(await store.commandKnowledge('target')).toEqual([expect.objectContaining({ command: 'sleep 20', purpose: '안정화 대기' })])
+    expect(await store.consolePromptRules('target')).toEqual([expect.objectContaining({ promptSignature: 'root-hash', role: 'input' })])
+    expect(await store.searchHistory('target')).toEqual([])
+    expect(await store.conversationHistory('target')).toEqual([])
+    expect(await store.attemptHistory('target')).toEqual([])
+    expect(await store.profileBindings('target')).toEqual([])
+    await expect(store.reuseConfirmedKnowledge('source', 'target')).resolves.toEqual({ workflows: 0, commandKnowledge: 0, consolePromptRules: 0 })
   })
 
   it('stores RT as a same-sample same-sequence attempt relation after FAIL', async () => {

@@ -18,15 +18,16 @@ describe('preload evaluation agent API', () => {
     const api = bridge.exposed?.nativeAgent as Record<string, (input: unknown) => unknown>
     expect(Object.keys(api)).toEqual([
       'backendStatus', 'create', 'list', 'get', 'send', 'retry', 'cancel', 'recordSearch',
-      'completeEvaluation', 'confirmWorkflow', 'dismissWorkflow', 'listWorkflows', 'onUpdate',
+      'completeEvaluation', 'confirmWorkflow', 'dismissWorkflow', 'listWorkflows', 'reuseConfirmedKnowledge', 'onUpdate',
     ])
     api.completeEvaluation({ projectId: 'p', sourceId: 's', result: 'PASS' })
     api.confirmWorkflow({ projectId: 'p', reviewId: 'r', purpose: '부팅 확인' })
     api.dismissWorkflow({ projectId: 'p', reviewId: 'r' })
     api.listWorkflows({ projectId: 'p' })
+    api.reuseConfirmedKnowledge({ sourceProjectId: 'p', targetProjectId: 'next' })
     expect(bridge.invoke.mock.calls.map((call) => call[0])).toEqual([
       'native-agent:complete-evaluation', 'native-agent:confirm-workflow',
-      'native-agent:dismiss-workflow', 'native-agent:list-workflows',
+      'native-agent:dismiss-workflow', 'native-agent:list-workflows', 'native-agent:reuse-knowledge',
     ])
   })
 })

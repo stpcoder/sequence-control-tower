@@ -35,6 +35,18 @@ describe('planLpddrTools', () => {
     await expect(service.completeEvaluation({ projectId: 'p', sourceId: 'other', result: 'PASS' })).rejects.toThrow('프로젝트 범위')
   })
 
+  it('reuses confirmed knowledge only when both project scopes exist', async () => {
+    const reuseConfirmedKnowledge = vi.fn(async () => ({ workflows: 2, commandKnowledge: 1, consolePromptRules: 1 }))
+    const service = new NativeAgentService({
+      store: { reuseConfirmedKnowledge },
+      projects: { get: vi.fn(async (id: string) => ['source', 'target'].includes(id) ? { id } : null) },
+    } as never)
+    await expect(service.reuseConfirmedKnowledge({ sourceProjectId: 'source', targetProjectId: 'target' }))
+      .resolves.toEqual({ workflows: 2, commandKnowledge: 1, consolePromptRules: 1 })
+    expect(reuseConfirmedKnowledge).toHaveBeenCalledWith('source', 'target')
+    await expect(service.reuseConfirmedKnowledge({ sourceProjectId: 'source', targetProjectId: 'missing' })).rejects.toThrow('프로젝트')
+  })
+
   it('asks once for an unknown command purpose and persists the engineer answer', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-command-question-')))
     await store.initialize()

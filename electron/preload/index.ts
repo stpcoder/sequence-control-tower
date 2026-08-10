@@ -33,6 +33,7 @@ import type {
   NativeAgentListRequest,
   NativeAgentListWorkflowsInput,
   NativeAgentRetryRequest,
+  NativeAgentReuseKnowledgeInput,
   NativeAgentSearchEventInput,
   NativeAgentSendRequest,
   NativeAgentSessionView,
@@ -115,6 +116,7 @@ const api: SequenceIntelligenceApi = {
     confirmWorkflow: (input: NativeAgentConfirmWorkflowInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentConfirmWorkflow, input),
     dismissWorkflow: (input: NativeAgentDismissWorkflowInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentDismissWorkflow, input),
     listWorkflows: (input: NativeAgentListWorkflowsInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentListWorkflows, input),
+    reuseConfirmedKnowledge: (input: NativeAgentReuseKnowledgeInput) => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentReuseKnowledge, input),
     onUpdate: (listener: (session: NativeAgentSessionView) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, session: NativeAgentSessionView): void => listener(session)
       ipcRenderer.on(IPC_CHANNELS.nativeAgentUpdate, handler)

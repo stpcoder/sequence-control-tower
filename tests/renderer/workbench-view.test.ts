@@ -44,6 +44,9 @@ import {
   resolveCurrentReplacementText,
   resolveSearchScopeFiles,
   occurrenceConditionForChoice,
+  engineerWorkflowCheckKey,
+  moveEngineerWorkflowCheck,
+  toggleEngineerWorkflowCheck,
   reorderRuleClausesByObservationIds,
   successfulSearchCounts,
   shouldCancelAnalysisJob,
@@ -116,6 +119,17 @@ function evidence(sourceId: string, rules: RecipeRule[], count = 1): Precomputed
 }
 
 describe('Log Workbench UI data hardening', () => {
+  it('lets an engineer select and reorder the exact Ctrl-F procedure to remember', () => {
+    const checks = [
+      { query: 'POST_PBL', mode: 'literal' as const, caseSensitive: false, expected: 'present' as const, matchCount: 1, stage: 'post-pbl' as const, order: 1 },
+      { query: 'LK:', mode: 'literal' as const, caseSensitive: false, expected: 'present' as const, matchCount: 1, stage: 'lk' as const, order: 2 },
+      { query: '@PASS', mode: 'literal' as const, caseSensitive: false, expected: 'present' as const, matchCount: 1, stage: 'memory-test' as const, order: 3 },
+    ]
+    const withoutLk = toggleEngineerWorkflowCheck(checks, checks[1])
+    expect(withoutLk.map((item) => item.query)).toEqual(['POST_PBL', '@PASS'])
+    expect(toggleEngineerWorkflowCheck(withoutLk, checks[1]).map((item) => item.query)).toEqual(['POST_PBL', '@PASS', 'LK:'])
+    expect(moveEngineerWorkflowCheck(checks, engineerWorkflowCheckKey(checks[2]), -1).map((item) => item.query)).toEqual(['POST_PBL', '@PASS', 'LK:'])
+  })
   it('projects only user recipes and turns artifact evidence into clause counts', () => {
     const candidate = rule('candidate', 'PASS', 'candidate')
     const internal = { id: 'internal-revision', recipeId: 'active-batch-ruleset', revision: 1, name: 'batch', rules: [candidate], createdAt: 'now' }

@@ -205,7 +205,24 @@ export class LpddrAgentToolService {
   }
 
   private context(project: ProjectSnapshot): LpddrAgentToolResult {
-    const data = { name: project.name, description: project.description, ...project.lpddrDevelopmentContext, onboarding: project.onboardingAnswers }
+    const savedLayouts = project.exportPresets.filter((item) => !item.archived).slice(-10).map((item) => {
+      if (item.id === 'sequence-control-tower.results-export.v1') {
+        return { id: item.id, name: item.name, format: item.format, columns: Array.isArray(item.options.columns) ? item.options.columns.slice(0, 32) : [] }
+      }
+      if (item.id === 'sequence-control-tower.patterns-layout.v1') {
+        return {
+          id: item.id, name: item.name, format: item.format,
+          rowAxes: Array.isArray(item.options.rowAxes) ? item.options.rowAxes.slice(0, 2) : [],
+          columnAxes: Array.isArray(item.options.columnAxes) ? item.options.columnAxes.slice(0, 2) : [],
+          aggregation: item.options.aggregation,
+        }
+      }
+      return { id: item.id, name: item.name, format: item.format }
+    })
+    const data = {
+      name: project.name, description: project.description, ...project.lpddrDevelopmentContext, onboarding: project.onboardingAnswers,
+      savedLayouts,
+    }
     return { name: 'project_context_get', label: '프로젝트 조건', summary: `${project.name} · 로그 ${project.artifacts.length}개 · 평가 ${project.evaluationNodes?.length ?? 0}건`, data, evidenceSourceIds: [] }
   }
 

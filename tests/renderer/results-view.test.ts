@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { projectLogRecords } from '../../src/state/logRecords'
 import { createResultsCsvBlob } from '../../src/views/ResultsView'
+import {
+  RESULT_EXPORT_PRESET_ID,
+  normalizeResultExportLayout,
+  resultExportLayoutFromPreset,
+  resultExportLayoutPreset,
+} from '../../src/state/resultExportLayout'
 
 describe('renderer results export', () => {
   it('downloads one BOM followed by the metadata/result/stage default header and row', async () => {
@@ -40,5 +46,12 @@ describe('renderer results export', () => {
     const content = Buffer.from(bytes).toString('utf8')
 
     expect(content).toBe('\uFEFF"result","evidence_count","selected_evidence_count"\r\n"PASS","2","2"')
+  })
+
+  it('persists a normalized ordered column subset as a project export preset', () => {
+    const preset = resultExportLayoutPreset({ columns: ['filename', 'result', 'filename', 'evidence_count'] })
+    expect(preset).toMatchObject({ id: RESULT_EXPORT_PRESET_ID, format: 'csv', options: { columns: ['filename', 'result', 'evidence_count'] } })
+    expect(resultExportLayoutFromPreset({ ...preset, createdAt: '', updatedAt: '' }).columns).toEqual(['filename', 'result', 'evidence_count'])
+    expect(normalizeResultExportLayout({ columns: ['not-a-column'] }).columns).not.toHaveLength(0)
   })
 })

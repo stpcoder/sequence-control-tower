@@ -4,6 +4,7 @@ import {
   buildProjectClonePlan,
   buildProjectOnboardingAnswers,
   isProjectInitStepValid,
+  projectListSecondary,
   serializeOnboardingItems,
   type ProjectInitDraft
 } from '../../src/components/ProjectControl'
@@ -55,5 +56,6 @@ describe('ProjectControl initialization helpers', () => {
     expect(plan).not.toHaveProperty('results')
     expect(plan.exportPresets).not.toBe(source.exportPresets)
     expect(plan.exportPresets?.[0]?.options).not.toBe(source.exportPresets[0].options)
+    expect(projectListSecondary(source)).toBe('Evaluate reboot safety · 로그 1 · 폴더 1')
   })
 })
