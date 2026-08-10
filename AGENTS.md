@@ -1,68 +1,31 @@
 # AGENTS.md
 
-## Repository Identity
+## Product
 
-This is the canonical Sequence Control Tower repository.
+This repository is **Sequence Control Tower**, the current Electron/React
+desktop product for Windows and macOS validation engineers. It combines a
+VS Code/Notepad++-style log workbench with local rules, structured results,
+evaluation history, an Agent-native workflow, and optional OpenCode support.
 
-- Local path: `/Users/taehoje/sequence-control-tower`
-- Git remote: `https://github.com/stpcoder/sequence-control-tower.git`
-- Package name: `sequence-control-tower`
-- Product name: `Sequence Control Tower`
+## Source Map
 
-Sequence Control Tower is the default target for ambiguous software, UI,
-Agent, log parsing, evaluation history, documentation, packaging, release, and
-deployment requests. Do not redirect these tasks to `/Users/taehoje/skhy` or a
-temporary `/tmp/sct-*` checkout.
+- `src/`: renderer UI, domain models, and views
+- `electron/main/`: local services, Agent harness, OpenCode/MCP integration
+- `electron/preload/`: renderer-safe desktop API
+- `tests/`: product and regression tests
+- `docs/manual/`: current Korean operator manual
 
-Before making changes, verify the Git remote and the package name. If either
-does not match the values above, stop before editing and report the mismatch.
+## Product Principles
 
-## Product Context
-
-This repository builds the Electron/React desktop Log Workbench for Windows
-and macOS validation engineers. It manages multiple log folders, text search,
-pattern rules, deterministic classification, structured results, evaluation
-history, OpenAI-compatible LLM integration, and release packages.
-
-The local deterministic parser and its line evidence remain the authority for
-PASS/FAIL-style results. LLM or Agent output must retain source identity,
-bounded evidence, explicit uncertainty, and an auditable confirmation path.
-Never send complete logs, absolute paths, API keys, or secrets to an LLM.
-
-## Implementation Rules
-
-- Preserve the established three-pane dark workbench: log folders on the left,
-  text editor in the center, analysis/results on the right.
-- Treat the Log page design tokens and controls as the UI source of truth.
-  Reuse them instead of introducing page-specific buttons, dropdowns, toggles,
-  colors, or box-heavy layouts.
-- Keep source logs read-only. Derived rules, metadata, results, and evaluation
-  history must remain traceable to artifact/source IDs.
-- Use `SKEW` for process-corner fields. Do not rename it to `SKU`.
-- Qualcomm and MediaTek boot profiles must remain independently selectable;
-  do not force UEFI stages onto MediaTek flows.
-- Keep LLM calls bounded for slow OpenAI-compatible providers and preserve
-  retry/resume behavior without duplicate writes.
-- Update the current manual when user-visible behavior changes. Remove or
-  rewrite obsolete instructions rather than layering contradictory guidance.
+- Keep source logs read-only and keep every result traceable to its evidence.
+- Use deterministic parsing for firm judgments; use the Agent for context,
+  uncertainty, questions, trends, and project memory.
+- Keep LLM requests bounded and safe for slow OpenAI-compatible providers.
+- Keep the established dark workbench compact and consistent; reuse the Log
+  page controls and avoid box-heavy layouts or repetitive helper text.
+- Update tests and the current manual with user-visible behavior.
 
 ## Validation
 
-Run focused tests while editing. Before committing shared behavior, run:
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
-
-For UI work, run the built macOS app when available, inspect the actual desktop
-screens at a practical window size, and capture the current screens required by
-the manual. Windows packaging is validated by the repository GitHub Actions.
-
-## Git and Release
-
-Preserve unrelated worktree changes. Commit only the intended Sequence Control
-Tower files. Push the active branch after requested implementation and let the
-configured CI/release workflows run; do not repeatedly poll unchanged CI state
-unless the user explicitly asks for monitoring.
+Use focused tests while editing. For shared behavior, run `npm run typecheck`,
+`npm test`, and `npm run build`. Package versions come from `package.json`.
