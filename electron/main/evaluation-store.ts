@@ -564,7 +564,7 @@ export class EvaluationStore {
 
   async approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult> {
     rejectSensitivePayload(input)
-    if (input.approval !== 'approved' && input.approval !== 'rejected') throw new Error('metadata approval이 올바르지 않습니다.')
+    if (input.approval !== 'approved' && input.approval !== 'rejected' && input.approval !== 'reset') throw new Error('metadata approval이 올바르지 않습니다.')
     const source = sourceRef(input.source)
     const fieldKey = safeIdentifier(input.fieldKey, 'fieldKey', 100)
     const candidateValue = safeOptionalText(input.candidateValue, 'candidateValue')

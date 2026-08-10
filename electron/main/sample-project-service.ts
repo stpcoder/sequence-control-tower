@@ -111,16 +111,16 @@ export class SampleProjectService {
     connected = await this.deps.projects.save({
       projectId: connected.id, expectedRevision: connected.revision,
       equipmentProfiles: [{ alias: 'SM-8975', profileId: 'qualcomm-default', vendor: 'qualcomm', socModels: ['SM-8975'], filenameAliases: ['SM8975', 'SM-8975'], updatedAt: stamp }],
-      lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'X6-16Gb', customer: 'Xiaomi', targetDevice: 'Mobile flagship', densityGb: 16, nominalVoltage: 1.295, program: 'VPERI 개선', phase: 'Development' },
+      lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'SS-16Gb-x16', customer: 'Xiaomi', targetDevice: 'Mobile flagship', densityGb: 16, nominalVoltage: 1.295, program: 'VPERI 개선', phase: 'Development' },
       failureHypotheses: [
         { id: 'sample-h-vperi-dq9', title: '고온 VPERI DQ9 집중', description: '85°C, VDD 1.295V에서 DQ9 fail이 반복됨. VPERI 동일 기인은 엔지니어 확인 전 가설.', origin: 'ai-proposed', evaluationNodeIds: ['sample-n-screen', 'sample-n-screen-rt2', 'sample-n-vdd-up'] },
         { id: 'sample-h-retention', title: '105°C retention DQ4', description: '동일 조건 2개 중 1개 halt. 추가 반복 필요.', origin: 'engineer-confirmed', evaluationNodeIds: ['sample-n-retention'] }
       ],
       evaluationNodes: [
-        { id: 'sample-n-screen', hypothesisId: 'sample-h-vperi-dq9', branchId: 'vperi-screen', name: 'VPERI 불량 가속 조건 확인', dimensions: { sku: 'X6-16Gb', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.295, testMode: 'VPERI' }, sequenceSignature: 'sample-vperi-screen', attemptNo: 1, status: 'fail' },
-        { id: 'sample-n-screen-rt2', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', retestOf: 'sample-n-screen', branchId: 'vperi-screen', name: 'SMP-01 동일 조건 RT2', dimensions: { sample: '01' }, sequenceSignature: 'sample-vperi-screen', attemptNo: 2, status: 'fail' },
-        { id: 'sample-n-vdd-up', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', branchId: 'vperi-improvement', name: 'VDD 1.315V 개선 확인', dimensions: { sku: 'X6-16Gb', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.315, testMode: 'VPERI' }, status: 'pass' },
-        { id: 'sample-n-retention', hypothesisId: 'sample-h-retention', branchId: 'retention', name: '고온 retention 재현', dimensions: { sku: 'X6-16Gb', lot: 'C2', material: 'WAF31', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 4, bl: 16, channel: 2, pattern: 'MARCH', frequencyMHz: 9600, temperatureC: 105, vdd: 1.295, testMode: 'RETENTION' }, status: 'inconclusive' }
+        { id: 'sample-n-screen', hypothesisId: 'sample-h-vperi-dq9', branchId: 'vperi-screen', name: 'VPERI 불량 가속 조건 확인', purpose: 'screening', dimensions: { sku: 'SS-16Gb-x16', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.295, testMode: 'VPERI' }, sequenceSignature: 'sample-vperi-screen', attemptNo: 1, status: 'fail' },
+        { id: 'sample-n-screen-rt2', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', retestOf: 'sample-n-screen', branchId: 'vperi-screen', name: 'SMP-01 동일 조건 RT2', purpose: 'reproduction', dimensions: { sample: '01' }, sequenceSignature: 'sample-vperi-screen', attemptNo: 2, status: 'fail' },
+        { id: 'sample-n-vdd-up', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', branchId: 'vperi-improvement', name: 'VDD 1.315V 개선 확인', purpose: 'improvement', dimensions: { sku: 'SS-16Gb-x16', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.315, testMode: 'VPERI' }, status: 'pass' },
+        { id: 'sample-n-retention', hypothesisId: 'sample-h-retention', branchId: 'retention', name: '고온 retention 재현', purpose: 'characterization', dimensions: { sku: 'SS-16Gb-x16', lot: 'C2', material: 'WAF31', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 4, bl: 16, channel: 2, pattern: 'MARCH', frequencyMHz: 9600, temperatureC: 105, vdd: 1.295, testMode: 'RETENTION' }, status: 'inconclusive' }
       ],
       evidenceRecords: [
         { id: 'sample-e-screen-fail', evaluationNodeId: 'sample-n-screen', occurredAt: stamp, status: 'fail', result: '2/2 FAIL at DQ9', sourceIds: idsWhere((name) => name.includes('T85_VDD1p295_F9600_TM-VPERI') && !name.includes('RT2')), note: '결정 규칙 @FAIL; 85°C 최초 평가 분모 2, 실패 2', origin: 'engineer-confirmed' },
@@ -138,9 +138,9 @@ export class SampleProjectService {
     let reference = await this.deps.projects.create({ name: 'LPDDR5 VPERI DQ9 과거 사례', description: `${REFERENCE_MARKER} · 샘플 프로젝트의 유사 사례 검색용` })
     reference = await this.deps.projects.save({
       projectId: reference.id, expectedRevision: reference.revision,
-      lpddrDevelopmentContext: { product: 'LPDDR5', sku: 'X5-12Gb', customer: 'Xiaomi', program: 'VPERI screening', phase: 'Closed' },
+      lpddrDevelopmentContext: { product: 'LPDDR5', sku: 'TT-12Gb-x8', customer: 'Xiaomi', program: 'VPERI screening', phase: 'Closed' },
       failureHypotheses: [{ id: 'ref-h-vperi', title: '고온 VPERI DQ9 반복 불량', description: '85°C VPERI write pattern에서 DQ9 집중. 전압 상향 후 개선은 제한적이어서 pattern 변경을 후속 평가함.', origin: 'engineer-confirmed', evaluationNodeIds: ['ref-n-vperi'] }],
-      evaluationNodes: [{ id: 'ref-n-vperi', hypothesisId: 'ref-h-vperi', branchId: 'closed-vperi', name: 'LPDDR5 VPERI DQ9 screening', dimensions: { sku: 'X5-12Gb', material: 'REF-WAF8', dq: 9, pattern: 'WR', temperatureC: 85, vdd: 1.1, testMode: 'VPERI' }, status: 'fail' }],
+      evaluationNodes: [{ id: 'ref-n-vperi', hypothesisId: 'ref-h-vperi', branchId: 'closed-vperi', name: 'LPDDR5 VPERI DQ9 screening', purpose: 'screening', dimensions: { sku: 'TT-12Gb-x8', material: 'REF-WAF8', dq: 9, pattern: 'WR', temperatureC: 85, vdd: 1.1, testMode: 'VPERI' }, status: 'fail' }],
       evidenceRecords: []
     })
     await this.deps.projects.archive({ projectId: reference.id, expectedRevision: reference.revision })

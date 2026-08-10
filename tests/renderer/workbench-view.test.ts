@@ -162,7 +162,7 @@ describe('Log Workbench UI data hardening', () => {
   })
 
   it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
-    expect(workbenchSource).toContain('판정 조건으로 pin')
+    expect(workbenchSource).toContain('판정 조건 추가')
     expect(workbenchSource).toContain('role="dialog" aria-modal="true"')
     expect(workbenchSource).toContain('onApplyMetadataSuggestion')
     expect(workbenchSource).toContain('field}</b> {suggestion.value}')
@@ -545,8 +545,8 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchRootRule).toContain('--wb-log-type: 13.25px;')
     expect(workbenchRootRule).toContain('--wb-log-line-height: 22px;')
     expect(workbenchRootRule).toContain('--wb-log-row-height: 28px;')
-    expect(workbenchRootRule).toContain('--wb-log-marker-gutter: 22px;')
-    expect(workbenchRootRule).toContain('--wb-log-number-gutter: 44px;')
+    expect(workbenchRootRule).toContain('--wb-log-marker-gutter: 18px;')
+    expect(workbenchRootRule).toContain('--wb-log-number-gutter: 36px;')
     expect(legacyLineRule).toMatch(/border-bottom:\s*(?!0(?:px)?\b)[^;]+;/)
     expect(workbenchCss).not.toMatch(/--wb-log-(?:row-height|line-height):\s*40px/)
     expect(lineRule).not.toMatch(/(?:height|min-height|line-height):\s*40px/)

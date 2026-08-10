@@ -83,7 +83,7 @@ describe('project UI state updates', () => {
       id: 'source-a', fileName: 'VPERI_DQ9.log', folder: 'logs', relativePath: 'VPERI_DQ9.log',
       sample: { value: 'S01', state: 'approved' }, temperature: { value: '85', state: 'approved' },
       mode: { value: 'VPERI', state: 'approved' }, grid: { value: 'DQ9', state: 'candidate' },
-      result: 'TEST_FAIL', resultSource: 'engineer', review: 'confirmed', evidenceCount: 1, selectedEvidenceCount: 1,
+      result: 'TEST_FAIL', resultSource: 'engineer', stageResults: [], review: 'confirmed', evidenceCount: 1, selectedEvidenceCount: 1,
     }
     const projectWithSource = { ...project('p1', ['root-a']), artifacts: [{ sourceId: 'durable-source-a', rootId: 'root-a', artifactId: 'artifact-a', relativePath: 'VPERI_DQ9.log' }] }
     const rendererFile: WorkbenchFile = { id: 'renderer-row-a', name: row.fileName, artifactId: 'artifact-a', rootId: 'root-a', relativePath: 'VPERI_DQ9.log' }

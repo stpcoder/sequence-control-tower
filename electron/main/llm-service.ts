@@ -33,6 +33,7 @@ export interface EffectiveLlmConfig {
 }
 
 export const LLM_COMPLETION_TOKEN_BUDGET = 1_200
+export const GEMINI_3_COMPLETION_TOKEN_BUDGET = 4_096
 const MIN_NON_EMPTY_PROMPT_TOKENS = 1
 export const MIN_LLM_TOKENS_PER_MINUTE = LLM_COMPLETION_TOKEN_BUDGET + MIN_NON_EMPTY_PROMPT_TOKENS
 
@@ -562,6 +563,10 @@ interface ChatCompletionResponse {
 
 const MAX_CHAT_RESPONSE_BYTES = 2 * 1024 * 1024
 
+function isGemini3Model(model: string): boolean {
+  return /(?:^|\/)gemini-3(?:\.\d+)?-/i.test(model.trim())
+}
+
 export class OpenAiCompatibleClient {
   private readonly limiter = new SlidingWindowLimiter()
 
@@ -577,9 +582,13 @@ export class OpenAiCompatibleClient {
   ): Promise<{ content: string; model: string }> {
     const config = await this.configService.effective()
     if (!config.baseUrl || !config.model) throw new Error('LLM_UNAVAILABLE')
+    const gemini3 = isGemini3Model(config.model)
+    const completionTokenBudget = gemini3
+      ? GEMINI_3_COMPLETION_TOKEN_BUDGET
+      : LLM_COMPLETION_TOKEN_BUDGET
     // UTF-8 bytes / 3 is intentionally conservative for Korean while still
     // remaining close enough for English-heavy structured JSON evidence.
-    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + LLM_COMPLETION_TOKEN_BUDGET
+    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + completionTokenBudget
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
@@ -621,8 +630,8 @@ export class OpenAiCompatibleClient {
               },
               { role: 'user', content: prompt }
             ],
-            temperature: 0.1,
-            max_tokens: LLM_COMPLETION_TOKEN_BUDGET
+            ...(gemini3 ? { reasoning_effort: 'low' } : { temperature: 0.1 }),
+            max_tokens: completionTokenBudget
           }),
           redirect: 'error',
           signal: timeoutController.signal

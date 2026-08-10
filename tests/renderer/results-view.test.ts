@@ -3,7 +3,7 @@ import { projectLogRecords } from '../../src/state/logRecords'
 import { createResultsCsvBlob } from '../../src/views/ResultsView'
 
 describe('renderer results export', () => {
-  it('downloads one BOM followed by the 18-column metadata/result default header and row', async () => {
+  it('downloads one BOM followed by the metadata/result/stage default header and row', async () => {
     const rows = projectLogRecords([{
       id: 'formula',
       name: '=cmd.log',
@@ -19,8 +19,8 @@ describe('renderer results export', () => {
     expect(content.startsWith('\uFEFF')).toBe(true)
     expect(content.slice(1)).not.toContain('\uFEFF')
     expect(lines).toHaveLength(2)
-    expect(lines[0].slice(1).split(',')).toHaveLength(18)
-    expect(lines[1].split(',')).toHaveLength(18)
+    expect(lines[0].slice(1).split(',')).toHaveLength(19)
+    expect(lines[1].split(',')).toHaveLength(19)
     expect(lines[1]).toContain("\"'=cmd.log\"")
     expect(content).not.toContain('/Users/private/root')
     expect(content).not.toContain('secret excerpt')

@@ -24,6 +24,11 @@ describe("filename metadata parser", () => {
     expect(result.grid.value).toBe("16X1");
   });
 
+  it("treats the hyphen after a plus-delimited TEMP label as a separator", () => {
+    const result = parseFilenameMetadata("capture-QBR-006+MAT-K4P+TEMP-125C+MODE-TEST.log");
+    expect(result.temperature.value).toBe("125");
+  });
+
   it("recognizes the unlabeled leading sample format used by repository fixtures", () => {
     const result = parseFilenameMetadata("SAMP-A__TEMP=25C__MODE=DIAG__RUN=1.log");
 

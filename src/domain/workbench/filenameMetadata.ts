@@ -71,13 +71,13 @@ function fieldFromMatches(
 function matchesFor(
   stem: string,
   expression: RegExp,
-  normalize: (value: string) => string,
+  normalize: (value: string, match: RegExpMatchArray) => string,
   rule: string,
 ): Array<{ value: string; token: string; start: number; end: number; rule: string }> {
   return [...stem.matchAll(expression)].flatMap((match) => {
     const raw = match.groups?.value ?? match[1];
     if (!raw) return [];
-    const value = normalize(raw);
+    const value = normalize(raw, match);
     const offset = match[0].indexOf(raw);
     return [{ value, token: match[0], start: match.index + Math.max(offset, 0), end: match.index + Math.max(offset, 0) + raw.length, rule }];
   });
@@ -122,7 +122,16 @@ export function parseFilenameMetadata(fileName: string): FilenameMetadata {
   const temperature = matchesFor(
     stem,
     /(?:^|[_.+@-])(?:TEMPERATURE|TEMP|T)(?:[=_:]?)(?<value>-?\d+(?:[p.]\d+)?)(?:\s*C)?(?=$|[_.+@-])/giu,
-    (value) => value.replace("p", "."),
+    (value, match) => {
+      // In `+TEMP-125C+MODE-*`, plus-delimited corpus names use the hyphen as
+      // the label separator. Explicit negative values remain `TEMP=-40C` or
+      // the established compact `T-40C` form.
+      const token = match[0].toUpperCase();
+      const normalized = token.startsWith("+TEMP-") || token.startsWith("+TEMPERATURE-")
+        ? value.replace(/^-/, "")
+        : value;
+      return normalized.replace("p", ".");
+    },
     "temperature-label",
   );
   const mode = matchesFor(

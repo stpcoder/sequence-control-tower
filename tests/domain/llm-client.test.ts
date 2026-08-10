@@ -110,6 +110,7 @@ describe('OpenAI-compatible chat client', () => {
     }))
     expect(JSON.parse(server.records[0].body)).toEqual(expect.objectContaining({
       model: 'qwen-internal',
+      temperature: 0.1,
       max_tokens: 1_200
     }))
   })
@@ -139,6 +140,35 @@ describe('OpenAI-compatible chat client', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer fresh-adc-token' }) })
     )
+  })
+
+  it('uses a bounded low-reasoning budget for Gemini 3 on the global Vertex endpoint', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      choices: [{ message: { content: 'gemini 3 ok' } }]
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const token = vi.fn(async () => 'fresh-adc-token')
+    const configService = {
+      effective: vi.fn(async () => effective({
+        baseUrl: 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/endpoints/openapi',
+        model: 'google/gemini-3.5-flash',
+        apiKey: undefined
+      }))
+    } as unknown as LlmConfigService
+    const request = new OpenAiCompatibleClient(configService, { token })
+
+    await expect(request.complete('bounded evidence', undefined, vi.fn())).resolves.toEqual({
+      content: 'gemini 3 ok',
+      model: 'google/gemini-3.5-flash'
+    })
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>
+    expect(body).toEqual(expect.objectContaining({
+      model: 'google/gemini-3.5-flash',
+      max_tokens: 4_096,
+      reasoning_effort: 'low'
+    }))
+    expect(body).not.toHaveProperty('temperature')
+    expect(token).toHaveBeenCalledTimes(1)
   })
 
   it.each([401, 403, 404])('does not retry permanent HTTP %s errors', async (status) => {

@@ -1,23 +1,25 @@
 import { useMemo } from 'react'
 import type { CSSProperties } from 'react'
-import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationStatus } from '../domain/evaluation-memory'
+import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationPurpose, EvaluationStatus } from '../domain/evaluation-memory'
 import './evaluation-lineage.css'
 
 type EvaluationLineageConfidence = 'confirmed' | 'proposed'
 
 interface DisplayNode {
   node: EvaluationNode
+  purpose?: EvaluationPurpose
+  purposeInferred: boolean
   lane: string
   state: EvaluationStatus
   confidence: EvaluationLineageConfidence
   hypothesisTitle?: string
   origin: AssessmentOrigin
   evidenceCount: number
+  failureCount: number
   failureRate?: number
   dominantDq?: string
   dominantPattern?: string
   dominantCondition?: string
-  timestamp?: string
 }
 
 export interface EvaluationLineageProps {
@@ -33,6 +35,21 @@ export interface EvaluationLineageProps {
 const stateLabel: Record<EvaluationStatus, string> = {
   pass: 'PASS', fail: 'FAIL', inconclusive: 'INCONCLUSIVE', running: 'RUNNING',
 }
+export const evaluationPurposeLabel: Record<EvaluationPurpose, string> = {
+  screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현', characterization: '불량 경향 파악', verification: '개선 효과 검증',
+}
+
+/** Gives old saved evaluations a visible candidate purpose without rewriting them. */
+export function displayEvaluationPurpose(node: Pick<EvaluationNode, 'name' | 'purpose'>): { purpose?: EvaluationPurpose; inferred: boolean } {
+  if (node.purpose) return { purpose: node.purpose, inferred: false }
+  const name = node.name.toLocaleLowerCase('ko-KR')
+  if (/가속|스크린|screen/.test(name)) return { purpose: 'screening', inferred: true }
+  if (/개선.*검증|효과.*확인|verify/.test(name)) return { purpose: 'verification', inferred: true }
+  if (/개선|완화|마진/.test(name)) return { purpose: 'improvement', inferred: true }
+  if (/\brt\d*\b|재현|retest|retry/.test(name)) return { purpose: 'reproduction', inferred: true }
+  if (/경향|특성|분포|character|retention/.test(name)) return { purpose: 'characterization', inferred: true }
+  return { inferred: false }
+}
 
 function toneFor(state: EvaluationStatus): 'pass' | 'fail' | 'warning' | 'active' {
   if (state === 'pass') return 'pass'
@@ -41,14 +58,23 @@ function toneFor(state: EvaluationStatus): 'pass' | 'fail' | 'warning' | 'active
   return 'warning'
 }
 
-function rateLabel(rate?: number): string {
-  if (rate === undefined || rate === null) return '—'
-  const normalized = rate <= 1 ? rate * 100 : rate
-  return `${Math.round(normalized)}%`
-}
-
 function value(value: unknown): string | undefined {
   return value === undefined || value === null || value === '' ? undefined : String(value)
+}
+
+export function evaluationInterpretation(input: Pick<DisplayNode, 'evidenceCount' | 'failureCount' | 'failureRate' | 'dominantCondition' | 'dominantPattern' | 'dominantDq'>): string {
+  if (!input.evidenceCount) return '연결된 로그가 없어 아직 불량 경향을 해석할 수 없습니다.'
+  if (!input.failureCount) return '연결된 로그에서는 실패가 확인되지 않았습니다.'
+  const conditions = [
+    input.dominantCondition,
+    input.dominantPattern ? `${input.dominantPattern} 패턴` : undefined,
+    input.dominantDq ? `DQ ${input.dominantDq}` : undefined,
+  ].filter(Boolean)
+  if (!conditions.length) return '실패 로그는 있으나 반복되는 온도·전압·패턴·DQ 조건은 아직 분명하지 않습니다.'
+  const subject = conditions.join(' · ')
+  if (input.failureRate === 1) return `${subject}에서 확인된 로그가 모두 실패했습니다.`
+  if ((input.failureRate ?? 0) >= 0.6) return `${subject}에서 실패가 반복적으로 집중됩니다.`
+  return `${subject}에서 일부 실패가 확인됩니다.`
 }
 
 function resolvedDimensions(node: EvaluationNode, recordDimensions: Partial<EvaluationDimensions> | undefined, nodes: ReadonlyMap<string, EvaluationNode>): EvaluationDimensions {
@@ -75,8 +101,8 @@ export function EvaluationLineage({
   selectedNodeId,
   onSelectNode,
   className = '',
-  emptyMessage = '표시할 평가 계보가 없습니다.',
-  ariaLabel = '평가 계보',
+  emptyMessage = '저장된 평가가 없습니다.',
+  ariaLabel = '평가 이력',
 }: EvaluationLineageProps) {
   const nodes = useMemo(() => {
     const nodeById = new Map(memory.nodes.map((node) => [node.id, node]))
@@ -85,18 +111,20 @@ export function EvaluationLineage({
       const evidence = memory.evidence.filter((record) => record.evaluationNodeId === node.id)
       const hypothesis = node.hypothesisId ? hypothesisById.get(node.hypothesisId) : undefined
       const origin = hypothesis?.origin ?? (evidence.some((record) => record.origin === 'engineer-confirmed') ? 'engineer-confirmed' : 'ai-proposed')
-      const dimensions = evidence.map((record) => resolvedDimensions(node, record.dimensions, nodeById))
-      const failures = evidence.filter((record) => record.status === 'fail').length
+      const failedEvidence = evidence.filter((record) => record.status === 'fail')
+      const dimensions = failedEvidence.map((record) => resolvedDimensions(node, record.dimensions, nodeById))
+      const failures = failedEvidence.length
       const latest = evidence.find((record) => record.status === 'running')?.status ?? node.status ?? evidence.at(-1)?.status ?? 'inconclusive'
+      const displayedPurpose = displayEvaluationPurpose(node)
       return {
-        node, lane: node.branchId || 'main', state: latest, origin,
+        node, purpose: displayedPurpose.purpose, purposeInferred: displayedPurpose.inferred, lane: node.branchId || 'main', state: latest, origin,
         confidence: origin === 'engineer-confirmed' ? 'confirmed' : 'proposed', hypothesisTitle: hypothesis?.title,
-        evidenceCount: evidence.length, failureRate: evidence.length ? failures / evidence.length : undefined,
+        evidenceCount: evidence.length, failureCount: failures, failureRate: evidence.length ? failures / evidence.length : undefined,
         dominantDq: mode(dimensions.map((item) => value(item.dq))), dominantPattern: mode(dimensions.map((item) => value(item.pattern))),
         dominantCondition: mode(dimensions.map((item) => {
           const parts = [item.temperatureC === undefined ? undefined : `${item.temperatureC}°C`, item.vdd === undefined ? undefined : `${item.vdd}V`, item.frequencyMHz === undefined ? undefined : `${item.frequencyMHz}MHz`].filter(Boolean)
           return parts.join(' · ') || undefined
-        })), timestamp: evidence.at(-1)?.occurredAt,
+        })),
       } satisfies DisplayNode
     })
   }, [memory])
@@ -104,7 +132,7 @@ export function EvaluationLineage({
   const laneIndex = useMemo(() => new Map(lanes.map((lane, index) => [lane, index])), [lanes])
   const nodeIndex = useMemo(() => new Map(nodes.map((item, index) => [item.node.id, index])), [nodes])
   const selected = nodes.find((item) => item.node.id === selectedNodeId) ?? nodes[0]
-  const graphHeight = Math.max(136, nodes.length * 54 + 28)
+  const graphHeight = Math.max(148, nodes.length * 62 + 30)
   const graphWidth = Math.max(1, lanes.length) * 100
 
   if (!nodes.length) {
@@ -113,19 +141,8 @@ export function EvaluationLineage({
 
   return (
     <section className={`evaluation-lineage ${className}`.trim()} aria-label={ariaLabel}>
-      <div className="evaluation-lineage__topline">
-        <span>평가 이력</span>
-        <div className="evaluation-lineage__legend" aria-label="계보 상태 범례">
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--confirmed" />확정
-          <i className="evaluation-lineage__legend-line evaluation-lineage__legend-line--proposed" />제안
-        </div>
-      </div>
-
       <div className="evaluation-lineage__body">
         <div className="evaluation-lineage__graph-wrap">
-          <div className="evaluation-lineage__lanes" aria-hidden="true">
-            {lanes.map((lane) => <span key={lane}>{lane}</span>)}
-          </div>
           <div className="evaluation-lineage__graph" style={{ '--lineage-height': `${graphHeight}px`, '--lineage-lanes': lanes.length } as CSSProperties}>
             <svg className="evaluation-lineage__wires" viewBox={`0 0 ${graphWidth} ${graphHeight}`} preserveAspectRatio="none" aria-hidden="true">
               {lanes.map((lane, index) => {
@@ -138,8 +155,8 @@ export function EvaluationLineage({
                 const parent = nodes[parentIndex]
                 const x1 = ((laneIndex.get(parent.lane) ?? 0) + 0.5) * 100
                 const x2 = ((laneIndex.get(item.lane) ?? 0) + 0.5) * 100
-                const y1 = parentIndex * 54 + 28
-                const y2 = index * 54 + 28
+                const y1 = parentIndex * 62 + 30
+                const y2 = index * 62 + 30
                 const midY = y1 + (y2 - y1) / 2
                 return <path key={`${item.node.id}-${parentId}`} d={`M ${x1} ${y1} V ${midY} H ${x2} V ${y2}`} className={item.confidence === 'proposed' ? 'evaluation-lineage__edge evaluation-lineage__edge--proposed' : 'evaluation-lineage__edge'} />
               }))}
@@ -149,7 +166,7 @@ export function EvaluationLineage({
                 const lane = laneIndex.get(item.lane) ?? 0
                 const active = item.node.id === selected?.node.id
                 return (
-                  <li key={item.node.id} style={{ '--node-x': `${((lane + 0.5) / lanes.length) * 100}%`, '--node-y': `${index * 54 + 28}px` } as CSSProperties}>
+                  <li key={item.node.id} style={{ '--node-x': `${((lane + 0.5) / lanes.length) * 100}%`, '--node-y': `${index * 62 + 30}px` } as CSSProperties}>
                     <button
                       type="button"
                       className={`evaluation-lineage__node evaluation-lineage__node--${toneFor(item.state)} evaluation-lineage__node--${item.confidence}${active ? ' is-selected' : ''}`}
@@ -158,9 +175,7 @@ export function EvaluationLineage({
                       onClick={() => onSelectNode?.(item.node)}
                     >
                       <span className="evaluation-lineage__point"><i /></span>
-                      <span className="evaluation-lineage__node-copy">
-                        <b>{item.node.id}</b><span>{item.node.name}</span>
-                      </span>
+                      <span className="evaluation-lineage__node-copy"><small>{item.purpose ? evaluationPurposeLabel[item.purpose] : '목적 확인 필요'}</small><b>{item.node.name}</b></span>
                     </button>
                   </li>
                 )
@@ -175,16 +190,8 @@ export function EvaluationLineage({
             <span className={`evaluation-lineage__confidence evaluation-lineage__confidence--${selected.confidence}`}>{selected.confidence === 'confirmed' ? '확정됨' : 'AI 제안'}</span>
           </div>
           <strong>{selected.node.name}</strong>
-          <small>{selected.node.id}{selected.timestamp ? ` · ${selected.timestamp}` : ''}</small>
-          <dl>
-            <div><dt>브랜치</dt><dd>{selected.lane}</dd></div>
-            <div><dt>근거</dt><dd>{selected.evidenceCount}건</dd></div>
-            <div><dt>실패율</dt><dd>{rateLabel(selected.failureRate)}</dd></div>
-            <div><dt>조건</dt><dd>{selected.dominantCondition || '—'}</dd></div>
-            <div><dt>패턴</dt><dd>{selected.dominantPattern || '—'}</dd></div>
-            <div><dt>주요 DQ</dt><dd>{selected.dominantDq || '—'}</dd></div>
-          </dl>
-          {selected.hypothesisTitle && <p className="evaluation-lineage__issue">{selected.hypothesisTitle} · {selected.origin === 'engineer-confirmed' ? '확정' : 'AI 제안'}</p>}
+          <p className="evaluation-lineage__interpretation">{evaluationInterpretation(selected)}</p>
+          {selected.hypothesisTitle && <p className="evaluation-lineage__issue"><small>분석 가설</small>{selected.hypothesisTitle}</p>}
         </aside>}
       </div>
     </section>

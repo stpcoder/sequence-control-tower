@@ -13,6 +13,7 @@ function record(id: string, mode: string, result: LogResultRecord['result']): Lo
     grid: { value: 'G1', state: 'candidate' },
     result,
     resultSource: 'engineer',
+    stageResults: [],
     review: 'confirmed',
     evidenceCount: 0,
     selectedEvidenceCount: 0,

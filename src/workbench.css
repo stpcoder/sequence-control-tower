@@ -22,8 +22,8 @@
   --wb-log-type: 13.25px;
   --wb-log-line-height: 22px;
   --wb-log-row-height: 28px;
-  --wb-log-marker-gutter: 22px;
-  --wb-log-number-gutter: 44px;
+  --wb-log-marker-gutter: 18px;
+  --wb-log-number-gutter: 36px;
   --wb-log-code: #c7ccd4;
   --wb-log-number: #68717d;
   --wb-log-marker: #727c89;
@@ -111,6 +111,7 @@
 .workbench-sidebar > header button:hover { color: var(--wb-text); background: var(--wb-hover); }
 
 .folder-tree { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px 18px; }
+.log-source-actions { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; border-bottom: 1px solid var(--wb-line-soft); }
 .add-folder-row {
   display: flex;
   grid-template-columns: 22px 1fr;
@@ -120,12 +121,14 @@
   min-height: 48px;
   padding: 0 10px;
   border: 0 !important;
-  border-bottom: 1px solid var(--wb-line-soft) !important;
+  border-bottom: 0 !important;
   border-radius: 0;
   color: var(--wb-text) !important;
   text-align: left;
   background: transparent !important;
 }
+.search-log-row { display: grid; min-height: 48px; place-items: center; color: var(--wb-muted) !important; }
+.search-log-row:hover { color: var(--wb-blue) !important; background: rgba(255,255,255,.025) !important; }
 .add-folder-row:hover { color: var(--wb-blue) !important; background: rgba(255,255,255,.025) !important; }
 .add-folder-row svg { color: var(--wb-blue); }
 .add-folder-row span { font-size: var(--wb-type-body); font-weight: 600; }
@@ -316,7 +319,7 @@
 }
 .log-workbench .log-line:hover .evidence-gutter { color: var(--wb-log-marker) !important; }
 .log-workbench .log-line.is-evidence .evidence-gutter { color: var(--wb-blue) !important; }
-.log-workbench .line-number { padding: 0 8px 0 0; color: var(--wb-log-number); text-align: right; user-select: none; }
+.log-workbench .line-number { padding: 0 5px 0 0; color: var(--wb-log-number); text-align: right; user-select: none; }
 .log-workbench .log-line code {
   display: block;
   padding-right: 24px;
@@ -355,10 +358,12 @@
 .workflow-confirmation > div:first-child strong { font-size: var(--wb-type-body); font-weight: 600; }
 .workflow-confirmation > div:first-child span { overflow: hidden; color: var(--wb-dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-confirmation p { margin: 0; color: var(--wb-muted); font-size: var(--wb-type-secondary); }
-.workflow-purpose-options { display: flex; flex-wrap: wrap; gap: 6px; }
-.workflow-purpose-options button { min-height: 32px; padding: 0 9px; border: 1px solid var(--wb-line) !important; border-radius: 6px; color: var(--wb-muted) !important; font-size: 12px; }
+.workflow-purpose-options { display: grid; gap: 1px; }
+.workflow-purpose-options button { display: flex; min-height: 34px; align-items: center; gap: 9px; padding: 0 4px; border: 0 !important; border-bottom: 1px solid var(--wb-line-soft) !important; border-radius: 0; color: var(--wb-muted) !important; font-size: 12px; text-align: left; }
+.workflow-purpose-options button i { width: 14px; height: 14px; border: 1px solid #59616d; border-radius: 50%; }
 .workflow-purpose-options button:hover,
-.workflow-purpose-options button.active { color: var(--wb-text) !important; border-color: #536b8c !important; background: var(--wb-blue-soft) !important; }
+.workflow-purpose-options button.active { color: var(--wb-text) !important; background: transparent !important; }
+.workflow-purpose-options button.active i { border: 4px solid var(--wb-blue); }
 .workflow-confirmation > input { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--wb-line); border-radius: 6px; outline: 0; color: var(--wb-text); background: #1e2229; font-size: 13px; }
 .workflow-confirmation > input:focus { border-color: var(--wb-blue); box-shadow: 0 0 0 2px var(--wb-blue-soft); }
 .workflow-confirmation-actions { display: flex; gap: 10px; }
@@ -451,23 +456,27 @@
 .recipe-title span { color: var(--wb-dim); font-size: var(--wb-type-secondary); line-height: 1.45; }
 .recipe-title button { width: 40px; height: 40px; border-radius: 7px; color: var(--wb-dim); }
 .recipe-title button:hover { color: var(--wb-text); background: var(--wb-hover); }
-.recipe-observations { display: grid; gap: 4px; padding: 12px 0 4px; }
+.recipe-observations { display: grid; gap: 0; padding: 12px 0 4px; }
 .recipe-observations > span { margin-bottom: 4px; color: var(--wb-dim); font-size: var(--wb-type-secondary); }
-.recipe-observations > button { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; min-height: 42px; align-items: center; gap: 7px; padding: 0 4px; border-radius: 7px; color: var(--wb-muted); text-align: left; }
-.recipe-observations > button:hover { color: var(--wb-text); background: var(--wb-hover); }
-.recipe-observations > button.selected { color: var(--wb-text); }
-.recipe-observations > button i,
+.recipe-observations > div { border-bottom: 1px solid var(--wb-line-soft); }
+.recipe-observations > div > button { display: grid; grid-template-columns: 20px minmax(0,1fr) auto 18px; width: 100%; min-height: 42px; align-items: center; gap: 7px; padding: 0 3px; border-radius: 0; color: var(--wb-muted); text-align: left; }
+.recipe-observations > div > button:hover { color: var(--wb-text); background: rgba(255,255,255,.018); }
+.recipe-observations > div > button.selected { color: var(--wb-text); }
+.recipe-observations > div > button i,
 .recipe-order i { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid #555d69; border-radius: 5px; color: #fff; font-style: normal; }
-.recipe-observations > button.selected i,
+.recipe-observations > div > button.selected i,
 .recipe-order.active i { border-color: #6d9fe9; background: #3d6fae; }
 .recipe-observations code { overflow: hidden; font: var(--wb-type-code)/1.35 'SFMono-Regular', Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .recipe-observations small { color: var(--wb-dim); font-size: var(--wb-type-secondary); }
-.recipe-condition-editor { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 5px; margin: 0 4px 6px 29px; }
-.recipe-condition-editor input:not([type='checkbox']), .recipe-condition-editor select { min-width: 0; height: 28px; padding: 0 6px; border: 1px solid var(--wb-line); border-radius: 5px; color: var(--wb-text); background: #1e2229; font-size: 12px; }
-.recipe-condition-editor input:not([type='checkbox']):focus, .recipe-condition-editor select:focus { border-color: var(--wb-blue); outline: 0; }
-.recipe-condition-editor select:nth-of-type(2) { grid-column: 1 / 2; }
-.recipe-condition-editor label { display: flex; align-items: center; gap: 4px; grid-column: 2 / 3; color: var(--wb-dim); font-size: 11px; white-space: nowrap; }
-.recipe-condition-editor input[type='checkbox'] { accent-color: var(--wb-blue); }
+.recipe-condition-editor { display: grid; gap: 0; margin: 0 3px 8px 27px; padding: 2px 0 5px; }
+.recipe-condition-editor > label { display: grid; grid-template-columns: 58px minmax(0, 1fr); min-height: 34px; align-items: center; border-top: 1px solid rgba(41,45,53,.72); color: var(--wb-dim); font-size: 11px; }
+.recipe-condition-editor input, .recipe-condition-editor select { min-width: 0; height: 28px; padding: 0 6px; border: 0; border-bottom: 1px solid transparent; border-radius: 0; color: var(--wb-text); background: transparent; font-size: 12px; }
+.recipe-condition-editor input:focus, .recipe-condition-editor select:focus { border-bottom-color: var(--wb-blue); outline: 0; }
+.recipe-inline-controls { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 6px; }
+.recipe-case-toggle { display: flex; min-height: 34px; align-items: center; gap: 9px; padding: 0; border-top: 1px solid rgba(41,45,53,.72) !important; color: var(--wb-dim) !important; font-size: 11px; text-align: left; }
+.recipe-case-toggle i { width: 14px; height: 14px; border: 1px solid #59616d; border-radius: 50%; }
+.recipe-case-toggle.active { color: var(--wb-text) !important; }
+.recipe-case-toggle.active i { border: 4px solid var(--wb-blue); }
 .recipe-order { display: grid; grid-template-columns: 22px 1fr; width: 100%; min-height: 42px; align-items: center; gap: 7px; padding: 0 4px; color: var(--wb-muted) !important; font-size: var(--wb-type-body); text-align: left; }
 .recipe-order:hover { color: var(--wb-text) !important; }
 .recipe-order-modal {

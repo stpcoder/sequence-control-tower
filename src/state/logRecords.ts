@@ -2,11 +2,28 @@ import type { ResultLabel } from '../domain/workbench'
 import type { MetadataFieldDefinition } from '../domain/workbench/records'
 import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
+import { detectSocFilenameContext } from '../domain/soc-profile'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
 export type ResultSource = 'engineer' | 'candidate' | 'unreviewed'
 export type PatternAxis = 'sample' | 'temperature' | 'mode' | 'grid'
+export type EvaluationStage = 'power' | 'pbl' | 'xbl' | 'abl' | 'uefi' | 'lk' | 'lk2' | 'boot' | 'training' | 'diag' | 'hdiag' | 'test' | 'os'
+export type EvaluationStageStatus = 'pass' | 'fail' | 'reached'
+export type ResultStageGroup = 'firmware' | 'os' | 'test'
+
+export interface EvaluationStageResult {
+  stage: EvaluationStage
+  status: EvaluationStageStatus
+  evidenceCount: number
+}
+
+export interface ResultStageCheckpoint {
+  group: ResultStageGroup
+  label: string
+  status: EvaluationStageStatus
+  evidenceCount: number
+}
 
 export interface CandidateValue {
   value: string | null
@@ -14,12 +31,13 @@ export interface CandidateValue {
 }
 
 export interface MetadataApprovalValue {
-  approval: 'approved' | 'rejected'
+  approval: 'approved' | 'rejected' | 'reset'
   candidateValue?: string
   approvedValue?: string
 }
 
 export type MetadataApprovalsBySource = Readonly<Record<string, Readonly<Record<string, MetadataApprovalValue>>>>
+export type StageResultsBySource = Readonly<Record<string, readonly EvaluationStageResult[]>>
 
 export interface LogResultRecord {
   id: string
@@ -35,6 +53,8 @@ export interface LogResultRecord {
   grid: CandidateValue
   result: ResultLabel
   resultSource: ResultSource
+  /** Independent checkpoints found in one log; a log may contain several passes before its final result. */
+  stageResults: readonly EvaluationStageResult[]
   review: ReviewState
   evidenceCount: number
   selectedEvidenceCount: number
@@ -97,7 +117,7 @@ export function isPivotSelectionValid(
   return [...selectedSourceIds].every((sourceId) => availableIds.has(sourceId))
 }
 
-export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'evidenceCount'
+export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'stageResults' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
 export interface PatternMatrixRow {
@@ -226,6 +246,53 @@ export const RESULT_LABEL_KO: Record<ResultLabel, string> = {
   EXCLUDED: 'Excluded',
 }
 
+export const STAGE_LABEL_KO: Record<EvaluationStage, string> = {
+  power: 'Power', pbl: 'PBL', xbl: 'XBL', abl: 'ABL', uefi: 'UEFI', lk: 'LK', lk2: 'LK2', boot: 'Boot', training: 'Training', diag: 'Diag', hdiag: 'HDiag', test: 'Test', os: 'OS',
+}
+
+export const RESULT_STAGE_GROUP_LABEL: Record<ResultStageGroup, string> = {
+  firmware: '펌웨어',
+  os: 'OS',
+  test: '테스트',
+}
+
+const statusPriority: Record<EvaluationStageStatus, number> = { fail: 3, pass: 2, reached: 1 }
+
+/**
+ * Converts verbose boot traces into the checkpoints an engineer actually scans.
+ * The last reached firmware stage is platform-aware; OS and a real test are
+ * optional, so a boot-only log never receives a fabricated test checkpoint.
+ */
+export function resultStageCheckpoints(
+  stages: readonly EvaluationStageResult[],
+  fileName = '',
+  finalResult?: ResultLabel,
+): ResultStageCheckpoint[] {
+  const byStage = new Map(stages.map((item) => [item.stage, item]))
+  const vendor = detectSocFilenameContext(fileName).vendor
+  const firmwareOrder: readonly EvaluationStage[] = vendor === 'mediatek'
+    ? ['lk2', 'lk', 'pbl']
+    : vendor === 'qualcomm'
+      ? ['uefi', 'abl', 'xbl', 'pbl']
+      : ['uefi', 'lk2', 'lk', 'abl', 'xbl', 'pbl']
+  const firmware = firmwareOrder.map((stage) => byStage.get(stage)).find(Boolean)
+  const os = byStage.get('os')
+  const testCandidates = ['test', 'hdiag', 'diag']
+    .map((stage) => byStage.get(stage as EvaluationStage))
+    .filter((item): item is EvaluationStageResult => Boolean(item))
+    .sort((left, right) => statusPriority[right.status] - statusPriority[left.status])
+  const test = testCandidates.find((item) => item.status === 'fail')
+    ?? (finalResult === 'PASS' ? testCandidates.find((item) => item.status === 'pass') : undefined)
+    ?? (finalResult !== 'TRAINING_FAIL' ? testCandidates.find((item) => item.status === 'reached') : undefined)
+  const checkpoints: ResultStageCheckpoint[] = [
+    ...(firmware ? [{ group: 'firmware' as const, label: STAGE_LABEL_KO[firmware.stage], status: firmware.status, evidenceCount: firmware.evidenceCount }] : []),
+    ...(os ? [{ group: 'os' as const, label: 'OS', status: os.status, evidenceCount: os.evidenceCount }] : []),
+    ...(test ? [{ group: 'test' as const, label: '테스트', status: test.status, evidenceCount: test.evidenceCount }] : []),
+  ]
+  const firmwareFailure = checkpoints.findIndex((item) => item.group === 'firmware' && item.status === 'fail')
+  return firmwareFailure >= 0 ? checkpoints.slice(0, firmwareFailure + 1) : checkpoints
+}
+
 function isMalformedName(name: string): boolean {
   return !name.trim() || /[\u0000-\u001f\u007f]/.test(name) || !/\.log$/i.test(name)
 }
@@ -285,6 +352,7 @@ function metadataCandidate(file: WorkbenchFile, key: PatternAxis): CandidateValu
 
 function applyMetadataApproval(candidate: CandidateValue, approval: MetadataApprovalValue | undefined): CandidateValue {
   if (!approval) return candidate
+  if (approval.approval === 'reset') return candidate
   if (approval.approval === 'rejected') return { ...candidate, state: 'rejected' }
   return {
     value: approval.approvedValue ?? approval.candidateValue ?? candidate.value,
@@ -353,11 +421,12 @@ function matchingLineCount(text: string, pattern: RegExp): number {
 export function inferResultCandidate(file: WorkbenchFile): { result: ResultLabel; evidenceCount: number } {
   const text = file.text ?? ''
   const candidates: Array<{ result: ResultLabel; pattern: RegExp }> = [
-    { result: 'SYSTEM_REBOOT', pattern: /reboot_reason|WATCHDOG_RESET|session recovery detected/i },
+    { result: 'SYSTEM_REBOOT', pattern: /reboot_reason|WATCHDOG_RESET|session recovery detected|\bTERMINAL_RESULT=SYSTEM_REBOOT\b/i },
+    { result: 'SYSTEM_HALT', pattern: /\b(?:TERMINAL_RESULT=)?SYSTEM_HALT\b/i },
     { result: 'TRAINING_FAIL', pattern: /TRAINING_FAIL|training:\s*.+timeout/i },
     { result: 'DIAG_FAIL', pattern: /DIAG_FAIL|hidag[^\n]*(?:fail|error)/i },
     { result: 'TEST_FAIL', pattern: /TEST_FAIL|@FAIL/i },
-    { result: 'PASS', pattern: /@PASS\b/i },
+    { result: 'PASS', pattern: /(?:@PASS\b|\bTERMINAL_RESULT=PASS\b)/i },
   ]
   for (const candidate of candidates) {
     if (candidate.pattern.test(text)) {
@@ -373,10 +442,62 @@ export function inferResultCandidate(file: WorkbenchFile): { result: ResultLabel
   return { result: text ? 'INCOMPLETE' : 'UNKNOWN', evidenceCount: 0 }
 }
 
+/** Finds explicit stage outcomes without collapsing them into one final PASS/FAIL label. */
+export function inferStageResults(file: WorkbenchFile): EvaluationStageResult[] {
+  const text = file.text ?? ''
+  if (!text) return []
+  const runtimeText = text.split(/\r?\n/).filter((line) => !/\bFLOW_CONVENTION\b/i.test(line)).join('\n')
+  const definitions: Array<{ stage: EvaluationStage; status: EvaluationStageStatus; pattern: RegExp }> = [
+    { stage: 'power', status: 'reached', pattern: /\b(?:(?:SYN_)?POWER[_ ]?ON|PWR[_ ]?ON)\b/i },
+    { stage: 'pbl', status: 'reached', pattern: /(?:\b(?:SYN_)?PBL[_ ]?(?:ENTER|START)\b|\bPBL\s*:)/i },
+    { stage: 'pbl', status: 'pass', pattern: /\b(?:SYN_)?PBL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b/i },
+    { stage: 'pbl', status: 'fail', pattern: /\b(?:SYN_)?PBL[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'xbl', status: 'reached', pattern: /(?:\b(?:SYN_)?XBL[_ ]?(?:ENTER|START)\b|\bXBL\s*:)/i },
+    { stage: 'xbl', status: 'pass', pattern: /\b(?:SYN_)?XBL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b/i },
+    { stage: 'xbl', status: 'fail', pattern: /\b(?:SYN_)?XBL[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'abl', status: 'reached', pattern: /(?:\b(?:SYN_)?ABL[_ ]?(?:ENTER|START)\b|\bABL\s*:)/i },
+    { stage: 'abl', status: 'pass', pattern: /\b(?:SYN_)?ABL[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b/i },
+    { stage: 'abl', status: 'fail', pattern: /\b(?:SYN_)?ABL[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'uefi', status: 'reached', pattern: /(?:\b(?:SYN_)?UEFI[_ ]?(?:ENTER|START)\b|\bUEFI\s*:)/i },
+    { stage: 'uefi', status: 'pass', pattern: /(?:\b(?:SYN_)?UEFI[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b|\bUEFI[^\n]*ExitBootServices\b)/i },
+    { stage: 'uefi', status: 'fail', pattern: /\b(?:SYN_)?UEFI[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'lk', status: 'reached', pattern: /(?:\b(?:SYN_)?LK[_ ]?(?:ENTER|START)\b|\bLK\s*:)/i },
+    { stage: 'lk', status: 'pass', pattern: /\b(?:SYN_)?LK[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b/i },
+    { stage: 'lk', status: 'fail', pattern: /\b(?:SYN_)?LK[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'lk2', status: 'reached', pattern: /(?:\b(?:SYN_)?LK2[_ ]?(?:ENTER|START)\b|\bLK2\s*:)/i },
+    { stage: 'lk2', status: 'pass', pattern: /\b(?:SYN_)?LK2[_ ]?(?:EXIT|PASS|DONE|COMPLETE|SUCCESS)\b/i },
+    { stage: 'lk2', status: 'fail', pattern: /\b(?:SYN_)?LK2[_ ]?(?:FAIL|ERROR|TIMEOUT)\b/i },
+    { stage: 'boot', status: 'pass', pattern: /\b(?:BOOT[_ ]?PASS|BOOT\s+(?:COMPLETE|SUCCESS))\b/i },
+    { stage: 'boot', status: 'fail', pattern: /\b(?:BOOT[_ ]?FAIL|BOOT\s+(?:ERROR|TIMEOUT))\b/i },
+    { stage: 'training', status: 'reached', pattern: /\bTRAINING[^\n]*(?:START|BEGIN)\b/i },
+    { stage: 'training', status: 'pass', pattern: /\b(?:TRAINING[_ ]?PASS|TRAINING\s+(?:COMPLETE|SUCCESS))\b/i },
+    { stage: 'training', status: 'fail', pattern: /\b(?:TRAINING[_ ]?FAIL|TRAINING\s+[^\n]*(?:ERROR|TIMEOUT))\b/i },
+    { stage: 'hdiag', status: 'reached', pattern: /\b(?:HIDAG|HDIAG)[^\n]*(?:START|BEGIN)\b/i },
+    { stage: 'hdiag', status: 'pass', pattern: /\b(?:HIDAG|HDIAG)[^\n]*(?:@?PASS|SUCCESS)\b/i },
+    { stage: 'hdiag', status: 'fail', pattern: /\b(?:HIDAG|HDIAG)[^\n]*(?:@?FAIL|ERROR)\b/i },
+    { stage: 'diag', status: 'reached', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:START|BEGIN)\b/i },
+    { stage: 'diag', status: 'pass', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:@?PASS|SUCCESS)\b/i },
+    { stage: 'diag', status: 'fail', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:@?FAIL|ERROR)\b/i },
+    { stage: 'test', status: 'pass', pattern: /(?:\bTEST[_ ]?PASS\b|\bSTRESSAPP[^\n]*(?:@?PASS|SUCCESS)\b|\bTERMINAL_RESULT=PASS\b|@PASS\b)/i },
+    { stage: 'test', status: 'fail', pattern: /(?:\bTEST[_ ]?FAIL\b|\bSTRESSAPP[^\n]*(?:@?FAIL|ERROR)\b|@FAIL\b)/i },
+    { stage: 'os', status: 'reached', pattern: /(?:\b(?:SYN_)?OS[_ ]?(?:READY|BOOTED|BOOT_START)\b|Linux\s+(?:boot\s+)?complete|\bExitBootServices\b)/i },
+  ]
+  const found: EvaluationStageResult[] = []
+  for (const definition of definitions) {
+    if (!definition.pattern.test(runtimeText)) continue
+    const existing = found.find((item) => item.stage === definition.stage)
+    const evidenceCount = matchingLineCount(runtimeText, definition.pattern)
+    if (!existing) found.push({ stage: definition.stage, status: definition.status, evidenceCount })
+    else if (definition.status === 'fail' || existing.status !== 'fail') Object.assign(existing, { status: definition.status, evidenceCount })
+  }
+  return found
+}
+
 export function projectLogRecords(
   files: readonly WorkbenchFile[],
   selectedEvidence: Readonly<Record<string, number>> = {},
   metadataApprovals: MetadataApprovalsBySource = {},
+  stageResultsBySource: StageResultsBySource = {},
 ): LogResultRecord[] {
   const folderLabels = rootAwareFolderLabels(files)
   return files.map((file) => {
@@ -386,6 +507,7 @@ export function projectLogRecords(
     const mode = applyMetadataApproval(metadataCandidate(file, 'mode'), approvals.mode)
     const grid = applyMetadataApproval(metadataCandidate(file, 'grid'), approvals.grid)
     const inferred = inferResultCandidate(file)
+    const stageResults = stageResultsBySource[file.id] ?? inferStageResults(file)
     const result = file.decision ?? file.ruleResult ?? inferred.result
     const resultSource: ResultSource = file.decision
       ? 'engineer'
@@ -409,6 +531,7 @@ export function projectLogRecords(
       grid,
       result,
       resultSource,
+      stageResults,
       review: file.decision && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
       evidenceCount: hasSelectedEvidence ? selectedEvidenceCount : inferred.evidenceCount,
       selectedEvidenceCount,
@@ -427,7 +550,7 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
     if (filters.result !== 'all' && row.result !== filters.result) return false
     if (filters.review !== 'all' && row.review !== filters.review) return false
     if (!query) return true
-    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, row.result]
+    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, row.result, row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]} ${item.status}`).join(' ')]
       .some((value) => normalized(value).includes(query))
   })
 }
@@ -504,6 +627,7 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
 
 function sortableValue(row: LogResultRecord, key: LogRecordSortKey): string | number {
   if (key === 'sample' || key === 'temperature' || key === 'mode' || key === 'grid') return row[key].value ?? ''
+  if (key === 'stageResults') return row.stageResults.map((item) => `${item.stage}:${item.status}`).join('|')
   return row[key]
 }
 
@@ -609,6 +733,7 @@ const BASE_EXPORT_HEADER = [
   'result',
   'result_source',
   'review',
+  'stage_results',
 ] as const
 
 export const EVIDENCE_EXPORT_COLUMNS = ['evidence_count', 'selected_evidence_count'] as const
@@ -640,6 +765,7 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'result', label: '결과' },
   { key: 'result_source', label: '결과 출처' },
   { key: 'review', label: '검토' },
+  { key: 'stage_results', label: '단계별 결과' },
   { key: 'evidence_count', label: '근거 수', group: 'evidence' },
   { key: 'selected_evidence_count', label: '선택 근거 수', group: 'evidence' },
 ]
@@ -669,6 +795,7 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     result: row.result,
     result_source: row.resultSource,
     review: row.review,
+    stage_results: row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]}:${item.status.toUpperCase()}`).join(' | '),
     evidence_count: row.evidenceCount,
     selected_evidence_count: row.selectedEvidenceCount,
   }

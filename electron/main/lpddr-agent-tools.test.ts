@@ -4,7 +4,7 @@ import { extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineerin
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
-    { sourceId: 's1', artifactId: 'a'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKU-X6_LOT-A1_MAT-WAF12_SMP-01_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_FAIL.log' },
+    { sourceId: 's1', artifactId: 'a'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKU-SS-16GB-X16_SKEW-12PS_LOT-A1_MAT-WAF12_SMP-01_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_FAIL.log' },
     { sourceId: 's2', artifactId: 'b'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKU-X6_LOT-B4_MAT-WAF27_SMP-11_T-20_VDD1p275_F8533_TM-BOOT_PAT-TRAIN_DQ20_BL32_CH1.log' }
   ], failureHypotheses: [], evaluationNodes: [], evidenceRecords: [], lpddrDevelopmentContext: {}, folders: [], equipmentProfiles: [], templatePins: [], exportPresets: [], revision: 0, archived: false, createdAt: '', updatedAt: '', schemaVersion: 2 as const
 }
@@ -12,7 +12,7 @@ const project = {
 describe('LPDDR agent tools', () => {
   it('extracts LPDDR conditions without swallowing adjacent tokens', () => {
     expect(extractLpddrFilenameDimensions(project.artifacts[0].relativePath)).toMatchObject({
-      sku: 'X6', lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,
+      sku: 'SS-16GB-X16', skewPs: 12, lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,
       vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR', dq: '9', bl: '16', channel: '0'
     })
     expect(extractLpddrFilenameDimensions(project.artifacts[1].relativePath).temperatureC).toBe(-20)
@@ -100,6 +100,9 @@ describe('LPDDR agent tools', () => {
     const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
     expect(data.denominator).toBe(3)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'temperatureC', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKU', value: 'SS-16GB-X16' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: '12' }))
+    expect(data.live.some((item) => item.dimension === 'sku')).toBe(false)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
     expect(result.summary).toContain('1/2 fail (50.0%)')
   })

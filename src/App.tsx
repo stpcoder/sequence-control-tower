@@ -7,6 +7,7 @@ import {
   type LogResultRecord,
   type MetadataApprovalsBySource,
   type PatternAxis,
+  type StageResultsBySource,
 } from './state/logRecords'
 import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
@@ -36,10 +37,11 @@ import type {
   ProjectLoadResult,
   ProjectSnapshot,
   RendererCommand,
+  ArtifactStageScanInput,
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
-import { matchesPersistedSource, resolveProjectSource } from './state/sourceIdentity'
+import { matchesPersistedSource, matchesProjectSource, resolveProjectSource } from './state/sourceIdentity'
 import { evaluationMemoryToProjectSave, projectSnapshotToEvaluationMemory } from './state/evaluationMemory'
 import type { EvaluationMemory } from './domain/evaluation-memory'
 import { EvaluationMemoryView, type AvailableEvaluationLog } from './views/EvaluationMemoryView'
@@ -164,7 +166,7 @@ export function projectMetadataApprovals(
     if (!files.some((file) => matchesPersistedSource(file, approval.source, projectSources))) return
     latest.set(`${approval.source.sourceId}\u0000${approval.fieldKey}`, approval)
   })
-  const bySource: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
+  const bySource: Record<string, Record<string, { approval: 'approved' | 'rejected' | 'reset'; candidateValue?: string; approvedValue?: string }>> = {}
   latest.forEach((approval) => {
     bySource[approval.source.sourceId] ??= {}
     bySource[approval.source.sourceId][approval.fieldKey] = {
@@ -263,6 +265,7 @@ export default function App() {
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [agentDraft, setAgentDraft] = useState('')
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -270,10 +273,12 @@ export default function App() {
   const activeProjectId = project?.id ?? PROJECT_ID
   const projectGeneration = useRef(0)
   const [previewMetadataApprovals, setPreviewMetadataApprovals] = useState<MetadataApprovalsBySource>({})
+  const [stageResultsBySource, setStageResultsBySource] = useState<StageResultsBySource>({})
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
   const evaluationSnapshotRef = useRef<EvaluationProjectSnapshot | null>(null)
   const evaluationQueue = useRef<Promise<void>>(Promise.resolve())
   const shownStorageNotice = useRef('')
+  const stageInspectionCache = useRef(new Map<string, StageResultsBySource>())
   const lifecycleRef = useRef<AppLifecycle>({ mounted: false, generation: 0 })
   const filesRef = useRef(files)
   const projectRef = useRef<ProjectSnapshot | null>(project)
@@ -405,7 +410,7 @@ export default function App() {
 
   const metadataApprovals = useMemo<MetadataApprovalsBySource>(() => {
     const persisted = projectMetadataApprovals(files, evaluationSnapshot, project?.artifacts ?? [])
-    const merged: Record<string, Record<string, { approval: 'approved' | 'rejected'; candidateValue?: string; approvedValue?: string }>> = {}
+    const merged: Record<string, Record<string, { approval: 'approved' | 'rejected' | 'reset'; candidateValue?: string; approvedValue?: string }>> = {}
     for (const [sourceId, fields] of Object.entries(persisted)) merged[sourceId] = { ...fields }
     for (const [sourceId, fields] of Object.entries(previewMetadataApprovals)) {
       merged[sourceId] = { ...(merged[sourceId] ?? {}), ...fields }
@@ -418,9 +423,74 @@ export default function App() {
     [evaluationSnapshot, files, project?.artifacts],
   )
 
+  const stageInspectionPlan = useMemo(() => {
+    const sources: ArtifactStageScanInput['sources'] = []
+    const fileIds = new Map<string, string>()
+    for (const file of files) {
+      if (!file.artifactId) continue
+      const source = project?.artifacts.find((candidate) => matchesProjectSource(file, candidate))
+      if (source) {
+        sources.push({
+          sourceId: source.sourceId,
+          artifactId: source.artifactId,
+          ...(source.artifactRootId ? { rootId: source.artifactRootId } : {}),
+          relativePath: source.relativePath,
+        })
+        fileIds.set(source.sourceId, file.id)
+      } else {
+        sources.push({
+          sourceId: file.id,
+          artifactId: file.artifactId,
+          ...(file.rootId ? { rootId: file.rootId } : {}),
+          ...(file.relativePath ? { relativePath: file.relativePath } : {}),
+        })
+        fileIds.set(file.id, file.id)
+      }
+    }
+    const key = `${project?.id ?? 'workspace'}\u0000${sources.map((source) => `${source.sourceId}:${source.artifactId}`).sort().join('|')}`
+    return { key, sources, fileIds }
+  }, [files, project])
+
+  useEffect(() => {
+    if (activePage !== 'results' && activePage !== 'patterns') return undefined
+    const api = window.sequenceIntelligence
+    if (!api?.artifacts.inspectStages || !stageInspectionPlan.sources.length) {
+      setStageResultsBySource({})
+      return undefined
+    }
+    const cached = stageInspectionCache.current.get(stageInspectionPlan.key)
+    if (cached) {
+      setStageResultsBySource(cached)
+      return undefined
+    }
+    let active = true
+    setStageResultsBySource({})
+    void api.artifacts.inspectStages({ sources: stageInspectionPlan.sources }).then((result) => {
+      if (!active) return
+      const next: Record<string, import('./state/logRecords').EvaluationStageResult[]> = {}
+      for (const source of result.sources) {
+        const fileId = stageInspectionPlan.fileIds.get(source.sourceId)
+        if (!fileId || source.error) continue
+        next[fileId] = source.stages
+      }
+      stageInspectionCache.current.set(stageInspectionPlan.key, next)
+      while (stageInspectionCache.current.size > 8) {
+        const oldest = stageInspectionCache.current.keys().next().value as string | undefined
+        if (!oldest) break
+        stageInspectionCache.current.delete(oldest)
+      }
+      setStageResultsBySource(next)
+    }).catch((error) => {
+      if (active && !(error instanceof Error && error.name === 'AbortError')) {
+        notify(error instanceof Error ? `단계 결과를 확인하지 못했습니다: ${error.message}` : '단계 결과를 확인하지 못했습니다.', 'error')
+      }
+    })
+    return () => { active = false }
+  }, [activePage, notify, stageInspectionPlan])
+
   const records = useMemo(
-    () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals),
-    [evidenceCounts, files, metadataApprovals, persistedEvidenceCounts],
+    () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals, stageResultsBySource),
+    [evidenceCounts, files, metadataApprovals, persistedEvidenceCounts, stageResultsBySource],
   )
 
   const memory = useMemo(() => project ? projectSnapshotToEvaluationMemory(project) : previewMemory, [previewMemory, project])
@@ -568,6 +638,35 @@ export default function App() {
     }
   }, [activeProjectId, enqueueEvaluation, files, notify])
 
+  const resetMetadataApproval = useCallback(async (record: LogResultRecord, field: PatternAxis) => {
+    const file = files.find((item) => item.id === record.id)
+    if (!file?.artifactId) {
+      setPreviewMetadataApprovals((current) => ({
+        ...current,
+        [record.id]: {
+          ...(current[record.id] ?? {}),
+          [field]: { approval: 'reset' },
+        },
+      }))
+      notify('승인을 취소하고 원래 후보로 되돌렸습니다.', 'info')
+      return
+    }
+    const generation = lifecycleRef.current.generation
+    try {
+      await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadata({
+        projectId: activeProjectId,
+        expectedRevision: snapshot.revision,
+        source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
+        fieldKey: field,
+        extractorId: `default-filename-${field}-v1`,
+        approval: 'reset',
+      }), '메타데이터 승인을 취소하지 못했습니다')
+      notify(`${record.fileName}의 승인을 취소했습니다.`, 'info', generation)
+    } catch {
+      // enqueueEvaluation already surfaced the durable-store failure.
+    }
+  }, [activeProjectId, enqueueEvaluation, files, notify])
+
   const applyMetadataSuggestion = useCallback(async (fileId: string, field: PatternAxis, value: string) => {
     const record = records.find((item) => item.id === fileId)
     if (!record) {
@@ -652,11 +751,11 @@ export default function App() {
       projectSources={project?.artifacts ?? []}
     />
   ) : activePage === 'results' ? (
-    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onNotify={notify} />
+    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} />
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : activePage === 'history' ? (
-    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} />
+    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} onAskAgent={(message) => { setAgentDraft(message); setAgentOpen(true) }} />
   ) : <SettingsView />
 
   return (
@@ -677,6 +776,8 @@ export default function App() {
         evaluationSnapshot={evaluationSnapshot}
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
         onProjectUpdated={projectUpdated}
+        draftMessage={agentDraft}
+        onDraftConsumed={() => setAgentDraft('')}
       />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

@@ -12,6 +12,7 @@ import {
   type PivotAggregation,
   type PivotDimension,
   type AggregateTrend,
+  type PatternAxis,
 } from '../state/logRecords'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
@@ -57,6 +58,10 @@ const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
   majority: '다수 결과',
 }
 
+export function isProjectRevisionConflict(error: unknown): boolean {
+  return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
+}
+
 function SelectControl({ label, value, onChange, children, testId }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode; testId?: string }) {
   return <label className="pattern-control" data-testid={testId}><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>
 }
@@ -88,13 +93,24 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
     setSavingLayout(true)
     try {
-      const existing = project.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)
-      const next = await window.sequenceIntelligence.projects.saveExportPreset({
-        projectId: project.id, expectedRevision: project.revision,
-        preset: patternLayoutPreset({ rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, existing),
+      const api = window.sequenceIntelligence.projects
+      const layout = { rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }
+      const persist = (target: ProjectSnapshot) => api.saveExportPreset({
+        projectId: target.id,
+        expectedRevision: target.revision,
+        preset: patternLayoutPreset(layout, target.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)),
       })
+      let next: ProjectSnapshot
+      try {
+        next = await persist(project)
+      } catch (error) {
+        if (!isProjectRevisionConflict(error)) throw error
+        const refreshed = await api.get({ projectId: project.id })
+        if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        next = await persist(refreshed)
+      }
       onProjectUpdated(next)
-      onNotify('N×M 결과 요약 레이아웃을 저장했습니다.', 'success')
+      onNotify('결과 정리 구성을 저장했습니다.', 'success')
     } catch (error) {
       onNotify(error instanceof Error ? `레이아웃을 저장하지 못했습니다: ${error.message}` : '레이아웃을 저장하지 못했습니다.', 'error')
     } finally { setSavingLayout(false) }
@@ -131,6 +147,9 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
+  const selectedDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
+  const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => ['sample', 'temperature', 'mode', 'grid', 'run'].includes(dimension)
+    && scopedRecords.every((row) => dimension === 'run' ? !row.run : !row[dimension as PatternAxis].value))
   const clearSelection = () => {
     setSelectedSourceIds(null)
     setSelectedCellKey(null)
@@ -165,35 +184,28 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }
 
   return <div className="data-view patterns-view">
-    <header className="data-view-header">
-      <div><h1>결과 정리</h1><span>{records.length.toLocaleString()} logs</span></div>
-      <div className="data-actions"><button className="clear-marking" onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '레이아웃 저장'}</button>{hasFilters || hasSelection ? <button className="clear-marking" onClick={clearAll}><FilterX size={16} />전체 해제</button> : null}</div>
-    </header>
+    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="pattern-toolbar"><button onClick={() => void saveLayout()} disabled={!project || savingLayout}>{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</div></header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
-      <section className="trend-summary" aria-label="현재 범위 추세 요약">
-        <span className="trend-summary-count">현재 범위 {trendSummary.total.toLocaleString()}건</span>
-        {trendSummary.trends.length ? <ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul> : <span>뚜렷한 집중 없음</span>}
-      </section>
-
+      {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
-        <div className="pattern-section-heading"><div><h2 id="pivot-heading">N × M 패턴 그리드</h2><span>셀을 누르면 해당 원본 로그만 아래에 표시됩니다</span></div><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
+        <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
         <div className="pattern-controls" aria-label="패턴 필터">
           <SelectControl label="결과" value={resultFilter} onChange={(value) => { setResultFilter(value as ResultLabel | 'all'); clearSelection() }}><option value="all">전체 결과</option>{resultChoices.map((result) => <option value={result} key={result}>{RESULT_LABEL_KO[result]}</option>)}</SelectControl>
           <SelectControl label="폴더" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 폴더</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
           <button className={`pattern-quick-filter ${failOnly ? 'active' : ''}`} aria-pressed={failOnly} onClick={() => { setFailOnly((value) => !value); clearSelection() }}>FAIL만</button>
-          <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 metadata만</button>
+          <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
         <div className="pattern-axis-controls">
-          <div><span>행축</span><SelectControl label="필수" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{dimensionOptions(activeDimensions, rowAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="선택" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, rowAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
-          <div><span>열축</span><SelectControl label="필수" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{dimensionOptions(activeDimensions, columnAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="선택" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, columnAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
+          <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{dimensionOptions(activeDimensions, rowAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, rowAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
+          <div><span>가로</span><SelectControl label="1" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{dimensionOptions(activeDimensions, columnAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, columnAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
         </div>
+        {allSelectedMetadataUnknown ? <p className="pivot-guidance">선택한 축 값이 모두 미확인입니다. 다른 축을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
         <div className="pivot-scroll"><table className="pivot-table"><thead><tr><th>{rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ')}</th>{grid.columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}><th scope="row">{row.label}</th>{grid.columns.map((column, columnIndex) => { const cell = grid.cells[rowIndex][columnIndex]; const cellKey = `${row.key}-${column.key}`; const active = selectedCellKey === cellKey; const selectable = cell.sourceIds.length > 0; const noSourcesLabel = '관련 로그가 없어 선택할 수 없는 셀'; return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} disabled={!selectable} title={selectable ? undefined : noSourcesLabel} aria-label={selectable ? `${cell.value}개 로그 선택` : `${cell.value} ${noSourcesLabel}`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{cell.value}</button></td> })}</tr>)}</tbody></table></div>
-        <div className="pattern-grid-summary">{grid.total.toLocaleString()} {AGGREGATIONS.find((item) => item.value === aggregation)?.label} · {scopedRecords.length.toLocaleString()} logs</div>
       </section>
 
       <section className="pattern-section marked-rows" aria-labelledby="marked-heading">
-        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? '셀의 원본 로그' : '현재 범위의 로그'}</h2><span>{visibleRows.length.toLocaleString()}{visibleRows.length > RESULT_LIMIT ? ` · 상위 ${RESULT_LIMIT}개 표시` : ''}</span></div>
+        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? '선택한 로그' : '원본 로그'}</h2></div>
         <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>검토</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
       </section>
     </>}
