@@ -11,12 +11,13 @@ import {
   exportableLogRecords,
   normalizeExportColumns,
   RESULT_LABEL_KO,
+  RESULT_STAGE_GROUP_LABEL,
+  resultStageCheckpoints,
   selectedLogRecords,
   selectAllFilteredLogRecords,
   serializeLogRecordsCsv,
   exportCellValue,
   sortLogRecords,
-  STAGE_LABEL_KO,
   toggleLogRecordSelection,
   type CandidateValue,
   type LogRecordExportColumn,
@@ -26,7 +27,7 @@ import {
   type ReviewState,
   type SortDirection,
   type LogRecordExportPreview,
-  type EvaluationStage,
+  type ResultStageGroup,
   type EvaluationStageStatus,
 } from '../state/logRecords'
 
@@ -48,7 +49,7 @@ const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'temperature', label: '온도' },
   { key: 'mode', label: 'Mode' },
   { key: 'grid', label: 'Grid' },
-  { key: 'stageResults', label: '단계별 결과' },
+  { key: 'stageResults', label: '진행 단계' },
   { key: 'result', label: '결과' },
   { key: 'review', label: '판정 검토' },
   { key: 'evidenceCount', label: '근거' },
@@ -82,8 +83,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<ResultLabel | 'all'>('all')
   const [review, setReview] = useState<ReviewState | 'all'>('all')
-  const [folder, setFolder] = useState<string | 'all'>('all')
-  const [stage, setStage] = useState<EvaluationStage | 'all'>('all')
+  const [stage, setStage] = useState<ResultStageGroup | 'all'>('all')
   const [stageStatus, setStageStatus] = useState<EvaluationStageStatus | 'all'>('all')
   const [sortKey, setSortKey] = useState<LogRecordSortKey>('fileName')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
@@ -98,14 +98,14 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const [editingValue, setEditingValue] = useState('')
   const [savingMetadata, setSavingMetadata] = useState(false)
 
-  const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((left, right) => left.localeCompare(right, 'ko-KR')), [records])
-  const filtered = useMemo(() => sortLogRecords(filterLogRecords(records, { query, result, review, folder }).filter((row) => {
-    if (stage !== 'all' && !row.stageResults.some((item) => item.stage === stage && (stageStatus === 'all' || item.status === stageStatus))) return false
-    if (stage === 'all' && stageStatus !== 'all' && !row.stageResults.some((item) => item.status === stageStatus)) return false
+  const filtered = useMemo(() => sortLogRecords(filterLogRecords(records, { query, result, review, folder: 'all' }).filter((row) => {
+    const checkpoints = resultStageCheckpoints(row.stageResults, row.fileName, row.result)
+    if (stage !== 'all' && !checkpoints.some((item) => item.group === stage && (stageStatus === 'all' || item.status === stageStatus))) return false
+    if (stage === 'all' && stageStatus !== 'all' && !checkpoints.some((item) => item.status === stageStatus)) return false
     if (preset === 'fail') return new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT']).has(row.result)
     if (preset === 'needs_review') return row.review === 'needs_review' || [row.sample, row.temperature, row.mode, row.grid].some((field) => field.state === 'missing' || field.state === 'malformed')
     return true
-  }), sortKey, sortDirection), [query, records, result, review, folder, stage, stageStatus, preset, sortDirection, sortKey])
+  }), sortKey, sortDirection), [query, records, result, review, stage, stageStatus, preset, sortDirection, sortKey])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
   const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -117,7 +117,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     () => EXPORT_COLUMN_DEFINITIONS.filter((column) => selectedExportColumnKeys.has(column.key)).map((column) => column.key),
     [selectedExportColumnKeys],
   )
-  const hasFilters = Boolean(query || result !== 'all' || review !== 'all' || folder !== 'all' || stage !== 'all' || stageStatus !== 'all' || preset)
+  const hasFilters = Boolean(query || result !== 'all' || review !== 'all' || stage !== 'all' || stageStatus !== 'all' || preset)
   const evidenceColumnsSelected = EVIDENCE_EXPORT_COLUMNS.every((column) => selectedExportColumnKeys.has(column))
   const editingRow = editingCell ? records.find((item) => item.id === editingCell.rowId) : undefined
 
@@ -134,7 +134,6 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     setQuery('')
     setResult('all')
     setReview('all')
-    setFolder('all')
     setStage('all')
     setStageStatus('all')
     setPreset(null)
@@ -262,11 +261,10 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
         <label className="data-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="파일명, 폴더, 조건 검색" aria-label="결과 검색" /></label>
         <label><span>결과</span><select value={result} onChange={(event) => { setResult(event.target.value as ResultLabel | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_LABEL_KO).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
         <label><span>검토</span><select value={review} onChange={(event) => { setReview(event.target.value as ReviewState | 'all'); setPage(1) }}><option value="all">전체</option><option value="needs_review">검토 필요</option><option value="confirmed">확정</option></select></label>
-        <label><span>단계</span><select value={stage} onChange={(event) => { setStage(event.target.value as EvaluationStage | 'all'); setPage(1) }}><option value="all">전체 단계</option>{Object.entries(STAGE_LABEL_KO).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <label><span>단계 판정</span><select value={stageStatus} onChange={(event) => { setStageStatus(event.target.value as EvaluationStageStatus | 'all'); setPage(1) }}><option value="all">전체</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="reached">도달</option></select></label>
-        <label><span>폴더 범위</span><select value={folder} onChange={(event) => { setFolder(event.target.value); setPage(1) }}><option value="all">전체 폴더</option>{folders.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
-        <button className="results-preset" aria-pressed={preset === 'fail'} onClick={() => { setPreset((current) => current === 'fail' ? null : 'fail'); setPage(1) }}>FAIL 모아보기</button>
-        <button className="results-preset" aria-pressed={preset === 'needs_review'} onClick={() => { setPreset((current) => current === 'needs_review' ? null : 'needs_review'); setReview('all'); setPage(1) }}>미확인·검토필요</button>
+        <label><span>구간</span><select value={stage} onChange={(event) => { setStage(event.target.value as ResultStageGroup | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_STAGE_GROUP_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label><span>판정</span><select value={stageStatus} onChange={(event) => { setStageStatus(event.target.value as EvaluationStageStatus | 'all'); setPage(1) }}><option value="all">전체</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="reached">도달</option></select></label>
+        <button className="results-preset" aria-pressed={preset === 'fail'} onClick={() => { setPreset((current) => current === 'fail' ? null : 'fail'); setPage(1) }}>FAIL만</button>
+        <button className="results-preset" aria-pressed={preset === 'needs_review'} onClick={() => { setPreset((current) => current === 'needs_review' ? null : 'needs_review'); setReview('all'); setPage(1) }}>검토 필요만</button>
         {hasFilters ? <button className="clear-filter" onClick={clearFilters}><FilterX size={16} />초기화</button> : null}
       </section>
 
@@ -287,7 +285,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
                 {(['sample', 'temperature', 'mode', 'grid'] as const).map((field) => <td key={field}>
                   {candidateLabel(row[field], field === 'temperature' ? '°C' : '', onEditMetadata || onApproveMetadata ? () => beginEdit(row, field) : undefined)}
                 </td>)}
-                <td><div className="stage-results">{row.stageResults.length ? row.stageResults.map((item) => <span className={`stage-result ${item.status}`} key={item.stage}>{STAGE_LABEL_KO[item.stage]} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
+                <td><div className="stage-results">{resultStageCheckpoints(row.stageResults, row.fileName, row.result).length ? resultStageCheckpoints(row.stageResults, row.fileName, row.result).map((item) => <span className={`stage-result ${item.status}`} key={item.group}>{item.label} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
                 <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span>{row.resultSource === 'candidate' ? <small className="row-note">후보</small> : null}</td>
                 <td><span className={`review-label ${row.review}`}>{row.review === 'confirmed' ? '확정' : '검토 필요'}</span></td>
                 <td><span className="evidence-count">{row.evidenceCount}</span>{row.selectedEvidenceCount ? <small className="row-note">선택됨</small> : null}</td>

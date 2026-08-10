@@ -1003,7 +1003,14 @@ export class ArtifactService {
   async inspectStages(input: ArtifactStageScanInput, signal?: AbortSignal): Promise<ArtifactStageScanResult> {
     const inspected = await this.inspectEvidence({
       sources: input?.sources ?? [],
-      specs: STAGE_EVIDENCE_SPECS.map((spec) => ({ ...spec, mode: 'regex' as const, caseSensitive: false })),
+      specs: STAGE_EVIDENCE_SPECS.map((spec) => ({
+        ...spec,
+        // FLOW_CONVENTION and similar declarations describe an expected path;
+        // they are not proof that the runtime reached that stage.
+        query: `(?:^|\\n)(?![^\\n]*\\bFLOW_CONVENTION\\b)[^\\n]*(?:${spec.query})`,
+        mode: 'regex' as const,
+        caseSensitive: false,
+      })),
     }, signal)
     return {
       sources: inspected.sources.map((source) => {

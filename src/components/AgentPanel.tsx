@@ -65,6 +65,10 @@ export function shouldRetainAgentSession(previous: ProjectSnapshot | null, next:
   return previous?.id === next?.id
 }
 
+function isProjectRevisionConflict(error: unknown): boolean {
+  return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
+}
+
 export function toolsForAssistantMessage(
   message: NativeAgentSessionView['messages'][number],
   messages: readonly NativeAgentSessionView['messages'][number][],
@@ -366,8 +370,19 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       if (!current || current.id !== project.id) throw new Error('프로젝트가 변경되었습니다. 최신 프로젝트에서 다시 시도해 주세요.')
       const title = evaluationProposalTitle(evaluationRun.proposal)
       const namedPayload: EvaluationAgentMemoryPayloadView = { ...payload, hypothesis: { ...payload.hypothesis, title }, node: { ...payload.node, name: title } }
-      const merged = mergeEvaluationAgentMemory(current, namedPayload)
-      const saved = await window.sequenceIntelligence.projects.save({ projectId: current.id, expectedRevision: current.revision, failureHypotheses: merged.failureHypotheses, evaluationNodes: merged.evaluationNodes, evidenceRecords: merged.evidenceRecords })
+      const persist = (target: ProjectSnapshot) => {
+        const merged = mergeEvaluationAgentMemory(target, namedPayload)
+        return window.sequenceIntelligence!.projects.save({ projectId: target.id, expectedRevision: target.revision, failureHypotheses: merged.failureHypotheses, evaluationNodes: merged.evaluationNodes, evidenceRecords: merged.evidenceRecords })
+      }
+      let saved: ProjectSnapshot
+      try {
+        saved = await persist(current)
+      } catch (reason) {
+        if (!isProjectRevisionConflict(reason)) throw reason
+        const refreshed = await window.sequenceIntelligence.projects.get({ projectId: current.id })
+        if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        saved = await persist(refreshed)
+      }
       onProjectUpdated(saved)
       setSavedMessage('평가 이력에 저장됨')
     } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }

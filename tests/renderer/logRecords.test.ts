@@ -9,6 +9,7 @@ import {
   initLogRecordExportPreview,
   patternMatrix,
   projectLogRecords,
+  resultStageCheckpoints,
   selectAllFilteredLogRecords,
   selectedLogRecords,
   serializeLogRecordsCsv,
@@ -404,6 +405,22 @@ describe('renderer log result projection', () => {
       { stage: 'test', status: 'fail', evidenceCount: 2 },
     ])
     expect(serializeLogRecordsTsv([row], ['stage_results'])).toContain('Power:REACHED | UEFI:PASS | Boot:PASS | Training:PASS | HDiag:FAIL | Test:FAIL')
+    expect(resultStageCheckpoints(row.stageResults, 'SM8975_boot.log')).toEqual([
+      { group: 'firmware', label: 'UEFI', status: 'pass', evidenceCount: 1 },
+      { group: 'test', label: '테스트', status: 'fail', evidenceCount: 2 },
+    ])
+  })
+
+  it('uses platform firmware labels and omits test for boot-only logs', () => {
+    expect(resultStageCheckpoints([
+      { stage: 'pbl', status: 'pass', evidenceCount: 1 },
+      { stage: 'lk', status: 'pass', evidenceCount: 1 },
+      { stage: 'lk2', status: 'pass', evidenceCount: 1 },
+      { stage: 'os', status: 'reached', evidenceCount: 1 },
+    ], 'MTK_24D_BOOT.log')).toEqual([
+      { group: 'firmware', label: 'LK2', status: 'pass', evidenceCount: 1 },
+      { group: 'os', label: 'OS', status: 'reached', evidenceCount: 1 },
+    ])
   })
 
   it('uses bounded native stage inspection when artifact text stays outside the renderer', () => {

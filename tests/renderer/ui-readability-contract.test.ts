@@ -103,4 +103,23 @@ describe('UI readability contract', () => {
     expect(memoryStyles).toContain('border: 1px solid #454b56;')
     expect(memoryStyles).toContain('background: #1e2229;')
   })
+
+  it('keeps result stages concise and history in a resizable qualitative workspace', async () => {
+    const [results, patterns, memory, memoryStyles, lineageStyles] = (await Promise.all([
+      readFile(resolve(root, 'src/views/ResultsView.tsx'), 'utf8'),
+      readFile(resolve(root, 'src/views/PatternsView.tsx'), 'utf8'),
+      readFile(resolve(root, 'src/views/EvaluationMemoryView.tsx'), 'utf8'),
+      readFile(resolve(root, 'src/views/evaluation-memory-view.css'), 'utf8'),
+      readFile(resolve(root, 'src/components/evaluation-lineage.css'), 'utf8'),
+    ])).map(normalizeNewlines)
+    expect(results).toContain('RESULT_STAGE_GROUP_LABEL')
+    expect(results).not.toContain('폴더 범위')
+    expect(results).toContain('FAIL만')
+    expect(results).toContain('검토 필요만')
+    expect(patterns).not.toContain('className="stage-summary"')
+    expect(memory).toContain('반복된 불량 경향')
+    expect(memory).toContain('role="separator"')
+    expect(memoryStyles).toContain('var(--evaluation-editor-width')
+    expect(lineageStyles).not.toContain('box-shadow: inset 2px 0 #75a7ff')
+  })
 })

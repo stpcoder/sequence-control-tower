@@ -446,6 +446,7 @@ describe('ArtifactService log workbench', () => {
     const source = join(root, 'source')
     await mkdir(source)
     await writeFile(join(source, 'multi-stage.log'), [
+      'FLOW_CONVENTION=SYN_POWER_ON>SYN_UEFI_ENTER>SYN_UEFI_EXIT>SYN_OS_READY',
       'POWER_ON',
       'SYN_UEFI_ENTER',
       'SYN_UEFI_EXIT',

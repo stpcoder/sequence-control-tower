@@ -15,6 +15,7 @@ interface DisplayNode {
   hypothesisTitle?: string
   origin: AssessmentOrigin
   evidenceCount: number
+  failureCount: number
   failureRate?: number
   dominantDq?: string
   dominantPattern?: string
@@ -57,14 +58,23 @@ function toneFor(state: EvaluationStatus): 'pass' | 'fail' | 'warning' | 'active
   return 'warning'
 }
 
-function rateLabel(rate?: number): string {
-  if (rate === undefined || rate === null) return '—'
-  const normalized = rate <= 1 ? rate * 100 : rate
-  return `${Math.round(normalized)}%`
-}
-
 function value(value: unknown): string | undefined {
   return value === undefined || value === null || value === '' ? undefined : String(value)
+}
+
+export function evaluationInterpretation(input: Pick<DisplayNode, 'evidenceCount' | 'failureCount' | 'failureRate' | 'dominantCondition' | 'dominantPattern' | 'dominantDq'>): string {
+  if (!input.evidenceCount) return '연결된 로그가 없어 아직 불량 경향을 해석할 수 없습니다.'
+  if (!input.failureCount) return '연결된 로그에서는 실패가 확인되지 않았습니다.'
+  const conditions = [
+    input.dominantCondition,
+    input.dominantPattern ? `${input.dominantPattern} 패턴` : undefined,
+    input.dominantDq ? `DQ ${input.dominantDq}` : undefined,
+  ].filter(Boolean)
+  if (!conditions.length) return '실패 로그는 있으나 반복되는 온도·전압·패턴·DQ 조건은 아직 분명하지 않습니다.'
+  const subject = conditions.join(' · ')
+  if (input.failureRate === 1) return `${subject}에서 확인된 로그가 모두 실패했습니다.`
+  if ((input.failureRate ?? 0) >= 0.6) return `${subject}에서 실패가 반복적으로 집중됩니다.`
+  return `${subject}에서 일부 실패가 확인됩니다.`
 }
 
 function resolvedDimensions(node: EvaluationNode, recordDimensions: Partial<EvaluationDimensions> | undefined, nodes: ReadonlyMap<string, EvaluationNode>): EvaluationDimensions {
@@ -101,14 +111,15 @@ export function EvaluationLineage({
       const evidence = memory.evidence.filter((record) => record.evaluationNodeId === node.id)
       const hypothesis = node.hypothesisId ? hypothesisById.get(node.hypothesisId) : undefined
       const origin = hypothesis?.origin ?? (evidence.some((record) => record.origin === 'engineer-confirmed') ? 'engineer-confirmed' : 'ai-proposed')
-      const dimensions = evidence.map((record) => resolvedDimensions(node, record.dimensions, nodeById))
-      const failures = evidence.filter((record) => record.status === 'fail').length
+      const failedEvidence = evidence.filter((record) => record.status === 'fail')
+      const dimensions = failedEvidence.map((record) => resolvedDimensions(node, record.dimensions, nodeById))
+      const failures = failedEvidence.length
       const latest = evidence.find((record) => record.status === 'running')?.status ?? node.status ?? evidence.at(-1)?.status ?? 'inconclusive'
       const displayedPurpose = displayEvaluationPurpose(node)
       return {
         node, purpose: displayedPurpose.purpose, purposeInferred: displayedPurpose.inferred, lane: node.branchId || 'main', state: latest, origin,
         confidence: origin === 'engineer-confirmed' ? 'confirmed' : 'proposed', hypothesisTitle: hypothesis?.title,
-        evidenceCount: evidence.length, failureRate: evidence.length ? failures / evidence.length : undefined,
+        evidenceCount: evidence.length, failureCount: failures, failureRate: evidence.length ? failures / evidence.length : undefined,
         dominantDq: mode(dimensions.map((item) => value(item.dq))), dominantPattern: mode(dimensions.map((item) => value(item.pattern))),
         dominantCondition: mode(dimensions.map((item) => {
           const parts = [item.temperatureC === undefined ? undefined : `${item.temperatureC}°C`, item.vdd === undefined ? undefined : `${item.vdd}V`, item.frequencyMHz === undefined ? undefined : `${item.frequencyMHz}MHz`].filter(Boolean)
@@ -164,7 +175,7 @@ export function EvaluationLineage({
                       onClick={() => onSelectNode?.(item.node)}
                     >
                       <span className="evaluation-lineage__point"><i /></span>
-                      <span className="evaluation-lineage__node-copy"><small>{item.purpose ? `${evaluationPurposeLabel[item.purpose]}${item.purposeInferred ? ' · 후보' : ''}` : '목적 확인 필요'}</small><b>{item.node.name}</b></span>
+                      <span className="evaluation-lineage__node-copy"><small>{item.purpose ? evaluationPurposeLabel[item.purpose] : '목적 확인 필요'}</small><b>{item.node.name}</b></span>
                     </button>
                   </li>
                 )
@@ -179,15 +190,8 @@ export function EvaluationLineage({
             <span className={`evaluation-lineage__confidence evaluation-lineage__confidence--${selected.confidence}`}>{selected.confidence === 'confirmed' ? '확정됨' : 'AI 제안'}</span>
           </div>
           <strong>{selected.node.name}</strong>
-          <dl>
-            <div><dt>목적</dt><dd>{selected.purpose ? `${evaluationPurposeLabel[selected.purpose]}${selected.purposeInferred ? ' (후보)' : ''}` : '확인 필요'}</dd></div>
-            <div><dt>근거</dt><dd>{selected.evidenceCount}건</dd></div>
-            <div><dt>실패율</dt><dd>{rateLabel(selected.failureRate)}</dd></div>
-            <div><dt>조건</dt><dd>{selected.dominantCondition || '—'}</dd></div>
-            <div><dt>패턴</dt><dd>{selected.dominantPattern || '—'}</dd></div>
-            <div><dt>주요 DQ</dt><dd>{selected.dominantDq || '—'}</dd></div>
-          </dl>
-          {selected.hypothesisTitle && <p className="evaluation-lineage__issue">{selected.hypothesisTitle}</p>}
+          <p className="evaluation-lineage__interpretation">{evaluationInterpretation(selected)}</p>
+          {selected.hypothesisTitle && <p className="evaluation-lineage__issue"><small>분석 가설</small>{selected.hypothesisTitle}</p>}
         </aside>}
       </div>
     </section>

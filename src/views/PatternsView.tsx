@@ -7,14 +7,11 @@ import {
   filterLogRecords,
   isPivotSelectionValid,
   RESULT_LABEL_KO,
-  STAGE_LABEL_KO,
   type LogResultRecord,
   type LogRecordFilters,
   type PivotAggregation,
   type PivotDimension,
   type AggregateTrend,
-  type EvaluationStage,
-  type EvaluationStageStatus,
   type PatternAxis,
 } from '../state/logRecords'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
@@ -61,6 +58,10 @@ const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
   majority: '다수 결과',
 }
 
+export function isProjectRevisionConflict(error: unknown): boolean {
+  return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
+}
+
 function SelectControl({ label, value, onChange, children, testId }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode; testId?: string }) {
   return <label className="pattern-control" data-testid={testId}><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>
 }
@@ -92,13 +93,24 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
     setSavingLayout(true)
     try {
-      const existing = project.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)
-      const next = await window.sequenceIntelligence.projects.saveExportPreset({
-        projectId: project.id, expectedRevision: project.revision,
-        preset: patternLayoutPreset({ rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, existing),
+      const api = window.sequenceIntelligence.projects
+      const layout = { rowAxes, columnAxes, aggregation, resultFilter, folderFilter, failOnly, unknownMetadataOnly }
+      const persist = (target: ProjectSnapshot) => api.saveExportPreset({
+        projectId: target.id,
+        expectedRevision: target.revision,
+        preset: patternLayoutPreset(layout, target.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)),
       })
+      let next: ProjectSnapshot
+      try {
+        next = await persist(project)
+      } catch (error) {
+        if (!isProjectRevisionConflict(error)) throw error
+        const refreshed = await api.get({ projectId: project.id })
+        if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        next = await persist(refreshed)
+      }
       onProjectUpdated(next)
-      onNotify('N×M 결과 요약 레이아웃을 저장했습니다.', 'success')
+      onNotify('결과 정리 구성을 저장했습니다.', 'success')
     } catch (error) {
       onNotify(error instanceof Error ? `레이아웃을 저장하지 못했습니다: ${error.message}` : '레이아웃을 저장하지 못했습니다.', 'error')
     } finally { setSavingLayout(false) }
@@ -135,14 +147,6 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
-  const stageSummary = useMemo(() => (Object.keys(STAGE_LABEL_KO) as EvaluationStage[]).map((stage) => {
-    const counts: Record<EvaluationStageStatus, number> = { pass: 0, fail: 0, reached: 0 }
-    for (const row of scopedRecords) {
-      const checkpoint = row.stageResults.find((item) => item.stage === stage)
-      if (checkpoint) counts[checkpoint.status] += 1
-    }
-    return { stage, counts, total: counts.pass + counts.fail + counts.reached }
-  }).filter((item) => item.total > 0), [scopedRecords])
   const selectedDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
   const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => ['sample', 'temperature', 'mode', 'grid', 'run'].includes(dimension)
     && scopedRecords.every((row) => dimension === 'run' ? !row.run : !row[dimension as PatternAxis].value))
@@ -186,15 +190,13 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
-      {stageSummary.length ? <section className="stage-summary" aria-label="단계별 결과"><span>단계별 결과</span>{stageSummary.map((item) => <div key={item.stage}><b>{STAGE_LABEL_KO[item.stage]}</b>{item.counts.pass ? <em className="pass">PASS {item.counts.pass}</em> : null}{item.counts.fail ? <em className="fail">FAIL {item.counts.fail}</em> : null}{item.counts.reached ? <em className="reached">도달 {item.counts.reached}</em> : null}</div>)}</section> : null}
-
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
         <div className="pattern-controls" aria-label="패턴 필터">
           <SelectControl label="결과" value={resultFilter} onChange={(value) => { setResultFilter(value as ResultLabel | 'all'); clearSelection() }}><option value="all">전체 결과</option>{resultChoices.map((result) => <option value={result} key={result}>{RESULT_LABEL_KO[result]}</option>)}</SelectControl>
           <SelectControl label="폴더" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 폴더</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
           <button className={`pattern-quick-filter ${failOnly ? 'active' : ''}`} aria-pressed={failOnly} onClick={() => { setFailOnly((value) => !value); clearSelection() }}>FAIL만</button>
-          <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 metadata만</button>
+          <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
         <div className="pattern-axis-controls">
           <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{dimensionOptions(activeDimensions, rowAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, rowAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>

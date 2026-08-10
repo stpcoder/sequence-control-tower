@@ -40,7 +40,7 @@ describe("Korean engineer workflow manual", () => {
       "결과표",
       "파일명, 폴더, 조건 검색",
       "검토",
-      "폴더 범위",
+      "구간",
       "초기화",
       "열 선택",
       "내보낼 열",

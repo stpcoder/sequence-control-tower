@@ -53,6 +53,7 @@ interface ProjectControlProps {
 }
 
 const blankDraft = (): ProjectInitDraft => ({ name: '', purpose: '', items: [], custom: '', reuseProjectId: '' })
+const isProjectRevisionConflict = (error: unknown) => error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
 
 export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }: ProjectControlProps) {
   const api = window.sequenceIntelligence
@@ -134,7 +135,11 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     const target = project
     if (!target) return
     setBusy(true)
-    try { const result = await api.projects.attachFolder({ projectId: target.id, expectedRevision: target.revision }); if (!('cancelled' in result)) { onLoaded(result); setCreatedProjectId(null) } }
+    try {
+      const latest = await api.projects.get({ projectId: target.id }) ?? target
+      const result = await api.projects.attachFolder({ projectId: latest.id, expectedRevision: latest.revision })
+      if (!('cancelled' in result)) { onLoaded(result); setCreatedProjectId(null) }
+    }
     catch (error) { onError(error instanceof Error ? error.message : '폴더를 연결하지 못했습니다.') }
     finally { setBusy(false) }
   }
@@ -146,7 +151,15 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
   }
   const detach = async (rootId: string) => {
     if (!project) return; setBusy(true)
-    try { onProjectUpdated(await api.projects.detachFolder({ projectId: project.id, expectedRevision: project.revision, rootId })) }
+    try {
+      try { onProjectUpdated(await api.projects.detachFolder({ projectId: project.id, expectedRevision: project.revision, rootId })) }
+      catch (error) {
+        if (!isProjectRevisionConflict(error)) throw error
+        const latest = await api.projects.get({ projectId: project.id })
+        if (!latest) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        onProjectUpdated(await api.projects.detachFolder({ projectId: latest.id, expectedRevision: latest.revision, rootId }))
+      }
+    }
     catch (error) { onError(error instanceof Error ? error.message : '폴더 연결을 해제하지 못했습니다.') }
     finally { setBusy(false) }
   }
@@ -154,12 +167,20 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     if (!project || !metaName.trim()) return; setBusy(true)
     try {
       const stamp = new Date().toISOString()
-      let next = await api.projects.save({
-        projectId: project.id, expectedRevision: project.revision, name: metaName.trim(), description: metaDescription.trim() || undefined,
+      const persist = (target: ProjectSnapshot) => api.projects.save({
+        projectId: target.id, expectedRevision: target.revision, name: metaName.trim(), description: metaDescription.trim() || undefined,
         onboardingAnswers: { ...metaAnswers, evaluationTarget: metaDescription.trim(), importantMetadata: serializeOnboardingItems(metaAnswerItems, metaCustom) },
-        equipmentProfiles: equipmentAlias ? [{ alias: equipmentAlias, profileId: project.equipmentProfiles[0]?.profileId ?? 'default', updatedAt: stamp }] : project.equipmentProfiles,
-        templatePins: templateRevision && Number.isInteger(Number(templateRevision)) ? [{ templateId: project.templatePins[0]?.templateId ?? 'default', revision: Number(templateRevision), pinnedAt: stamp }] : project.templatePins,
+        equipmentProfiles: equipmentAlias ? [{ alias: equipmentAlias, profileId: target.equipmentProfiles[0]?.profileId ?? 'default', updatedAt: stamp }] : target.equipmentProfiles,
+        templatePins: templateRevision && Number.isInteger(Number(templateRevision)) ? [{ templateId: target.templatePins[0]?.templateId ?? 'default', revision: Number(templateRevision), pinnedAt: stamp }] : target.templatePins,
       })
+      let next: ProjectSnapshot
+      try { next = await persist(project) }
+      catch (error) {
+        if (!isProjectRevisionConflict(error)) throw error
+        const latest = await api.projects.get({ projectId: project.id })
+        if (!latest) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+        next = await persist(latest)
+      }
       if (presetName) next = await api.projects.saveExportPreset({ projectId: next.id, expectedRevision: next.revision, preset: { id: next.exportPresets[0]?.id, name: presetName, format: next.exportPresets[0]?.format ?? 'csv', options: next.exportPresets[0]?.options ?? {} } })
       onProjectUpdated(next)
     } catch (error) { onError(error instanceof Error ? error.message : '프로젝트 설정을 저장하지 못했습니다.') }
