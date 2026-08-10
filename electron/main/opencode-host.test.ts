@@ -1,19 +1,21 @@
+import { join, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isolatedOpenCodePaths, latestRunToolNames, vertexOpenCodeTarget } from './opencode-host'
 
 describe('isolatedOpenCodePaths', () => {
   it('keeps embedded OpenCode state below the application data root', () => {
     const paths = isolatedOpenCodePaths('/app/data')
+    const root = join('/app/data', 'opencode-runtime')
 
     expect(paths).toEqual({
-      home: '/app/data/opencode-runtime/home',
-      configHome: '/app/data/opencode-runtime/config',
-      dataHome: '/app/data/opencode-runtime/data',
-      cacheHome: '/app/data/opencode-runtime/cache',
-      stateHome: '/app/data/opencode-runtime/state',
-      configDir: '/app/data/opencode-runtime/config/opencode'
+      home: join(root, 'home'),
+      configHome: join(root, 'config'),
+      dataHome: join(root, 'data'),
+      cacheHome: join(root, 'cache'),
+      stateHome: join(root, 'state'),
+      configDir: join(root, 'config', 'opencode')
     })
-    expect(Object.values(paths).every((value) => value.startsWith('/app/data/opencode-runtime/'))).toBe(true)
+    expect(Object.values(paths).every((value) => value.startsWith(`${root}${sep}`))).toBe(true)
   })
 
   it('maps a Vertex OpenAI-compatible URL to the native Vertex provider target', () => {
