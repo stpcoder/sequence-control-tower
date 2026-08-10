@@ -77,6 +77,7 @@ describe('UI readability contract', () => {
     expect(memory).not.toContain('프로젝트 평가 이력')
     expect(project).not.toContain('<summary>프로젝트 고급 설정</summary>')
     expect(project).not.toContain('>재검증</button>')
+    expect(normalizeNewlines(await readFile(resolve(root, 'src/styles.css'), 'utf8'))).not.toContain('.project-list-item.active { border-left-color')
   })
 
   it('keeps setup copy concise and separates SKEW from numeric timing offset', async () => {
@@ -119,7 +120,9 @@ describe('UI readability contract', () => {
     expect(results).toContain('검토 필요만')
     expect(patterns).not.toContain('className="stage-summary"')
     expect(patterns).not.toContain('미승인 후보로 계산한 미리보기입니다')
-    expect(memory).toContain('반복된 불량 경향')
+    expect(memory).toContain('로그 기반 경향')
+    expect(memory).toContain('나머지 {remainingTrends.length}개')
+    expect(memory).not.toContain('evaluation-memory-view__agent-composer')
     expect(memory).toContain('role="separator"')
     expect(memoryStyles).toContain('var(--evaluation-editor-width')
     expect(lineageStyles).not.toContain('box-shadow: inset 2px 0 #75a7ff')

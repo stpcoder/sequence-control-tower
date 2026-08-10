@@ -26,8 +26,6 @@ interface AgentPanelProps {
   evaluationSnapshot: EvaluationProjectSnapshot | null
   onSnapshotSaved: (snapshot: EvaluationProjectSnapshot) => void
   onProjectUpdated: (project: ProjectSnapshot) => void
-  draftMessage?: string
-  onDraftConsumed?: () => void
 }
 
 export function mergeEvaluationAgentMemory(project: ProjectSnapshot, payload: EvaluationAgentMemoryPayloadView): ProjectSnapshot {
@@ -208,7 +206,7 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, draftMessage, onDraftConsumed }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evaluationSnapshot, onSnapshotSaved, onProjectUpdated }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [nativeSessions, setNativeSessions] = useState<NativeAgentSessionSummary[]>([])
@@ -316,13 +314,6 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       window.removeEventListener('sequence-control-tower:command', onCommand)
     }
   }, [onClose, onOpen, open])
-
-  useEffect(() => {
-    if (!open || !draftMessage) return
-    setInput(draftMessage)
-    onDraftConsumed?.()
-    window.setTimeout(() => composerRef.current?.focus(), 0)
-  }, [draftMessage, onDraftConsumed, open])
 
   const invoke = async (action: () => Promise<AgentRun>, clearInput = false) => {
     if (busy || !activeRunId.current) return

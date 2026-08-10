@@ -55,8 +55,8 @@
 .evaluation-memory-view__project-context > div {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px 14px;
-  padding: 2px 0 14px;
+  gap: 13px 14px;
+  padding: 4px 0 15px;
 }
 .evaluation-memory-view__project-context > div > button { grid-column: 1 / -1; min-width: 74px; justify-self: end; }
 .evaluation-memory-view__project-context label,
@@ -64,6 +64,8 @@
   color: var(--em-dim);
   font-size: 11px;
 }
+.evaluation-memory-view__project-context label { display: grid; min-width: 0; gap: 6px; }
+.evaluation-memory-view__project-context input { min-height: 36px; }
 
 .evaluation-memory-view__layout {
   display: grid;
@@ -82,22 +84,7 @@
   overflow: auto;
   background: var(--sct-header);
 }
-.evaluation-memory-view__agent-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
-  align-items: end;
-  gap: 7px;
-  margin: 0 0 14px;
-  padding: 9px;
-  border: 1px solid var(--sct-line-strong);
-  border-radius: 9px;
-  background: var(--sct-control);
-}
-.evaluation-memory-view__agent-composer:focus-within { border-color: #75a7ff; box-shadow: 0 0 0 2px rgba(117, 167, 255, .12); }
-.evaluation-memory-view__agent-input { min-height: 56px !important; padding: 0 !important; border: 0 !important; background: transparent !important; line-height: 1.5; box-shadow: none !important; }
-.evaluation-memory-view__agent-composer > button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; color: #111722; background: #75a7ff; }
-.evaluation-memory-view__agent-composer > button:hover { color: #111722; background: #8ab4ff; }
-.evaluation-memory-view__manual { border-top: 1px solid var(--em-border); }
+.evaluation-memory-view__manual { border-bottom: 1px solid var(--em-border); }
 .evaluation-memory-view__manual > summary { padding: 12px 0; color: var(--em-dim); font-size: 12px; cursor: pointer; }
 .evaluation-memory-view__manual[open] > summary { color: #cbd1d9; }
 .evaluation-memory-view__editor .evaluation-memory-view__section-label {
@@ -138,7 +125,9 @@
 .evaluation-memory-view__dimensions { display: grid; grid-template-columns: 1fr; gap: 9px; padding-top: 5px; }
 
 .evaluation-memory-view__logs { margin: 12px 0; border-top: 1px solid var(--em-border); border-bottom: 1px solid var(--em-border); }
-.evaluation-memory-view__logs > span { display: block; padding: 9px 0 5px; color: var(--em-dim); font-size: 11px; }
+.evaluation-memory-view__logs > summary { padding: 10px 0; color: var(--em-dim); font-size: 12px; cursor: pointer; }
+.evaluation-memory-view__logs > summary span { margin-left: 5px; color: #6f7884; font-size: 11px; }
+.evaluation-memory-view__logs > div { max-height: 360px; overflow: auto; }
 .evaluation-memory-view__logs label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -156,11 +145,15 @@
 .evaluation-memory-view__signals .evaluation-memory-view__section-label { display: block; padding-bottom: 7px; border-bottom: 1px solid var(--em-border); }
 .evaluation-memory-view__trend { padding: 11px 0; border-bottom: 1px solid #252a32; }
 .evaluation-memory-view__trend p { color: #c8ced7; font-size: 13px; line-height: 1.55; }
+.evaluation-memory-view__more-trends > summary { padding: 10px 0; color: var(--em-dim); font-size: 12px; cursor: pointer; }
+.evaluation-memory-view__more-trends[open] > summary { color: #c2c9d2; }
 
 .evaluation-memory-view__selected { display: grid; gap: 3px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--em-border); font-size: 12px; }
 .evaluation-memory-view__selected > span { color: var(--em-dim); font-size: 11px; }
 .evaluation-memory-view__selected > b { color: #d5dae2; font-size: 13px; }
-.evaluation-memory-view__selected-logs { display: grid; gap: 2px; margin-top: 5px; }
+.evaluation-memory-view__selected-logs { margin-top: 7px; }
+.evaluation-memory-view__selected-logs > summary { padding: 5px 0; color: var(--em-dim); font-size: 11px; cursor: pointer; }
+.evaluation-memory-view__selected-logs > div { display: grid; gap: 2px; max-height: 240px; overflow: auto; }
 .evaluation-memory-view__selected-logs button { width: 100%; overflow: hidden; padding-inline: 0; color: var(--em-dim); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1180px) {
