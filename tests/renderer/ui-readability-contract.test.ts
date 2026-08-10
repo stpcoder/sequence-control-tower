@@ -11,7 +11,7 @@ describe('UI readability contract', () => {
       readFile(resolve(root, 'src/styles.css'), 'utf8'),
       readFile(resolve(root, 'src/data-views.css'), 'utf8'),
       readFile(resolve(root, 'src/workbench.css'), 'utf8'),
-      readFile(resolve(root, 'docs/manual/20-로그-워크벤치.md'), 'utf8'),
+      readFile(resolve(root, 'docs/manual/02-로그-분석-규칙.md'), 'utf8'),
     ])).map(normalizeNewlines)
 
     expect(styles).toContain('min-width: 1100px;')
