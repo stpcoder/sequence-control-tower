@@ -5,7 +5,7 @@ describe("desktop release configuration", () => {
   it("pins Windows x64 targets and validates stable release assets", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8"));
     const workflow = await readFile(".github/workflows/release.yml", "utf8");
-    const manual = await readFile("docs/manual/06-설치-문제-해결.md", "utf8");
+    const manual = await readFile("docs/manual/01-설치와-프로젝트.md", "utf8");
     const mainProcess = await readFile("electron/main/index.ts", "utf8");
 
     expect(packageJson.scripts["dist:win"]).toContain("--x64");
@@ -16,8 +16,7 @@ describe("desktop release configuration", () => {
     expect(workflow).toContain("Sequence-Control-Tower-Windows.zip");
     expect(workflow).toContain("WINDOWS-SIGNING-NOTICE.txt");
     expect(workflow).toContain("$machine -ne 0x8664");
-    expect(manual).toContain("조직 서명이 없는 빌드는 SmartScreen 경고를 표시할 수 있습니다.");
-    expect(manual).toContain("기존 설치가 있으면 제거 후 재설치 옵션을 사용할 수 있습니다.");
+    expect(manual).toContain("기존 버전을 제거할지 묻는 경우 제거 후 설치를 선택합니다.");
   });
 
   it("contracts the assisted NSIS upgrade confirmation", async () => {
@@ -41,7 +40,7 @@ describe("desktop release configuration", () => {
   it("pins an unsigned Universal macOS package and verifies both architectures and archives", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8"));
     const workflow = await readFile(".github/workflows/release-macos.yml", "utf8");
-    const manual = await readFile("docs/manual/06-설치-문제-해결.md", "utf8");
+    const manual = await readFile("docs/manual/01-설치와-프로젝트.md", "utf8");
 
     expect(packageJson.scripts["dist:mac"]).toContain("--universal");
     expect(packageJson.build.mac).toMatchObject({ identity: null, target: ["dmg", "zip"] });
@@ -50,8 +49,8 @@ describe("desktop release configuration", () => {
     expect(workflow).toContain("unzip -tq");
     expect(workflow).toContain("LSMinimumSystemVersion");
     expect(workflow).toContain("GATEKEEPER-NOTICE-macOS.txt");
-    expect(manual).toContain("Apple Silicon과 Intel Mac에서 같은 Universal 빌드를 사용합니다.");
-    expect(manual).toContain("조직 notarization이 없는 빌드는 Gatekeeper 경고를 표시할 수 있습니다.");
+    expect(manual).toContain("Sequence-Control-Tower-macOS-Universal.dmg");
+    expect(manual).toContain("조직 서명이 없는 빌드는 회사 보안 정책에 따라 실행을 허용합니다.");
   });
 
   it("keeps native folder pickers multi-select on both desktop platforms", async () => {

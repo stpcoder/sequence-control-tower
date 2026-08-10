@@ -68,6 +68,7 @@ function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
 export class EvaluationAgentService {
   private readonly sessions = new Map<string, EvaluationAgentSession>()
   private readonly sourceMaps = new Map<string, Source[]>()
+  private readonly runners = new Map<string, Promise<void>>()
   /** Internal provenance binding; never serialized into renderer session views. */
   private readonly projectIds = new Map<string, string>()
   private readonly id: () => string
@@ -79,10 +80,13 @@ export class EvaluationAgentService {
     const project = await this.project(input.projectId)
     const sources = await this.authorize(project, input.sourceIds)
     const id = this.id(); this.sourceMaps.set(id, sources); this.projectIds.set(id, project.id)
-    const session = await this.runtime(sources).start(id)
+    const runtime = this.runtime(sources)
+    const session = await runtime.prepare(id)
     // Intent/issue are deliberately transcript labels only; neither can alter tool authority.
     if (safe(input.intent) || safe(input.issueId)) session.transcript.unshift({ at: new Date().toISOString(), role: 'user', type: 'request', detail: `intent=${safe(input.intent)} issue=${safe(input.issueId)}`.trim() })
-    return this.remember(session)
+    await this.remember(session)
+    this.schedule(id, runtime)
+    return session
   }
 
   async resume(sessionId: string, input?: { answer?: string; confirm?: 'accept' | 'reject' }): Promise<EvaluationAgentSession> {
@@ -90,8 +94,12 @@ export class EvaluationAgentService {
     if (!session) throw new Error('evaluation agent session not found')
     const sources = this.sourceMaps.get(id)
     if (!sources) throw new Error('evaluation agent source scope is unavailable; start a new session')
-    session = await this.runtime(sources).resume(session, input)
-    return this.remember(session)
+    if (session.status === 'running' && this.runners.has(id)) return session
+    const runtime = this.runtime(sources)
+    session = runtime.transition(session, input)
+    await this.remember(session)
+    if (session.status === 'running') this.schedule(id, runtime)
+    return session
   }
 
   /** Returns a caller-owned payload; this service intentionally performs no memory/project writes. */
@@ -102,6 +110,23 @@ export class EvaluationAgentService {
   }
 
   private async remember(session: EvaluationAgentSession): Promise<EvaluationAgentSession> { this.sessions.set(session.id, session); await this.deps.sessions?.save?.(session); return session }
+  private schedule(id: string, runtime: EvaluationAgentRuntime): void {
+    const previous = this.runners.get(id)
+    if (previous) {
+      void previous.finally(() => {
+        if (this.sessions.get(id)?.status === 'running') this.schedule(id, runtime)
+      })
+      return
+    }
+    const task = runtime.run(this.sessions.get(id)!).then(async (session) => { await this.remember(session) }).catch(async (error) => {
+      const session = this.sessions.get(id)
+      if (!session) return
+      session.status = 'paused'
+      session.failure = `agent failed: ${safe(error instanceof Error ? error.message : String(error), 300)}`
+      await this.remember(session)
+    }).finally(() => { this.runners.delete(id) })
+    this.runners.set(id, task)
+  }
   private async project(id: string): Promise<ProjectSnapshot> { const project = await this.deps.projects.get(safe(id)); if (!project) throw new Error('project not found'); return project }
   private async authorize(project: ProjectSnapshot, requested?: string[]): Promise<Source[]> {
     const requestedIds = requested?.map((id) => safe(id)).filter(Boolean)

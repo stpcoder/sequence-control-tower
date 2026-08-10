@@ -1,6 +1,6 @@
 {
   "name": "sequence-control-tower",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "description": "Local-first log parsing workbench for Windows and macOS validation engineers",
   "author": "stpcoder",
@@ -13,6 +13,9 @@
     "test": "vitest run",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "npm run typecheck && vite build",
+    "docs:dev": "vitepress dev docs/manual",
+    "docs:build": "vitepress build docs/manual",
+    "docs:preview": "vitepress preview docs/manual",
     "dist:win": "npm run build && electron-builder --win nsis portable zip --x64 --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never"
   },
@@ -37,6 +40,7 @@
     "electron-vite": "^5.0.0",
     "typescript": "^5.7.2",
     "vite": "^7.3.6",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.10"
   },
   "build": {

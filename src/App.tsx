@@ -256,7 +256,23 @@ function initialFiles(): WorkbenchFile[] {
 }
 
 function previewEvaluationMemory(): EvaluationMemory {
-  return { project: { id: PROJECT_ID, name: '웹 미리보기 평가 이력' }, hypotheses: [], nodes: [], evidence: [] }
+  return {
+    project: { id: PROJECT_ID, name: 'LPDDR6 Sample 분석' },
+    hypotheses: [
+      { id: 'preview-h-85', projectId: PROJECT_ID, title: '85°C DIAG 종료 상태', origin: 'engineer-confirmed', evaluationNodeIds: ['preview-n-85'] },
+      { id: 'preview-h-105', projectId: PROJECT_ID, title: '105°C Training·Reboot 경향', origin: 'ai-proposed', evaluationNodeIds: ['preview-n-105'] },
+    ],
+    nodes: [
+      { id: 'preview-n-85', projectId: PROJECT_ID, hypothesisId: 'preview-h-85', evaluationScopeId: 'Qualcomm_A / 85C', name: '85°C DIAG 확인', purpose: 'verification', status: 'pass', interpretation: '85°C의 두 로그에서 stress test PASS가 확인됐습니다. 한 로그는 종료 marker가 없어 정상 종료 여부를 추가 확인해야 합니다.', authorship: 'engineer', reviewState: 'confirmed', dimensions: { temperatureC: 85, testMode: 'DIAG' } },
+      { id: 'preview-n-105', projectId: PROJECT_ID, hypothesisId: 'preview-h-105', evaluationScopeId: 'Qualcomm_A / 105C', name: '105°C 실패 경향', purpose: 'characterization', status: 'fail', interpretation: '105°C에서 Training fail과 watchdog reboot가 각각 확인됐습니다. 동일 원인으로 확정하지 않고 Sample과 전압 조건을 분리해 재평가해야 합니다.', authorship: 'agent', reviewState: 'proposed', dimensions: { temperatureC: 105, testMode: 'DIAG' } },
+    ],
+    evidence: [
+      { id: 'preview-e-01', projectId: PROJECT_ID, evaluationNodeId: 'preview-n-85', status: 'pass', result: 'PASS', dimensions: { sample: '01', temperatureC: 85 }, sourceIds: ['demo-pass-01'], origin: 'engineer-confirmed' },
+      { id: 'preview-e-03', projectId: PROJECT_ID, evaluationNodeId: 'preview-n-85', status: 'inconclusive', result: 'UNKNOWN', dimensions: { sample: '03', temperatureC: 85 }, sourceIds: ['demo-halt-03'], origin: 'engineer-confirmed' },
+      { id: 'preview-e-07', projectId: PROJECT_ID, evaluationNodeId: 'preview-n-105', status: 'fail', result: 'TRAINING_FAIL', dimensions: { sample: '07', temperatureC: 105 }, sourceIds: ['demo-training-07'], origin: 'ai-proposed' },
+      { id: 'preview-e-09', projectId: PROJECT_ID, evaluationNodeId: 'preview-n-105', status: 'fail', result: 'SYSTEM_REBOOT', dimensions: { sample: '09', temperatureC: 105 }, sourceIds: ['demo-reboot-09'], origin: 'ai-proposed' },
+    ],
+  }
 }
 
 export function availableEvaluationLogs(records: readonly LogResultRecord[], files: readonly WorkbenchFile[], project: ProjectSnapshot | null): AvailableEvaluationLog[] {
@@ -270,7 +286,9 @@ export function availableEvaluationLogs(records: readonly LogResultRecord[], fil
     const temperature = record.temperature.value === null ? Number.NaN : Number(record.temperature.value)
     return [{
       id: source?.sourceId ?? record.id, openId: file?.id ?? record.id, name: record.fileName, result: record.result,
-      ...(source?.rootId ? { rootId: source.rootId, folderName: project?.folders.find((folder) => folder.rootId === source.rootId)?.displayLabel ?? source.rootId } : {}),
+      ...(source?.rootId
+        ? { rootId: source.rootId, folderName: project?.folders.find((folder) => folder.rootId === source.rootId)?.displayLabel ?? source.rootId }
+        : file?.origin ? { rootId: file.origin, folderName: file.origin } : {}),
       ...(record.sample.value ? { sample: record.sample.value } : {}),
       ...(Number.isFinite(temperature) ? { temperatureC: temperature } : {}),
       ...(record.mode.value ? { mode: record.mode.value } : {}),

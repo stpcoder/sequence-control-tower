@@ -13,9 +13,9 @@
 [![Windows 포터블 다운로드](https://img.shields.io/badge/Windows-포터블_다운로드-30363D?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-Portable.exe)
 [![macOS Universal 다운로드](https://img.shields.io/badge/macOS-Universal_DMG-1F6FEB?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/stpcoder/sequence-control-tower/releases/latest/download/Sequence-Control-Tower-macOS-Universal.dmg)
 
-[사용자 매뉴얼](docs/manual/README.md) · [Agent 네이티브 분석](docs/manual/03-Agent-네이티브-분석.md) · [LLM·OpenCode 설정](docs/manual/05-LLM-OpenCode-설정.md) · [모든 Release](https://github.com/stpcoder/sequence-control-tower/releases)
+[온라인 매뉴얼](https://stpcoder.github.io/sequence-control-tower/) · [Agent 사용](docs/manual/05-Agent.md) · [LLM·OpenCode 설정](docs/manual/07-LLM-OpenCode.md) · [모든 Release](https://github.com/stpcoder/sequence-control-tower/releases)
 
-![Log Workbench](docs/images/manual-v098-log.png)
+![Log Workbench](docs/manual/images/01-log-workbench.jpg)
 
 ## 핵심 작업
 
@@ -42,7 +42,7 @@ Agent는 일반 채팅에 로그 전체를 올리는 방식이 아닙니다. 프
 
 OpenCode가 설치되어 있으면 앱 전용 headless sidecar가 대화와 MCP 도구 호출을 관리합니다. 사용자의 전역 OpenCode plugin·규칙과 격리되며, shell·파일 편집·웹 도구는 차단됩니다. OpenCode를 사용할 수 없으면 동일한 SCT 도구를 쓰는 내부 bounded 하네스로 자동 전환합니다.
 
-자세한 흐름, 도구, 질문 예시는 [Agent 네이티브 분석](docs/manual/03-Agent-네이티브-분석.md)에 있습니다.
+자세한 흐름과 질문 예시는 [Agent 사용](docs/manual/05-Agent.md)에 있습니다.
 
 ## LLM과 데이터 경계
 
@@ -55,7 +55,7 @@ OpenCode가 설치되어 있으면 앱 전용 headless sidecar가 대화와 MCP 
 - Windows 10/11 x64: Setup 또는 Portable
 - macOS 12 이상: Intel/Apple Silicon Universal DMG
 
-조직 인증서가 적용되지 않은 빌드는 Windows SmartScreen 또는 macOS Gatekeeper 경고를 표시할 수 있습니다. [설치와 문제 해결](docs/manual/06-설치-문제-해결.md)을 확인하세요.
+조직 인증서가 적용되지 않은 빌드는 Windows SmartScreen 또는 macOS Gatekeeper 경고를 표시할 수 있습니다. [문제 해결](docs/manual/08-문제-해결.md)을 확인하세요.
 
 ## 개발과 검증
 

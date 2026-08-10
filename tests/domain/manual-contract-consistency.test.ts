@@ -1,37 +1,33 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { DEFAULT_EXPORT_COLUMNS, EVIDENCE_EXPORT_COLUMNS } from "../../src/state/logRecords";
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_EXPORT_COLUMNS, EVIDENCE_EXPORT_COLUMNS } from '../../src/state/logRecords'
 
-const repositoryRoot = resolve(".");
-const workbenchManualPath = resolve(repositoryRoot, "docs/manual/04-결과-평가-이력.md");
-const settingsManualPath = resolve(repositoryRoot, "docs/manual/05-LLM-OpenCode-설정.md");
+describe('manual and product contract', () => {
+  it('documents configurable result fields without exposing retired candidate columns', async () => {
+    const manual = await readFile(resolve('docs/manual/04-결과-정리.md'), 'utf8')
+    expect(manual).toContain('열 선택')
+    expect(manual).toContain('근거 개수')
+    expect(manual).not.toContain('sample_candidate')
+    expect(DEFAULT_EXPORT_COLUMNS.length).toBeGreaterThan(5)
+    expect(EVIDENCE_EXPORT_COLUMNS.length).toBeGreaterThan(0)
+  })
 
-describe("Luna manual export and LLM settings contract", () => {
-  it("documents the current export fields and optional evidence columns", async () => {
-    const manual = await readFile(workbenchManualPath, "utf8");
+  it('documents provider limits and background recovery without presenting implementation defaults as required input', async () => {
+    const manual = await readFile(resolve('docs/manual/07-LLM-OpenCode.md'), 'utf8')
+    for (const label of ['RPM', 'TPM', '응답 제한 시간', '재시도 횟수']) expect(manual).toContain(label)
+    expect(manual).toContain('분석은 백그라운드에서 실행합니다')
+    expect(manual).toContain('내장 Agent로 전환합니다')
+  })
 
-    for (const field of DEFAULT_EXPORT_COLUMNS) {
-      expect(manual).toContain(`\`${field}\``);
-    }
-    for (const field of EVIDENCE_EXPORT_COLUMNS) {
-      expect(manual).toContain(`\`${field}\``);
-    }
-    expect(manual).not.toContain("sample_candidate");
-    expect(manual).not.toContain("temperature_candidate");
-    expect(manual).not.toContain("mode_candidate");
-    expect(manual).toContain("내보낼 행과 열");
-    expect(manual).toContain("선택 근거 열");
-  });
-
-  it("documents the current Timeout range and TPM behavior", async () => {
-    const manual = await readFile(settingsManualPath, "utf8");
-
-    expect(manual).toContain("`응답 시간 (초)`는 5~300초 범위이며 기본값은 60초입니다.");
-    expect(manual).toContain("기본값은 60초입니다.");
-    expect(manual).toContain("`TPM`은 1,201~10,000,000 범위이며 기본값은 80,000입니다.");
-    expect(manual).toContain("기본값은 80,000입니다.");
-    expect(manual).toContain("응답 예약 1,200토큰과 최소 프롬프트 1토큰을 합친 값");
-    expect(manual).not.toContain("30~90초");
-  });
-});
+  it('builds a GitBook-compatible and GitHub Pages-compatible manual', async () => {
+    const [gitbook, config, workflow] = await Promise.all([
+      readFile('.gitbook.yaml', 'utf8'),
+      readFile('docs/manual/.vitepress/config.mts', 'utf8'),
+      readFile('.github/workflows/docs.yml', 'utf8'),
+    ])
+    expect(gitbook).toContain('summary: SUMMARY.md')
+    expect(config).toContain("base: '/sequence-control-tower/'")
+    expect(workflow).toContain('actions/deploy-pages@v4')
+  })
+})

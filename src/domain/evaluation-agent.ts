@@ -87,7 +87,9 @@ function actionFrom(content: string): PlannerAction | null {
 export class EvaluationAgentRuntime {
   constructor(private readonly reader: LogReader, private readonly provider: OpenAiCompatibleEvaluationProvider, private readonly limits: EvaluationAgentLimits = DEFAULT_EVALUATION_AGENT_LIMITS) {}
 
-  async start(id: string): Promise<EvaluationAgentSession> {
+  /** Performs local metadata/stage inspection only. Provider work can be
+   * scheduled separately so slow LLMs never block the renderer IPC call. */
+  async prepare(id: string): Promise<EvaluationAgentSession> {
     const files = (await this.reader.listFiles()).slice(0, 32).map((file) => ({ ...file, name: clean(file.name, 240), metadata: file.metadata ?? {} }))
     const session: EvaluationAgentSession = { schemaVersion: 1, id, status: 'running', depth: 0, calls: 0, searches: 0, files, evidence: [], transcript: [], context: { dimensions: {}, aggregate: '' } }
     for (const file of files) {
@@ -101,10 +103,15 @@ export class EvaluationAgentRuntime {
       return first !== undefined && values.every((value) => value !== undefined && String(value) === String(first)) ? [[key, first]] : []
     })) as EvaluationAgentSession['context']['dimensions']
     event(session, 'runtime', 'metadata-inspection', `${files.length} filenames inspected; no log content uploaded`)
-    return this.drive(session)
+    return session
   }
 
-  async resume(session: EvaluationAgentSession, input?: { answer?: string; confirm?: 'accept' | 'reject' }): Promise<EvaluationAgentSession> {
+  async start(id: string): Promise<EvaluationAgentSession> {
+    return this.run(await this.prepare(id))
+  }
+
+  /** Applies a user transition without waiting for the provider. */
+  transition(session: EvaluationAgentSession, input?: { answer?: string; confirm?: 'accept' | 'reject' }): EvaluationAgentSession {
     if (session.status === 'waiting_question') {
       if (!input?.answer || !session.question) return session
       Object.assign(session.context.dimensions, { [session.question.dimension]: clean(input.answer) } as Partial<Pick<EvaluationDimensions, EvaluationDimension>>)
@@ -120,7 +127,18 @@ export class EvaluationAgentRuntime {
         session.searches = 0
         session.status = 'running'
       }
-    } else if (session.status === 'paused') session.status = 'running'
+    } else if (session.status === 'paused') {
+      session.status = 'running'
+      session.failure = undefined
+    }
+    return session
+  }
+
+  async resume(session: EvaluationAgentSession, input?: { answer?: string; confirm?: 'accept' | 'reject' }): Promise<EvaluationAgentSession> {
+    return this.run(this.transition(session, input))
+  }
+
+  async run(session: EvaluationAgentSession): Promise<EvaluationAgentSession> {
     return session.status === 'running' ? this.drive(session) : session
   }
 
@@ -134,10 +152,10 @@ export class EvaluationAgentRuntime {
   private async drive(session: EvaluationAgentSession): Promise<EvaluationAgentSession> {
     while (session.status === 'running') {
       if (session.depth >= this.limits.maxDepth || session.calls >= this.limits.maxCalls) return this.boundedFallback(session)
-      session.status = 'paused'; session.context.lastProviderState = 'waiting for provider'; event(session, 'runtime', 'waiting-provider', 'session is resumable while provider is slow')
+      session.context.lastProviderState = 'waiting for provider'; event(session, 'runtime', 'waiting-provider', 'provider request is running in background')
       let reply: { content: string; model?: string }
-      try { reply = await this.provider.complete(this.prompt(session)) } catch (error) { session.failure = `provider failed: ${clean(error instanceof Error ? error.message : String(error))}`; event(session, 'runtime', 'provider-failure', session.failure); return session }
-      session.status = 'running'; session.calls++; session.depth++; session.context.lastProviderState = undefined; event(session, 'provider', 'planner-action', reply.content)
+      try { reply = await this.provider.complete(this.prompt(session)) } catch (error) { session.status = 'paused'; session.context.lastProviderState = undefined; session.failure = `provider failed: ${clean(error instanceof Error ? error.message : String(error))}`; event(session, 'runtime', 'provider-failure', session.failure); return session }
+      session.calls++; session.depth++; session.context.lastProviderState = undefined; event(session, 'provider', 'planner-action', reply.content)
       const action = actionFrom(reply.content)
       if (!action) { session.status = 'failed'; session.failure = 'provider returned invalid planner JSON'; return session }
       const finalTurn = session.depth >= this.limits.maxDepth || session.calls >= this.limits.maxCalls
