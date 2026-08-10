@@ -246,7 +246,7 @@ export function registerIpc(services: Services): void {
     const refreshed = await services.projects.get(project.id)
     if (!refreshed) return null
     const available = await services.projects.availableFolderPaths(project.id)
-    const imported = available.length ? await services.artifacts.importFolders(available.map((item) => item.path), { maxFiles: 10000 }) : { artifacts: [], failures: [], skippedCount: 0 }
+    const imported = available.length ? await services.artifacts.importFolders(available.map((item) => item.path), { extensions: ['log'], maxFiles: 10000 }) : { artifacts: [], failures: [], skippedCount: 0 }
     const rootsByArtifactId = new Map(available.map((item) => [artifactRootIdForPath(item.path), item]))
     const sources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).flatMap((source) => {
       const projectRoot = rootsByArtifactId.get(source.rootId)
@@ -257,7 +257,12 @@ export function registerIpc(services: Services): void {
       artifactId: artifact.id,
       relativePath: source.relativePath,
     }] : [] }))
-    const connected = sources.length ? await services.projects.connectArtifacts({ projectId: refreshed.id, expectedRevision: refreshed.revision, artifacts: sources }) : refreshed
+    const connected = available.length
+      ? await services.projects.syncArtifacts(
+        { projectId: refreshed.id, expectedRevision: refreshed.revision, artifacts: sources },
+        available.map((item) => item.rootId),
+      )
+      : refreshed
     return { project: { ...connected, folders: connected.folders.map((folder) => statuses.find((item) => item.rootId === folder.rootId) ?? folder) }, artifacts: imported.artifacts, failures: imported.failures, skippedCount: imported.skippedCount }
   }
   handle(IPC_CHANNELS.appStatus, async () => ({

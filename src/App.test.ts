@@ -3,7 +3,9 @@ import type { ArtifactRecord, ProjectSnapshot } from '../electron/shared/contrac
 import {
   availableEvaluationLogs,
   createLatestProjectSaveQueue,
+  projectArtifactFiles,
   projectLoadFileState,
+  reconcileProjectListedFiles,
   reconcileProjectUpdateFileState,
 } from './App'
 import type { WorkbenchFile } from './views/WorkbenchView'
@@ -126,5 +128,25 @@ describe('project UI state updates', () => {
     expect(state.files[0].artifactId).toBe('new-artifact')
     expect(state.files[0].rootId).toBe('root-new')
     expect(state.selectedFileId).toBe(state.files[0].id)
+  })
+
+  it('keeps the active project isolated when the artifact store contains other project sources', () => {
+    const shared = artifact('shared-artifact', 'root-project')
+    shared.sources = [
+      { rootId: 'root-project', folderLabel: 'project logs', relativePath: 'same.log' },
+      { rootId: 'root-other', folderLabel: 'other logs', relativePath: 'same.log' },
+    ]
+    const unrelated = artifact('other-artifact', 'root-other')
+    const sources = [{ sourceId: 'source-project', rootId: 'root-project', artifactId: shared.id, relativePath: 'same.log' }]
+
+    const scoped = projectArtifactFiles([shared, unrelated], sources)
+    const reconciled = reconcileProjectListedFiles([
+      file('stale-global', 'root-other'),
+      ...scoped,
+    ], [shared, unrelated], sources)
+
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]).toMatchObject({ artifactId: shared.id, rootId: 'root-project', relativePath: 'same.log' })
+    expect(reconciled).toEqual(scoped)
   })
 })

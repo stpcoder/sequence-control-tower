@@ -167,18 +167,28 @@ export class ProjectStore {
 
   async connectArtifacts(input: ProjectConnectArtifactsInput): Promise<ProjectSnapshot> {
     return this.mutate(input.projectId, input.expectedRevision, (p) => {
-      const validRoots = new Set(p.folders.map((folder) => folder.rootId)); const next = input.artifacts.map((a): ProjectArtifactSourceRef => ({ sourceId: id(a.sourceId, 'sourceId'), rootId: id(a.rootId, 'rootId'), ...(a.artifactRootId ? { artifactRootId: id(a.artifactRootId, 'artifactRootId') } : {}), artifactId: id(a.artifactId, 'artifactId'), relativePath: text(a.relativePath, 'relativePath', 2_000) }))
-      if (next.some((a) => !validRoots.has(a.rootId) || a.relativePath.startsWith('/') || a.relativePath.includes('..'))) throw new Error('연결할 artifact source가 프로젝트 폴더에 속하지 않습니다.')
+      const next = this.artifactSources(p, input.artifacts)
       const merged = [...p.artifacts.filter((a) => !next.some((n) => n.sourceId === a.sourceId)), ...next]
-      const current = new Map(p.artifacts.map((source) => [source.sourceId, source]))
-      const unchanged = merged.length === p.artifacts.length && merged.every((source) => {
-        const before = current.get(source.sourceId)
-        return before?.rootId === source.rootId
-          && before.artifactRootId === source.artifactRootId
-          && before.artifactId === source.artifactId
-          && before.relativePath === source.relativePath
-      })
-      if (unchanged) return false
+      if (this.sameArtifactSources(p.artifacts, merged)) return false
+      p.artifacts = merged
+    })
+  }
+
+  /** Reconciles the current files for selected project roots. Evidence-backed
+   * sources remain as durable history even if the physical file later moves. */
+  async syncArtifacts(input: ProjectConnectArtifactsInput, rootIds: string[]): Promise<ProjectSnapshot> {
+    return this.mutate(input.projectId, input.expectedRevision, (p) => {
+      const selected = new Set(rootIds.map((rootId) => id(rootId, 'rootId')))
+      const validRoots = new Set(p.folders.map((folder) => folder.rootId))
+      if ([...selected].some((rootId) => !validRoots.has(rootId))) throw new Error('동기화할 프로젝트 폴더가 올바르지 않습니다.')
+      const next = this.artifactSources(p, input.artifacts)
+      if (next.some((source) => !selected.has(source.rootId))) throw new Error('동기화할 artifact source 범위가 올바르지 않습니다.')
+      const referenced = new Set((p.evidenceRecords ?? []).flatMap((record) => record.sourceIds))
+      const retainedHistory = p.artifacts.filter((source) => selected.has(source.rootId)
+        && referenced.has(source.sourceId)
+        && !next.some((candidate) => candidate.sourceId === source.sourceId))
+      const merged = [...p.artifacts.filter((source) => !selected.has(source.rootId)), ...retainedHistory, ...next]
+      if (this.sameArtifactSources(p.artifacts, merged)) return false
       p.artifacts = merged
     })
   }
@@ -192,6 +202,24 @@ export class ProjectStore {
     return this.public(result!)
   }
   private public(project: StoredProject): ProjectSnapshot { this.defaults(project); return { schemaVersion: 2, ...structuredClone(project) } }
+  private artifactSources(project: StoredProject, values: ProjectConnectArtifactsInput['artifacts']): ProjectArtifactSourceRef[] {
+    const validRoots = new Set(project.folders.map((folder) => folder.rootId))
+    const sources = values.map((a): ProjectArtifactSourceRef => ({ sourceId: id(a.sourceId, 'sourceId'), rootId: id(a.rootId, 'rootId'), ...(a.artifactRootId ? { artifactRootId: id(a.artifactRootId, 'artifactRootId') } : {}), artifactId: id(a.artifactId, 'artifactId'), relativePath: text(a.relativePath, 'relativePath', 2_000) }))
+    if (sources.some((a) => !validRoots.has(a.rootId) || a.relativePath.startsWith('/') || a.relativePath.includes('..'))) throw new Error('연결할 artifact source가 프로젝트 폴더에 속하지 않습니다.')
+    if (new Set(sources.map((source) => source.sourceId)).size !== sources.length) throw new Error('sourceId가 중복되었습니다.')
+    return sources
+  }
+  private sameArtifactSources(before: ProjectArtifactSourceRef[], after: ProjectArtifactSourceRef[]): boolean {
+    if (before.length !== after.length) return false
+    const current = new Map(before.map((source) => [source.sourceId, source]))
+    return after.every((source) => {
+      const existing = current.get(source.sourceId)
+      return existing?.rootId === source.rootId
+        && existing.artifactRootId === source.artifactRootId
+        && existing.artifactId === source.artifactId
+        && existing.relativePath === source.relativePath
+    })
+  }
   private async status(path: string | undefined): Promise<ProjectFolderStatus> { if (!path) return 'missing'; try { await stat(path); await access(path); return 'available' } catch (error) { const code = (error as NodeJS.ErrnoException).code; return code === 'EACCES' || code === 'EPERM' ? 'permission-denied' : 'missing' } }
   private pathError(error: unknown): Error { const code = (error as NodeJS.ErrnoException).code; return new Error(code === 'EACCES' || code === 'EPERM' ? '선택한 폴더에 접근할 권한이 없습니다.' : '선택한 폴더를 찾을 수 없습니다.') }
   private profiles(value: ProjectEquipmentProfile[]): ProjectEquipmentProfile[] { if (!Array.isArray(value)) throw new Error('장비 profile이 올바르지 않습니다.'); return value.map((p) => ({ alias: text(p.alias, '장비 alias', 120), profileId: id(p.profileId, 'profileId'), updatedAt: text(p.updatedAt, 'updatedAt', 80), ...(p.vendor === undefined ? {} : { vendor: optionalVendor(p.vendor, 'vendor') }), ...(p.socModels === undefined ? {} : { socModels: this.texts(p.socModels, 'socModels', 40) }), ...(p.filenameAliases === undefined ? {} : { filenameAliases: this.texts(p.filenameAliases, 'filenameAliases', 80) }) })) }

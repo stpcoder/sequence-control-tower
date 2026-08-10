@@ -66,6 +66,19 @@ export function proposalDecisionResult(outcome: EvaluationAgentPublicOutcome): E
   return outcome
 }
 
+export function proposalSourceDecisions(proposal: NonNullable<EvaluationAgentSessionView['proposal']>): Array<{ sourceId: string; outcome: EvaluationAgentPublicOutcome; evidenceIds: string[] }> {
+  if (proposal.sourceAssessments?.length) return proposal.sourceAssessments
+  if (proposal.sourceIds.length === 1) return [{ sourceId: proposal.sourceIds[0], outcome: proposal.outcome, evidenceIds: proposal.evidenceIds }]
+  return []
+}
+
+export function shouldShowNativeAgentSuggestions(session: NativeAgentSessionView): boolean {
+  if (session.status !== 'idle' || session.question) return false
+  // Profile, console and command confirmations are onboarding, not ordinary
+  // chat. Keep the primary project actions reachable after those answers.
+  return session.messages.filter((message) => message.role === 'user').length <= 3
+}
+
 export function evaluationDimensionSummary(dimensions: EvaluationAgentSessionView['dimensions']): string[] {
   const values: Array<[string, unknown]> = [
     ['SKEW', dimensions.skew], ['Sample', dimensions.sample], ['Die', dimensions.die],
@@ -79,9 +92,18 @@ export function evaluationDimensionSummary(dimensions: EvaluationAgentSessionVie
   return values.filter(([, value]) => value !== undefined && value !== '').map(([label, value]) => `${label} ${value}`)
 }
 
-/** A revision bump is not a project switch: keep a slow native session alive. */
+export function agentProjectScopeKey(project: ProjectSnapshot | null): string {
+  if (!project) return 'no-project'
+  const sources = project.artifacts
+    .map((source) => `${source.sourceId}:${source.artifactId}`)
+    .sort()
+    .join('|')
+  return `${project.id}\u0000${sources}`
+}
+
+/** Keep slow work only while both the project and its analysed log set match. */
 export function shouldRetainAgentSession(previous: ProjectSnapshot | null, next: ProjectSnapshot | null): boolean {
-  return previous?.id === next?.id
+  return agentProjectScopeKey(previous) === agentProjectScopeKey(next)
 }
 
 function isProjectRevisionConflict(error: unknown): boolean {
@@ -157,7 +179,9 @@ function boundedError(error: unknown): string {
   const raw = error instanceof Error ? error.message : ''
   if (raw.includes('REVISION_CONFLICT')) return '분석 결과가 바뀌었습니다. 최신 결과를 확인해 주세요.'
   if (raw.includes('찾을 수 없습니다')) return '프로젝트 또는 실행을 찾을 수 없습니다.'
-  if (raw.includes('LLM_') || raw.includes('timeout') || raw.includes('429')) return '분석 서버 응답이 늦거나 제한되었습니다.'
+  if (raw.includes('입력인지 출력인지 선택')) return '먼저 위 질문에 답해 주세요.'
+  if (raw.includes('LLM_') || raw.includes('provider failed') || raw.includes('timeout') || raw.includes('429')) return '분석 서버 응답이 늦거나 제한되었습니다.'
+  if (raw.includes('Error invoking remote method')) return 'Agent 요청을 처리하지 못했습니다. 다시 시도해 주세요.'
   return raw ? `작업을 완료하지 못했습니다: ${raw.replace(/[\r\n]+/g, ' ').slice(0, 120)}` : '작업을 완료하지 못했습니다.'
 }
 
@@ -195,8 +219,11 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const projectRef = useRef<ProjectSnapshot | null>(project)
   projectRef.current = project
   const projectKey = project?.id ?? 'no-project'
+  const projectScopeKey = agentProjectScopeKey(project)
   const projectKeyRef = useRef(projectKey)
   projectKeyRef.current = projectKey
+  const projectScopeKeyRef = useRef(projectScopeKey)
+  projectScopeKeyRef.current = projectScopeKey
 
   useEffect(() => {
     const api = window.sequenceIntelligence
@@ -223,6 +250,17 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setSavedMessage('')
     setMentionedSourceIds([])
   }, [projectKey])
+
+  useEffect(() => {
+    activeRunId.current = null
+    setRun(null)
+    setEvaluationRun(null)
+    setEvaluationAnswer('')
+    setBusy(false)
+    setError('')
+    setSavedMessage('')
+    setMentionedSourceIds((current) => current.filter((sourceId) => project?.artifacts.some((source) => source.sourceId === sourceId)))
+  }, [projectScopeKey])
 
   useEffect(() => {
     const api = window.sequenceIntelligence?.nativeAgent
@@ -365,7 +403,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setBusy(true); setError(''); setSavedMessage(''); setEvaluationRun(null)
     try {
       const next = await api.evaluationAgent.start({ projectId: project.id, sourceIds: project.artifacts.slice(0, 32).map((source) => source.sourceId), intent: 'failure-trend' })
-      if (projectKeyRef.current === projectKey) setEvaluationRun(next)
+      if (projectScopeKeyRef.current === projectScopeKey) setEvaluationRun(next)
     } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
   }
 
@@ -389,22 +427,34 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       // against the current prop/revision, not the revision that started it.
       const current = projectRef.current
       if (!current || current.id !== project.id) throw new Error('프로젝트가 변경되었습니다. 최신 프로젝트에서 다시 시도해 주세요.')
-      const decisionResult = proposalDecisionResult(evaluationRun.proposal.outcome)
+      const sourceDecisions = proposalSourceDecisions(evaluationRun.proposal)
+        .flatMap((assessment) => {
+          const result = proposalDecisionResult(assessment.outcome)
+          return result ? [{ ...assessment, result }] : []
+        })
       let nextEvaluation = evaluationSnapshot
-      if (decisionResult && nextEvaluation && window.sequenceIntelligence.evaluations) {
-        for (const sourceId of evaluationRun.proposal.sourceIds) {
-          const source = current.artifacts.find((item) => item.sourceId === sourceId)
+      if (sourceDecisions.length && nextEvaluation && window.sequenceIntelligence.evaluations) {
+        for (const assessment of sourceDecisions) {
+          const source = current.artifacts.find((item) => item.sourceId === assessment.sourceId)
           if (!source) continue
-          const decision = await window.sequenceIntelligence.evaluations.saveDecision({
-            projectId: current.id,
-            expectedRevision: nextEvaluation.revision,
-            source: { sourceId: source.sourceId, artifactId: source.artifactId, sourceKey: source.sourceId },
-            result: decisionResult,
-            evidenceRefs: evaluationRun.evidence
-              .filter((item) => item.sourceId === sourceId && evaluationRun.proposal!.evidenceIds.includes(item.id))
-              .flatMap((item) => item.lineNumbers)
-              .map((lineNumber) => ({ artifactId: source.artifactId, lineNumber })),
-          })
+          const saveDecision = (expectedRevision: number) => window.sequenceIntelligence!.evaluations.saveDecision({
+              projectId: current.id,
+              expectedRevision,
+              source: { sourceId: source.sourceId, artifactId: source.artifactId, sourceKey: source.sourceId },
+              result: assessment.result,
+              evidenceRefs: evaluationRun.evidence
+                .filter((item) => item.sourceId === assessment.sourceId && assessment.evidenceIds.includes(item.id))
+                .flatMap((item) => item.lineNumbers)
+                .map((lineNumber) => ({ artifactId: source.artifactId, lineNumber })),
+            })
+          let decision: Awaited<ReturnType<typeof saveDecision>>
+          try {
+            decision = await saveDecision(nextEvaluation.revision)
+          } catch (reason) {
+            if (!isProjectRevisionConflict(reason)) throw reason
+            nextEvaluation = await window.sequenceIntelligence.evaluations.getSnapshot({ projectId: current.id })
+            decision = await saveDecision(nextEvaluation.revision)
+          }
           nextEvaluation = decision.snapshot
         }
         if (nextEvaluation !== evaluationSnapshot) onSnapshotSaved(nextEvaluation)
@@ -425,7 +475,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
         saved = await persist(refreshed)
       }
       onProjectUpdated(saved)
-      setSavedMessage(decisionResult ? '결과와 평가 이력에 저장됨' : '평가 이력에 저장됨')
+      setSavedMessage(sourceDecisions.length ? '결과와 평가 이력에 저장됨' : '평가 이력에 저장됨')
     } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
   }
 
@@ -493,7 +543,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     </div>
     <div className="agent-thread">
       {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? selectedFile.name : '로그를 선택하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석</button></div> : null}
-      {scope === 'project' && !nativeSession ? <div className="agent-empty"><p>{project ? (project.artifacts.length ? `로그 ${project.artifacts.length}개` : '로그를 연결하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
+      {scope === 'project' && !nativeSession ? <div className="agent-empty">{!project?.artifacts.length ? <p>{project ? '로그를 연결하세요.' : '프로젝트를 선택하세요.'}</p> : null}<button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
       {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div> : null}</> : null}
       {scope === 'current' && run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
       {scope === 'current' && run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}
@@ -508,11 +558,11 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
         })}
         {nativeSession.question ? <div className="native-agent-question"><AgentMarkdown>{nativeSession.question.prompt}</AgentMarkdown><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div></div> : null}
         {nativeSession.status === 'running' && nativeSession.tools.some((tool) => tool.state === 'running') ? <div className="native-agent-running-tools">{nativeSession.tools.filter((tool) => tool.state === 'running').at(-1)?.label} 확인 중</div> : null}
-        {nativeSession.status === 'idle' && nativeSession.messages.filter((item) => item.role === 'user').length === 0 ? <div className="native-agent-suggestions"><button onClick={() => void startProjectTrend()} disabled={!projectCanStart || busy}>결과와 평가 이력 정리</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')}>과거 사례와 다음 평가</button></div> : null}
+        {shouldShowNativeAgentSuggestions(nativeSession) ? <div className="native-agent-suggestions"><button onClick={() => void startProjectTrend()} disabled={!projectCanStart || busy}>결과와 평가 이력 정리</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')}>과거 사례와 다음 평가</button></div> : null}
       </> : null}
       {scope === 'project' && evaluationRun ? <section className="agent-evaluation-review" aria-label="결과와 평가 이력 검토">
         <div className="agent-evaluation-review-head"><strong>결과와 평가 이력</strong><button type="button" onClick={() => setEvaluationRun(null)} aria-label="검토 닫기"><X size={14} /></button></div>
-        {projectPending ? <div className="agent-evaluation-progress"><span>{evaluationRun.status === 'paused' ? evaluationRun.failure ?? '분석을 이어갈 수 있습니다.' : '분석 중'}</span>{evaluationRun.status === 'paused' ? <button type="button" onClick={() => void resumeProjectTrend({})} disabled={busy}><RotateCcw size={14} />계속</button> : null}</div> : null}
+        {projectPending ? <div className="agent-evaluation-progress"><span>{evaluationRun.status === 'paused' ? boundedError(new Error(evaluationRun.failure ?? '분석을 이어갈 수 있습니다.')) : '분석 중'}</span>{evaluationRun.status === 'paused' ? <button type="button" onClick={() => void resumeProjectTrend({})} disabled={busy}><RotateCcw size={14} />다시 시도</button> : null}</div> : null}
         {evaluationRun.question ? <div className="agent-evaluation-question"><AgentMarkdown>{evaluationRun.question.prompt}</AgentMarkdown>{evaluationRun.question.choices?.length ? <div className="quick-answers">{evaluationRun.question.choices.map((choice) => <button type="button" key={choice} onClick={() => void resumeProjectTrend({ answer: choice })} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div> : <form onSubmit={(event) => { event.preventDefault(); if (evaluationAnswer.trim()) void resumeProjectTrend({ answer: evaluationAnswer.trim() }) }}><input value={evaluationAnswer} onChange={(event) => setEvaluationAnswer(event.target.value)} placeholder="확인할 값 입력" /><button type="submit" disabled={busy || !evaluationAnswer.trim()}>확인</button></form>}</div> : null}
         {evaluationRun.proposal ? <div className="agent-evaluation-proposal"><div><strong>{evaluationRun.proposal.outcome}</strong>{evaluationRun.proposal.purpose ? <span>{evaluationRun.proposal.purpose}</span> : null}</div><p>{evaluationRun.proposal.rationale}</p>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).length ? <ul>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).map((item) => <li key={item}>{item}</li>)}</ul> : null}<div className="agent-review-actions"><button type="button" onClick={() => void saveProjectProposal()} disabled={busy}><Check size={14} />결과·이력 저장</button>{evaluationRun.status === 'waiting_confirmation' ? <button type="button" onClick={() => void resumeProjectTrend({ confirm: 'reject' })} disabled={busy}>다시 분석</button> : null}</div></div> : null}
       </section> : null}

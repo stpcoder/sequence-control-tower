@@ -26,6 +26,7 @@ import {
   chooseNextTabId,
   clampSearchHitIndex,
   clampWorkbenchPaneWidth,
+  deferredSearchHitIndex,
   DEFAULT_WORKBENCH_PANE_WIDTHS,
   clauseSpecKey,
   filterUserRecipeRevisions,
@@ -514,6 +515,8 @@ describe('Log Workbench UI data hardening', () => {
     expect(nextSearchHitIndex(0, 3, -1, false)).toBe(2)
     expect(nextSearchHitIndex(0, 3, 1, true)).toBe(1)
     expect(nextSearchHitIndex(0, 3, -1, true)).toBe(2)
+    expect(deferredSearchHitIndex(1, 3)).toBe(0)
+    expect(deferredSearchHitIndex(-1, 3)).toBe(2)
   })
 
   it('resets the undisclosed-first-hit contract before input and async result transitions', () => {

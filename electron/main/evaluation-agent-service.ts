@@ -12,7 +12,7 @@ import type { ProjectStore } from './project-store'
 export interface EvaluationAgentStartInput { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentSessionStore { load?(id: string): Promise<EvaluationAgentSession | null>; save?(session: EvaluationAgentSession): Promise<void> }
 export interface EvaluationAgentServiceDeps {
-  artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'>
+  artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'> & Partial<Pick<ArtifactService, 'inspectStages'>>
   projects: Pick<ProjectStore, 'get'>
   llm: Pick<OpenAiCompatibleClient, 'complete'>
   sessions?: EvaluationAgentSessionStore
@@ -21,7 +21,7 @@ export interface EvaluationAgentServiceDeps {
 
 export interface EvaluationMemorySavePayload { hypothesis: FailureHypothesis; node: EvaluationNode; evidence: EvidenceRecord[] }
 
-type Source = { sourceId: string; artifactId: string; fileName: string; artifact?: ArtifactRecord }
+type Source = { sourceId: string; artifactId: string; rootId: string; relativePath: string; fileName: string; artifact?: ArtifactRecord }
 
 function safe(value: unknown, max = 240): string { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '' }
 /** Preserve engineering tokens while removing credential-like filename values before any provider-facing metadata exists. */
@@ -34,7 +34,15 @@ function safeEvidence(value: string): string {
     .replace(/(?:[A-Za-z]:[\\/]|\\\\|\/)(?:[^\\/\s]+[\\/])+[^\\/\s,;)]*/g, '<PATH>')
     .replace(/\b(?:api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, '<SECRET>')
 }
-function numeric(value: string | null): number | undefined { if (!value) return undefined; const found = Number(value.replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]); return Number.isFinite(found) ? found : undefined }
+function numeric(value: string | null): number | undefined { if (!value) return undefined; const found = Number(value.replace(',', '.').replace(/[pP]/g, '.').match(/-?\d+(?:\.\d+)?/)?.[0]); return Number.isFinite(found) ? found : undefined }
+function patternCapture(name: string): string | undefined {
+  const marker = /(?:^|[_\-.])(?:PATTERN|PAT)[=:_-]?/i.exec(name)
+  if (!marker) return undefined
+  const tail = name.slice(marker.index + marker[0].length).replace(/\.[^.]+$/, '')
+  const stop = tail.search(/(?:_|-)(?:DQ|BL|CH|CHANNEL|SUBCH|SUBCHANNEL|SCH|RANK|RK|BANK|BG|BANKGROUP|ROW|COL|COLUMN|FREQ|FREQUENCY|F|TEMP|TEMPERATURE|T|VDD|SKEW|TSKEW|TIMINGSKEW|TM|MODE|PASS|FAIL|HALT|REBOOT|TRAIN)(?=[=:_-]?[A-Z0-9])/i)
+  const value = (stop < 0 ? tail : tail.slice(0, stop)).replace(/^[-_]+|[-_]+$/g, '')
+  return value || undefined
+}
 function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
   const parsed = parseFilenameMetadata(fileName); const name = fileName
   const soc = detectSocFilenameContext(fileName)
@@ -42,14 +50,16 @@ function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
   const numberCapture = (expression: RegExp): number | undefined => numeric(capture(expression) ?? null)
   return {
     skew: capture(/(?:^|[_\-.])SKEW[=:_-]?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
+    lot: capture(/(?:^|[_\-.])LOT[=:_-]?([A-Z0-9-]+)/i),
     material: capture(/(?:^|[_\-.])(?:MAT|MATERIAL)[=:_-]?([A-Z0-9-]+)/i),
     die: capture(/(?:^|[_\-.])DIE[=:_-]?([A-Z0-9-]+)/i),
+    sample: parsed.sample.value ?? undefined,
     temperatureC: numeric(parsed.temperature.value),
-    testMode: parsed.mode.value ?? undefined,
+    testMode: parsed.mode.value ?? capture(/(?:^|[_\-.])(?:TM|MODE)[=:_-]?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
     bl: capture(/(?:^|[_\-.])BL[=:_-]?(\d+)/i), dq: capture(/(?:^|[_\-.])DQ[=:_-]?(\d+)/i),
     channel: capture(/(?:^|[_\-.])(?:CH|CHANNEL)[=:_-]?(\d+)/i), subChannel: capture(/(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)[=:_-]?(\d+)/i), rank: capture(/(?:^|[_\-.])(?:RANK|RK)[=:_-]?(\d+)/i), bank: capture(/(?:^|[_\-.])BANK[=:_-]?(\d+)/i), bankGroup: capture(/(?:^|[_\-.])(?:BG|BANKGROUP)[=:_-]?(\d+)/i), row: capture(/(?:^|[_\-.])ROW[=:_-]?([A-F0-9x]+)/i), column: capture(/(?:^|[_\-.])(?:COL|COLUMN)[=:_-]?([A-F0-9x]+)/i),
-    pattern: capture(/(?:^|[_\-.])PATTERN[=:_-]?([A-Z0-9-]+)/i), frequencyMHz: numberCapture(/(?:^|[_\-.])(?:FREQ|FREQUENCY)[=:_-]?(\d+(?:\.\d+)?)/i) ?? numberCapture(/(?:^|[_\-.])(\d{3,5})MT/i),
-    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:\.\d+)?)/i), timingSkewPs: numberCapture(/(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)[=:_-]?(\d+(?:\.\d+)?)(?:PS)?/i),
+    pattern: patternCapture(name), frequencyMHz: numberCapture(/(?:^|[_\-.])(?:FREQ|FREQUENCY|F)[=:_-]?(\d+(?:[p.]\d+)?)/i) ?? numberCapture(/(?:^|[_\-.])(\d{3,5})MT/i),
+    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:[p.]\d+)?)/i), timingSkewPs: numberCapture(/(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)[=:_-]?(\d+(?:[p.]\d+)?)(?:PS)?/i),
     ...(soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId })
   }
 }
@@ -100,12 +110,39 @@ export class EvaluationAgentService {
     if (requestedIds && allowed.length !== requestedIds.length) throw new Error('source is not authorized for this project')
     if (!allowed.length) throw new Error('no authorized sources')
     const artifacts = new Map((await this.deps.artifacts.list()).map((artifact) => [artifact.id, artifact]))
-    return allowed.map((source) => ({ sourceId: source.sourceId, artifactId: source.artifactId, fileName: safeFilename(basename(source.relativePath)), artifact: artifacts.get(source.artifactId) }))
+    return allowed.map((source) => ({
+      sourceId: source.sourceId,
+      artifactId: source.artifactId,
+      rootId: source.artifactRootId ?? source.rootId,
+      relativePath: source.relativePath,
+      fileName: safeFilename(basename(source.relativePath)),
+      artifact: artifacts.get(source.artifactId),
+    }))
   }
   private runtime(sources: Source[]): EvaluationAgentRuntime {
     const bySource = new Map(sources.map((source) => [source.sourceId, source]))
     const reader: LogReader = {
-      listFiles: async () => sources.map((source) => ({ id: source.sourceId, name: source.fileName, size: source.artifact?.size, lineCount: source.artifact?.fingerprint?.lineCount, metadata: filenameDimensions(source.fileName) })),
+      listFiles: async () => {
+        const inspected = this.deps.artifacts.inspectStages
+          ? await this.deps.artifacts.inspectStages({
+              sources: sources.map((source) => ({
+                sourceId: source.sourceId,
+                artifactId: source.artifactId,
+                rootId: source.rootId,
+                relativePath: source.relativePath,
+              })),
+            }).catch(() => null)
+          : null
+        const stagesBySource = new Map(inspected?.sources.map((item) => [item.sourceId, item.stages]) ?? [])
+        return sources.map((source) => ({
+          id: source.sourceId,
+          name: source.fileName,
+          size: source.artifact?.size,
+          lineCount: source.artifact?.fingerprint?.lineCount,
+          metadata: filenameDimensions(source.fileName),
+          stages: stagesBySource.get(source.sourceId),
+        }))
+      },
       search: async (sourceId, query, options) => {
         const source = bySource.get(sourceId); if (!source) throw new Error('unauthorized source')
         const result = await this.deps.artifacts.search({ artifactIds: [source.artifactId], query, mode: 'literal', caseSensitive: false, maxMatches: Math.min(options.maxMatches, 6), contextLines: 0 })

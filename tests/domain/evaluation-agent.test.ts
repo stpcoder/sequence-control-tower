@@ -13,6 +13,17 @@ function setup(actions: string[]) {
 }
 
 describe('EvaluationAgentRuntime', () => {
+  it('keeps only dimensions shared by every selected log in aggregate context', async () => {
+    const runtime = new EvaluationAgentRuntime({
+      listFiles: async () => [
+        { id: 'a', name: 'a.log', metadata: { testMode: 'HDIAG', vdd: 1.295, temperatureC: 25 } },
+        { id: 'b', name: 'b.log', metadata: { testMode: 'HDIAG', vdd: 1.315, temperatureC: 85 } },
+      ],
+      search: async () => [], lineWindow: async () => [],
+    }, { complete: async () => ({ content: '{"action":"complete"}' }) })
+    const session = await runtime.start('common-dimensions')
+    expect(session.context.dimensions).toEqual({ testMode: 'HDIAG' })
+  })
   it('plans bounded metadata/search/window evidence and requires human acceptance', async () => {
     const { runtime, prompts } = setup(['{"action":"search","fileId":"a","query":"FAIL"}', '{"action":"window","fileId":"a","startLine":195,"lineCount":999}', '{"action":"propose","outcome":"TEST_FAIL","purpose":"screening","dimensions":{"pattern":"checkerboard","bank":"3","subChannel":"1","timingSkewPs":"12"},"rationale":"failure evidence","evidenceIds":["search-1","window-2"]}'])
     const session = await runtime.start('s1')
@@ -37,11 +48,19 @@ describe('EvaluationAgentRuntime', () => {
     expect(resumed.transcript.some((item) => item.type === 'answer')).toBe(true)
   })
 
-  it('rejects low-impact questions and bounds tool/depth loops', async () => {
+  it('rejects low-impact questions and ends tool loops with a reviewable safe fallback', async () => {
     const { runtime } = setup(['{"action":"ask","dimension":"temperatureC","impact":"low","question":"temperature?"}'])
     expect((await runtime.start('s3')).status).toBe('failed')
     const looping = setup(Array(10).fill('{"action":"search","fileId":"a","query":"FAIL"}')).runtime
     const session = await looping.start('s4')
-    expect(session.status).toBe('paused'); expect(session.failure).toContain('budget')
+    expect(session.status).toBe('waiting_confirmation')
+    expect(session.failure).toBeUndefined()
+    expect(session.proposal).toMatchObject({ outcome: 'UNKNOWN', purpose: 'characterization' })
+  })
+
+  it('accepts only evidence-bound per-source outcomes', async () => {
+    const { runtime } = setup(['{"action":"search","fileId":"a","query":"FAIL"}', '{"action":"propose","outcome":"TEST_FAIL","rationale":"mixed project","evidenceIds":["search-1"],"sourceAssessments":[{"sourceId":"a","outcome":"TEST_FAIL","evidenceIds":["search-1"]},{"sourceId":"unknown","outcome":"PASS","evidenceIds":["search-1"]}]}'])
+    const session = await runtime.start('s5')
+    expect(session.proposal?.sourceAssessments).toEqual([{ sourceId: 'a', outcome: 'TEST_FAIL', evidenceIds: ['search-1'] }])
   })
 })

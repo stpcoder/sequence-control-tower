@@ -967,7 +967,8 @@ export interface EvaluationAgentDimensions { skew?: string; lot?: string; materi
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
-export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[] }
+export interface EvaluationAgentSourceAssessmentView { sourceId: string; outcome: EvaluationAgentPublicOutcome; evidenceIds: string[] }
+export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[]; sourceAssessments?: EvaluationAgentSourceAssessmentView[] }
 export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string; lineNumbers: number[] }
 export interface EvaluationAgentSessionView {
   schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number

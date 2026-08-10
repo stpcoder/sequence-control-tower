@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, shouldRetainAgentSession, toolsForAssistantMessage } from './AgentPanel'
-import type { EvaluationAgentMemoryPayloadView, NativeAgentMessageView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
+import { evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage } from './AgentPanel'
+import type { EvaluationAgentMemoryPayloadView, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
 
@@ -25,9 +25,34 @@ describe('mergeEvaluationAgentMemory', () => {
     expect(evaluationDimensionSummary({ skew: 'SS', channel: 0, subChannel: 1, bank: 5 })).toEqual(['SKEW SS', 'CH 0', 'Sub CH 1', 'Bank 5'])
   })
 
-  it('keeps a live agent session for revision updates but clears it on project switch', () => {
+  it('never applies one project-level outcome to several logs without per-source evidence', () => {
+    expect(proposalSourceDecisions({ outcome: 'TEST_FAIL', dimensions: {}, rationale: '', evidenceIds: ['e1', 'e2'], sourceIds: ['s1', 's2'] })).toEqual([])
+    expect(proposalSourceDecisions({
+      outcome: 'TEST_FAIL', dimensions: {}, rationale: '', evidenceIds: ['e1', 'e2'], sourceIds: ['s1', 's2'],
+      sourceAssessments: [{ sourceId: 's1', outcome: 'PASS', evidenceIds: ['e1'] }, { sourceId: 's2', outcome: 'TEST_FAIL', evidenceIds: ['e2'] }],
+    })).toEqual([{ sourceId: 's1', outcome: 'PASS', evidenceIds: ['e1'] }, { sourceId: 's2', outcome: 'TEST_FAIL', evidenceIds: ['e2'] }])
+  })
+
+  it('keeps a live agent session for revision-only updates and clears it when its log scope changes', () => {
     expect(shouldRetainAgentSession({ ...project, revision: 1 }, { ...project, revision: 2 })).toBe(true)
+    expect(shouldRetainAgentSession(project, {
+      ...project,
+      artifacts: [{ sourceId: 's1', rootId: 'r1', artifactId: 'a1', relativePath: 'one.log' }],
+    })).toBe(false)
     expect(shouldRetainAgentSession(project, { ...project, id: 'other' })).toBe(false)
+  })
+
+  it('keeps primary actions reachable after bounded onboarding answers', () => {
+    const session = (userMessages: number, question = false): NativeAgentSessionView => ({
+      id: 'session', projectId: 'p1', title: 'analysis', backend: 'internal', status: 'idle',
+      createdAt: '', updatedAt: '', tools: [],
+      messages: Array.from({ length: userMessages }, (_, index) => ({ id: `m-${index}`, role: 'user' as const, content: `answer ${index}`, createdAt: '' })),
+      ...(question ? { question: { id: 'q', kind: 'command-purpose' as const, command: 'memory_training', prompt: 'purpose?', choices: ['Training'] } } : {}),
+    })
+    expect(shouldShowNativeAgentSuggestions(session(0))).toBe(true)
+    expect(shouldShowNativeAgentSuggestions(session(3))).toBe(true)
+    expect(shouldShowNativeAgentSuggestions(session(4))).toBe(false)
+    expect(shouldShowNativeAgentSuggestions(session(1, true))).toBe(false)
   })
 
   it('places only the tools used for an answer directly before that answer', () => {

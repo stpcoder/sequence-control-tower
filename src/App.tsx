@@ -77,6 +77,41 @@ export function reconcileListedFiles(
   return mergeWorkbenchFiles(current, listedLogs)
 }
 
+/**
+ * Builds rows only for sources connected to the active project. Artifact
+ * records are content-addressed and can contain source locations from several
+ * projects, so filtering by artifact id alone is not sufficient.
+ */
+export function projectArtifactFiles(
+  artifacts: readonly ArtifactRecord[],
+  projectSources: readonly ProjectSnapshot['artifacts'][number][],
+): WorkbenchFile[] {
+  const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
+  return dedupeWorkbenchFiles(projectSources.flatMap((source) => {
+    const artifact = artifactById.get(source.artifactId)
+    if (!artifact || artifact.extension.replace(/^\./, '').toLowerCase() !== 'log') return []
+    const rootId = source.artifactRootId ?? source.rootId
+    const locations = (artifact.sources ?? []).filter((location) => (
+      location.rootId === rootId
+      && location.relativePath.replace(/\\/g, '/') === source.relativePath.replace(/\\/g, '/')
+    ))
+    const narrowed: ArtifactRecord = {
+      ...artifact,
+      sources: locations.length ? locations : [{ rootId, folderLabel: 'Project logs', relativePath: source.relativePath }],
+    }
+    return artifactFiles(narrowed).filter((file) => matchesProjectSource(file, source))
+  }))
+}
+
+export function reconcileProjectListedFiles(
+  current: readonly WorkbenchFile[],
+  artifacts: readonly ArtifactRecord[],
+  projectSources: readonly ProjectSnapshot['artifacts'][number][],
+): WorkbenchFile[] {
+  const currentProjectRows = current.filter((file) => projectSources.some((source) => matchesProjectSource(file, source)))
+  return mergeWorkbenchFiles(currentProjectRows, projectArtifactFiles(artifacts, projectSources))
+}
+
 export interface ProjectUpdateFileState {
   files: WorkbenchFile[]
   selectedFileId: string | null
@@ -99,8 +134,11 @@ export function reconcileProjectUpdateFileState(
   }
 }
 
-export function projectLoadFileState(artifacts: readonly ArtifactRecord[]): ProjectUpdateFileState {
-  const files = dedupeWorkbenchFiles(artifacts.flatMap(artifactFiles))
+export function projectLoadFileState(
+  artifacts: readonly ArtifactRecord[],
+  projectSources?: readonly ProjectSnapshot['artifacts'][number][],
+): ProjectUpdateFileState {
+  const files = projectSources ? projectArtifactFiles(artifacts, projectSources) : dedupeWorkbenchFiles(artifacts.flatMap(artifactFiles))
   return { files, selectedFileId: files[0]?.id ?? null }
 }
 
@@ -351,7 +389,9 @@ export default function App() {
     const projectLoadGeneration = projectGeneration.current
     void api.artifacts.list().then((artifacts) => {
       if (!active || projectGeneration.current !== projectLoadGeneration || !isAppLifecycleActive(lifecycleRef.current, generation)) return
-      const next = reconcileListedFiles(filesRef.current, artifacts)
+      const next = project
+        ? reconcileProjectListedFiles(filesRef.current, artifacts, project.artifacts)
+        : reconcileListedFiles(filesRef.current, artifacts)
       filesRef.current = next
       setFiles(hydrateEvaluation(next, evaluationSnapshotRef.current, project?.artifacts ?? []))
       setSelectedFileId((current) => current && next.some((file) => file.id === current) ? current : next[0]?.id ?? null)
@@ -369,7 +409,7 @@ export default function App() {
     setProject(result.project)
     evaluationSnapshotRef.current = null
     setEvaluationSnapshot(null)
-    const next = projectLoadFileState(result.artifacts)
+    const next = projectLoadFileState(result.artifacts, result.project.artifacts)
     filesRef.current = next.files
     setFiles(next.files)
     setSelectedFileId(next.selectedFileId)
@@ -383,6 +423,23 @@ export default function App() {
     setSelectedFileId(next.selectedFileId)
   }, [project, selectedFileId])
   projectUpdatedRef.current = projectUpdated
+
+  const importProjectFolder = useCallback(async (): Promise<{ cancelled: true } | { cancelled: false; importedCount: number; failureCount: number; skippedCount: number }> => {
+    const api = window.sequenceIntelligence
+    const target = projectRef.current
+    if (!api?.projects || !target) return { cancelled: true }
+    const latest = await api.projects.get({ projectId: target.id }) ?? target
+    const previousSources = new Set(latest.artifacts.map((source) => source.sourceId))
+    const result = await api.projects.attachFolder({ projectId: latest.id, expectedRevision: latest.revision })
+    if ('cancelled' in result) return { cancelled: true }
+    projectLoaded(result)
+    return {
+      cancelled: false,
+      importedCount: result.project.artifacts.filter((source) => !previousSources.has(source.sourceId)).length,
+      failureCount: result.failures.length,
+      skippedCount: result.skippedCount,
+    }
+  }, [projectLoaded])
 
   useEffect(() => {
     const api = window.sequenceIntelligence
@@ -746,6 +803,7 @@ export default function App() {
       onArchiveRecipe={archiveRecipeRevision}
       onBatchResults={updateBatchResults}
       onApplyMetadataSuggestion={applyMetadataSuggestion}
+      onImportProjectFolder={project ? importProjectFolder : undefined}
       onNotify={notify}
       projectId={project?.id ?? PROJECT_ID}
       projectSources={project?.artifacts ?? []}

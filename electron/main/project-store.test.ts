@@ -82,6 +82,39 @@ describe('ProjectStore', () => {
     await expect(store.save({ ...payload, expectedRevision: saved.revision, lpddrDevelopmentContext: { ...payload.lpddrDevelopmentContext, densityGb: -1 } })).rejects.toThrow('densityGb')
   })
 
+  it('synchronizes current log sources while retaining evidence-backed history', async () => {
+    const dataRoot = await tempRoot(); const folder = await mkdtemp(join(tmpdir(), 'project-folder-')); roots.push(folder)
+    const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'Source sync' })
+    const attached = await store.attachFolder(project.id, project.revision, folder)
+    const rootId = attached.folders[0].rootId
+    const connected = await store.connectArtifacts({ projectId: project.id, expectedRevision: attached.revision, artifacts: [
+      { sourceId: 'keep-history', rootId, artifactId: 'old-log', relativePath: 'old.log' },
+      { sourceId: 'remove-manifest', rootId, artifactId: 'manifest', relativePath: 'manifest.json' },
+      { sourceId: 'replace-log', rootId, artifactId: 'replace-old', relativePath: 'replace.log' },
+    ] })
+    const withMemory = await store.save({
+      projectId: project.id, expectedRevision: connected.revision,
+      evaluationNodes: [{ id: 'node', name: 'historical fail', dimensions: {}, status: 'fail' }],
+      evidenceRecords: [{ id: 'evidence', evaluationNodeId: 'node', status: 'fail', sourceIds: ['keep-history'] }],
+    })
+    const synced = await store.syncArtifacts({ projectId: project.id, expectedRevision: withMemory.revision, artifacts: [
+      { sourceId: 'replace-log', rootId, artifactId: 'replace-new', relativePath: 'replace.log' },
+      { sourceId: 'new-log', rootId, artifactId: 'new-log', relativePath: 'new.log' },
+    ] }, [rootId])
+    expect(synced.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'keep-history', artifactId: 'old-log' }),
+      expect.objectContaining({ sourceId: 'replace-log', artifactId: 'replace-new' }),
+      expect.objectContaining({ sourceId: 'new-log' }),
+    ]))
+    expect(synced.artifacts.some((source) => source.sourceId === 'remove-manifest')).toBe(false)
+    expect(synced.evidenceRecords?.[0].sourceIds).toEqual(['keep-history'])
+    const unchanged = await store.syncArtifacts({ projectId: project.id, expectedRevision: synced.revision, artifacts: [
+      { sourceId: 'replace-log', rootId, artifactId: 'replace-new', relativePath: 'replace.log' },
+      { sourceId: 'new-log', rootId, artifactId: 'new-log', relativePath: 'new.log' },
+    ] }, [rootId])
+    expect(unchanged.revision).toBe(synced.revision)
+  })
+
   it('adds empty LPDDR memory fields when reading a legacy v2 project and rejects broken references', async () => {
     const dataRoot = await tempRoot(); await mkdir(join(dataRoot, 'metadata'), { recursive: true })
     await writeFile(join(dataRoot, 'metadata', 'projects.json'), JSON.stringify({ schemaVersion: 2, projects: {

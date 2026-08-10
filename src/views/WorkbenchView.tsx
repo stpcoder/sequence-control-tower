@@ -129,6 +129,7 @@ export interface WorkbenchViewProps {
   onSaveRecipe?: (draft: WorkbenchRecipeDraft) => void | Promise<void>
   onArchiveRecipe?: (recipeId: string) => void | Promise<void>
   onApplyMetadataSuggestion?: (fileId: string, field: MetadataSuggestionField, value: string) => void | Promise<void>
+  onImportProjectFolder?: () => Promise<{ cancelled: true } | { cancelled: false; importedCount: number; failureCount: number; skippedCount: number }>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   projectId?: string
   projectSources?: readonly ProjectSnapshot['artifacts'][number][]
@@ -221,6 +222,10 @@ export function nextSearchHitIndex(
   if (hitCount <= 0) return 0
   if (!hasNavigated) return direction < 0 ? hitCount - 1 : 0
   return (currentIndex + direction + hitCount) % hitCount
+}
+
+export function deferredSearchHitIndex(direction: 1 | -1, hitCount: number): number {
+  return nextSearchHitIndex(0, hitCount, direction, false)
 }
 
 export interface WorkbenchPaneWidths {
@@ -971,6 +976,7 @@ export function WorkbenchView({
   onSaveRecipe,
   onArchiveRecipe,
   onApplyMetadataSuggestion,
+  onImportProjectFolder,
   onNotify,
   projectId = 'log-workbench',
   projectSources = [],
@@ -1037,6 +1043,7 @@ export function WorkbenchView({
   const workbenchRef = useRef<HTMLDivElement>(null)
   const splitterDragRef = useRef<{ pane: keyof WorkbenchPaneWidths; startX: number; startWidth: number } | null>(null)
   const searchHasNavigatedRef = useRef(false)
+  const pendingSearchDirectionRef = useRef<1 | -1 | null>(null)
   const observationTimer = useRef<number | undefined>(undefined)
   const searchRequest = useRef(0)
   const mountedRef = useRef(false)
@@ -1062,6 +1069,7 @@ export function WorkbenchView({
     setCurrentHit(0)
     searchHasNavigatedRef.current = false
     authorizedHitKeyRef.current = ''
+    pendingSearchDirectionRef.current = null
   }, [])
   const patternReviewFileIdRef = useRef('')
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
@@ -1785,10 +1793,21 @@ export function WorkbenchView({
   }, [lineWindows, loadLineWindow, scheduleScroll, selectFile])
 
   const moveToHit = useCallback((direction: 1 | -1) => {
-    if (!hits.length) return
+    if (!hits.length) {
+      if (query.trim() && !invalidPattern) pendingSearchDirectionRef.current = direction
+      return
+    }
+    pendingSearchDirectionRef.current = null
     const next = nextSearchHitIndex(currentHit, hits.length, direction, searchHasNavigatedRef.current)
     navigateToSearchHit(next)
-  }, [currentHit, hits.length, navigateToSearchHit])
+  }, [currentHit, hits.length, invalidPattern, navigateToSearchHit, query])
+
+  useEffect(() => {
+    const direction = pendingSearchDirectionRef.current
+    if (direction === null || !hits.length) return
+    pendingSearchDirectionRef.current = null
+    navigateToSearchHit(deferredSearchHitIndex(direction, hits.length))
+  }, [hits.length, navigateToSearchHit])
 
   const openSearch = useCallback((scope: SearchScope, nextReplaceMode = replaceMode) => {
     setSearchScope(scope)
@@ -2223,6 +2242,17 @@ export function WorkbenchView({
     batchGeneration.current = invalidateImportBatchGeneration(batchGeneration.current)
     setImporting(true)
     try {
+      if (onImportProjectFolder) {
+        const result = await onImportProjectFolder()
+        if (!canApplyImportContinuation(mountedRef.current) || result.cancelled) return
+        onNotify?.(
+          result.failureCount
+            ? `${result.importedCount}개 로그를 프로젝트에 연결했습니다 · 실패 ${result.failureCount}.`
+            : `${result.importedCount}개 로그를 프로젝트에 연결했습니다${result.skippedCount ? ` · 로그 외 파일 ${result.skippedCount}개 제외` : ''}.`,
+          result.failureCount ? 'info' : 'success',
+        )
+        return
+      }
       const result = await api.artifacts.importFolder({ extensions: ['log'], maxFiles: 10000 })
       if (!canApplyImportContinuation(mountedRef.current)) return
       if (result.cancelled) return
@@ -2236,12 +2266,12 @@ export function WorkbenchView({
       })
       if (imported[0]) selectFile(imported[0].id)
       const limitReached = 'limitReached' in result && result.limitReached === true
-      const partial = result.failures.length > 0 || result.skippedCount > 0 || limitReached
+      const failed = result.failures.length > 0 || limitReached
       onNotify?.(
-        partial
-          ? `${imported.length}개 로그를 불러왔지만 일부는 처리하지 못했습니다${result.failures.length ? ` · 실패 ${result.failures.length}` : ''}${result.skippedCount ? ` · 제외 ${result.skippedCount}` : ''}${limitReached ? ' · 10,000개 제한 도달' : ''}.`
-          : `${imported.length}개 로그 메타데이터를 불러왔습니다. 내용은 열 때만 읽습니다.`,
-        partial ? 'info' : 'success',
+        failed
+          ? `${imported.length}개 로그를 불러왔습니다${result.failures.length ? ` · 실패 ${result.failures.length}` : ''}${limitReached ? ' · 10,000개 제한 도달' : ''}.`
+          : `${imported.length}개 로그를 불러왔습니다${result.skippedCount ? ` · 로그 외 파일 ${result.skippedCount}개 제외` : ''}.`,
+        failed ? 'info' : 'success',
       )
     } catch (error) {
       if (!canApplyImportContinuation(mountedRef.current)) return
@@ -2250,7 +2280,7 @@ export function WorkbenchView({
       importInFlightRef.current = false
       if (canApplyImportContinuation(mountedRef.current)) setImporting(false)
     }
-  }, [onNotify, selectFile, updateFiles])
+  }, [onImportProjectFolder, onNotify, selectFile, updateFiles])
 
   useEffect(() => {
     const handleAppCommand = (event: Event) => {
