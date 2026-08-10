@@ -90,7 +90,8 @@
 .evaluation-memory-view__interpretation p { max-width: 850px; margin: 8px 0 0; color: #d7dbe1; font-size: 14px; line-height: 1.72; }
 .evaluation-memory-view__interpretation > small { display: inline-block; margin-top: 12px; color: #93b8fc; font-size: 12px; }
 .evaluation-memory-view__trends,
-.evaluation-memory-view__runs { padding: 14px 0 4px; border-bottom: 1px solid var(--em-line-soft); }
+.evaluation-memory-view__runs,
+.evaluation-memory-view__logs { padding: 14px 0 4px; border-bottom: 1px solid var(--em-line-soft); }
 .evaluation-memory-view__trends > p,
 .evaluation-memory-view__runs > p { padding: 12px 0 16px; color: var(--em-dim); font-size: 12px; }
 .evaluation-memory-view__trends > div:not(.evaluation-memory-view__section-head),
@@ -104,6 +105,12 @@
 .evaluation-memory-view__run b { overflow: hidden; color: #d4d9e0; font-size: 13px; font-weight: 590; text-overflow: ellipsis; white-space: nowrap; }
 .evaluation-memory-view__run span { overflow: hidden; color: var(--em-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .evaluation-memory-view__run em { color: var(--em-muted); font-size: 11px; font-style: normal; }
+.evaluation-memory-view__logs > div:not(.evaluation-memory-view__section-head) { max-height: 260px; overflow: auto; }
+.evaluation-memory-view__logs button { display: grid; grid-template-columns: 16px minmax(0,1fr) auto; gap: 8px; align-items: center; width: 100%; min-height: 40px; border-top: 1px solid rgba(51,56,66,.55); color: var(--em-muted); font-size: 12px; text-align: left; }
+.evaluation-memory-view__logs button:hover { color: var(--em-text); background: rgba(255,255,255,.018); }
+.evaluation-memory-view__logs button svg { color: var(--em-dim); }
+.evaluation-memory-view__logs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evaluation-memory-view__logs button em { color: var(--em-dim); font-size: 11px; font-style: normal; }
 .evaluation-memory-view__empty { display: grid; height: 100%; place-content: center; justify-items: center; gap: 8px; color: var(--em-dim); font-size: 12px; }
 .evaluation-memory-view__empty p { margin: 0; }
 
@@ -111,26 +118,9 @@
 .evaluation-memory-view__review > header > div { display: grid; gap: 2px; }
 .evaluation-memory-view__review > header button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 9px; border-radius: 6px; color: var(--sct-blue); font-size: 12px; }
 .evaluation-memory-view__review > header button:hover { background: var(--sct-hover); }
-.evaluation-memory-view__review > label,
-.evaluation-memory-view__manual label { display: grid; gap: 6px; margin: 0 0 12px; color: var(--em-dim); font-size: 12px; }
+.evaluation-memory-view__review > label { display: grid; gap: 6px; margin: 0 0 14px; color: var(--em-dim); font-size: 12px; }
 .evaluation-memory-view__narrative textarea { min-height: 126px; line-height: 1.55; }
 .evaluation-memory-view__save { display: flex; width: 100%; min-height: var(--sct-control-height); align-items: center; justify-content: center; gap: 7px; border-radius: var(--sct-control-radius); font-size: 13px; font-weight: 630; }
-.evaluation-memory-view__linked-logs,
-.evaluation-memory-view__manual { margin-top: 16px; border-top: 1px solid var(--em-line); }
-.evaluation-memory-view__linked-logs > summary,
-.evaluation-memory-view__manual > summary,
-.evaluation-memory-view__manual details > summary,
-.evaluation-memory-view__dimensions > summary { display: flex; min-height: 42px; align-items: center; gap: 7px; color: var(--em-muted); font-size: 12px; cursor: pointer; }
-.evaluation-memory-view__linked-logs > div { max-height: 250px; overflow: auto; }
-.evaluation-memory-view__linked-logs button { display: flex; width: 100%; min-height: 38px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; border-top: 1px solid var(--em-line-soft); color: var(--em-muted); font-size: 12px; text-align: left; }
-.evaluation-memory-view__linked-logs button:hover { color: var(--em-text); background: rgba(255,255,255,.018); }
-.evaluation-memory-view__linked-logs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.evaluation-memory-view__linked-logs button em { flex: 0 0 auto; color: var(--em-dim); font-size: 11px; font-style: normal; }
-.evaluation-memory-view__manual[open] { padding-bottom: 10px; }
-.evaluation-memory-view__manual > details { margin-bottom: 12px; border-bottom: 1px solid var(--em-line-soft); }
-.evaluation-memory-view__manual button { min-height: 36px; padding: 0 10px; border-radius: var(--sct-control-radius); color: var(--em-muted); }
-.evaluation-memory-view__manual button:hover { color: var(--em-text); background: var(--sct-hover); }
-.evaluation-memory-view__dimensions > div { display: grid; grid-template-columns: 1fr; }
 
 @media (max-width: 1220px) {
   .evaluation-memory-view__workspace { grid-template-columns: 230px minmax(390px,1fr) 320px; }

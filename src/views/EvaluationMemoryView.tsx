@@ -183,15 +183,12 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
   const [projectDraft, setProjectDraft] = useState<ProductProject>(memory.project)
   const [saving, setSaving] = useState(false)
   const [review, setReview] = useState({ purpose: 'characterization' as EvaluationPurpose, status: 'inconclusive' as EvaluationStatus, parentId: '', interpretation: '' })
-  const [hypothesis, setHypothesis] = useState({ title: '', description: '' })
-  const [evaluation, setEvaluation] = useState({ name: '', purpose: 'characterization' as EvaluationPurpose, hypothesisId: '', parentId: '', status: 'inconclusive' as EvaluationStatus, interpretation: '', dimensions: emptyDimensions(), logIds: [] as string[] })
 
   useEffect(() => { setProjectDraft(memory.project) }, [memory.project])
   useEffect(() => { if (!groups.some((group) => group.id === selectedGroupId)) setSelectedGroupId(groups[0]?.id) }, [groups, selectedGroupId])
   useEffect(() => {
     const externalParent = latestNode?.parentId && !selectedGroup?.nodes.some((node) => node.id === latestNode.parentId) ? latestNode.parentId : ''
     setReview({ purpose: latestNode?.purpose ?? 'characterization', status: latestNode?.status ?? 'inconclusive', parentId: externalParent, interpretation: latestNode?.interpretation ?? '' })
-    setEvaluation((current) => ({ ...current, logIds: selectedGroup?.logs.map((log) => log.id) ?? [] }))
   }, [latestNode?.id, selectedGroup?.id])
 
   const save = async (next: EvaluationMemory) => { setSaving(true); try { await onChange(next); return true } catch { onNotify('저장하지 못했습니다. 내용을 확인한 뒤 다시 시도하세요.'); return false } finally { setSaving(false) } }
@@ -201,7 +198,6 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     if (first) onSelectLog?.(first.openId ?? first.id)
   }
   const updateProjectDraft = (key: 'product' | 'skew' | 'customer' | 'targetDevice' | 'densityGb' | 'nominalVoltage', raw: string) => setProjectDraft((current) => ({ ...current, [key]: raw === '' ? undefined : key === 'densityGb' || key === 'nominalVoltage' ? Number(raw) : raw }))
-  const updateDimension = (key: keyof EvaluationDimensions, raw: string, kind: 'text' | 'number') => setEvaluation((current) => ({ ...current, dimensions: { ...current.dimensions, [key]: raw === '' ? undefined : kind === 'number' ? Number(raw) : raw } }))
 
   const saveReview = async () => {
     if (!selectedGroup) return
@@ -217,22 +213,13 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     }
     if (await save(next)) onNotify('평가 해설을 저장했습니다.')
   }
-  const addHypothesis = async () => {
-    if (!hypothesis.title.trim()) return onNotify('불량 가설 이름을 입력하세요.')
-    if (await save(addFailureHypothesis(memory, { title: hypothesis.title.trim(), description: hypothesis.description.trim() || undefined, origin: 'engineer-confirmed' }))) setHypothesis({ title: '', description: '' })
-  }
-  const addEvaluation = async () => {
-    if (!evaluation.name.trim()) return onNotify('평가 이름을 입력하세요.')
-    const next = addEvaluationWithEvidence(memory, { ...evaluation, name: evaluation.name.trim(), evaluationScopeId: selectedGroup?.id.startsWith('legacy:') || selectedGroup?.id === 'unscoped' ? undefined : selectedGroup?.id, origin: 'engineer-confirmed' })
-    if (await save(next)) setEvaluation({ name: '', purpose: 'characterization', hypothesisId: '', parentId: '', status: 'inconclusive', interpretation: '', dimensions: emptyDimensions(), logIds: selectedGroup?.logs.map((log) => log.id) ?? [] })
-  }
   const copyContext = async () => { try { await navigator.clipboard.writeText(buildEvaluationContextMarkdown(memory)); onNotify('AI 맥락을 클립보드에 복사했습니다.') } catch { onNotify('클립보드를 사용할 수 없습니다.') } }
   return <div className="data-view evaluation-memory-view">
     <header className="data-view-header evaluation-memory-view__header"><div><h1>평가 이력</h1></div><div className="data-actions evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}>CSV</button><button onClick={() => void copyContext()}>AI 맥락</button></div></header>
     <details className="evaluation-memory-view__project-context"><summary>제품 조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void save(withProjectConditions(memory, projectDraft))}>저장</button></div></details>
     <div className="evaluation-memory-view__workspace">
       <aside className="evaluation-memory-view__folders">
-        <header><strong>평가</strong><span>{groups.length}</span></header>
+        <header><strong>평가 폴더</strong><span>{groups.length}</span></header>
         <div>{groups.length ? groups.map((group) => { const state = folderStatus(group); return <button type="button" className={group.id === selectedGroup?.id ? 'is-selected' : ''} onClick={() => selectGroup(group)} key={group.id}><i className={`is-${state}`} /><span><b>{group.label}</b><small>{group.logs.length}개 로그</small></span><em>{statusLabel[state]}</em></button> }) : <p>연결된 평가 폴더가 없습니다.</p>}</div>
       </aside>
 
@@ -240,7 +227,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
         {selectedGroup ? <>
           <header><div><Folder size={17} /><h2>{selectedGroup.label}</h2></div><span>{selectedGroup.logs.length}개 로그</span></header>
           <section className="evaluation-memory-view__interpretation">
-            <div className="evaluation-memory-view__section-head"><strong>정성 해석</strong><span>{provenance(latestNode)}</span></div>
+            <div className="evaluation-memory-view__section-head"><strong>평가 해석</strong><span>{provenance(latestNode)}</span></div>
             <p>{folderInterpretation(selectedGroup, trends)}</p>
             {latestNode?.purpose ? <small>{purposeLabel[latestNode.purpose]}</small> : null}
           </section>
@@ -250,33 +237,24 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
             {trends.length > 6 ? <details><summary>나머지 {trends.length - 6}개</summary>{trends.slice(6).map((trend) => <div key={`${trend.dimension}-${trend.value}`}><span>{trendDimensionLabel(trend.dimension)}</span><b>{trend.value}</b><em>{trend.failureCount}/{trend.evidenceCount} 실패</em></div>)}</details> : null}
           </section>
           <section className="evaluation-memory-view__runs">
-            <div className="evaluation-memory-view__section-head"><strong>분석 기록</strong><span>{selectedGroup.nodes.length}</span></div>
+            <div className="evaluation-memory-view__section-head"><strong>이 평가의 기록</strong><span>{selectedGroup.nodes.length}</span></div>
             {selectedGroup.nodes.length ? selectedGroup.nodes.map((node) => { const parent = memory.nodes.find((item) => item.id === node.parentId); return <div className="evaluation-memory-view__run" key={node.id}><i className={`is-${node.status ?? 'inconclusive'}`} /><div><b>{node.name}</b><span>{node.purpose ? purposeLabel[node.purpose] : '목적 미정'}{parent ? ` · ${parent.name} 이후` : ''}</span></div><em>{statusLabel[node.status ?? 'inconclusive']}</em></div> }) : <p>저장된 분석 기록이 없습니다.</p>}
+          </section>
+          <section className="evaluation-memory-view__logs">
+            <div className="evaluation-memory-view__section-head"><strong>이 평가의 로그</strong><span>{selectedGroup.logs.length}</span></div>
+            <div>{selectedGroup.logs.map((log) => <button type="button" onClick={() => onOpenLog(log.openId ?? log.id)} key={log.id}><FileText size={13} /><span>{log.name}</span><em>{log.result ?? '미정'}</em></button>)}</div>
           </section>
         </> : <div className="evaluation-memory-view__empty"><Folder size={20} /><p>평가 폴더를 연결하세요.</p></div>}
       </main>
 
       <aside className="evaluation-memory-view__review">
-        <header><div><strong>평가 정리</strong><span>{provenance(latestNode)}</span></div></header>
+        <header><div><strong>선택 평가 수정</strong><span>{selectedGroup?.label ?? '평가를 선택하세요'}</span></div></header>
         {selectedGroup ? <>
-          <label><span>목적</span><select value={review.purpose} onChange={(event) => setReview({ ...review, purpose: event.target.value as EvaluationPurpose })}>{Object.entries(purposeLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-          <label><span>결과</span><select value={review.status} onChange={(event) => setReview({ ...review, status: event.target.value as EvaluationStatus })}><option value="inconclusive">미정</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="running">진행 중</option></select></label>
-          <label><span>이전 평가</span><select value={review.parentId} onChange={(event) => setReview({ ...review, parentId: event.target.value })}><option value="">연결하지 않음</option>{memory.nodes.filter((node) => !selectedGroup.nodes.some((current) => current.id === node.id)).map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>
-          <label className="evaluation-memory-view__narrative"><span>해설</span><textarea value={review.interpretation} onChange={(event) => setReview({ ...review, interpretation: event.target.value })} placeholder="어떤 조건에서 불량이 집중됐는지, 무엇이 개선됐는지, 추가 확인이 필요한지 기록" /></label>
-          <button className="evaluation-memory-view__save is-primary" disabled={saving} onClick={() => void saveReview()}><Check size={14} />{saving ? '저장 중…' : '확정 저장'}</button>
-
-          <details className="evaluation-memory-view__linked-logs"><summary><FileText size={13} />연결 로그 {selectedGroup.logs.length}</summary><div>{selectedGroup.logs.map((log) => <button type="button" onClick={() => onOpenLog(log.openId ?? log.id)} key={log.id}><span>{log.name}</span><em>{log.result ?? '미정'}</em></button>)}</div></details>
-          <details className="evaluation-memory-view__manual"><summary>직접 추가</summary>
-            <details><summary>가설 추가</summary><label><span>가설</span><input value={hypothesis.title} onChange={(event) => setHypothesis({ ...hypothesis, title: event.target.value })} /></label><label><span>메모</span><textarea value={hypothesis.description} onChange={(event) => setHypothesis({ ...hypothesis, description: event.target.value })} /></label><button disabled={saving} onClick={() => void addHypothesis()}>가설 저장</button></details>
-            <label><span>이름</span><input value={evaluation.name} onChange={(event) => setEvaluation({ ...evaluation, name: event.target.value })} /></label>
-            <label><span>목적</span><select value={evaluation.purpose} onChange={(event) => setEvaluation({ ...evaluation, purpose: event.target.value as EvaluationPurpose })}>{Object.entries(purposeLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>가설</span><select value={evaluation.hypothesisId} onChange={(event) => setEvaluation({ ...evaluation, hypothesisId: event.target.value })}><option value="">연결하지 않음</option>{memory.hypotheses.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-            <label><span>이전 평가</span><select value={evaluation.parentId} onChange={(event) => setEvaluation({ ...evaluation, parentId: event.target.value })}><option value="">연결하지 않음</option>{memory.nodes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label><span>결과</span><select value={evaluation.status} onChange={(event) => setEvaluation({ ...evaluation, status: event.target.value as EvaluationStatus })}><option value="inconclusive">미정</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="running">진행 중</option></select></label>
-            <label><span>해설</span><textarea value={evaluation.interpretation} onChange={(event) => setEvaluation({ ...evaluation, interpretation: event.target.value })} /></label>
-            <details className="evaluation-memory-view__dimensions"><summary>상세 조건</summary><div>{dimensionFields.map(([key, label, kind]) => <label key={key}><span>{label}</span><input type={kind} value={evaluation.dimensions[key] ?? ''} onChange={(event) => updateDimension(key, event.target.value, kind)} /></label>)}</div></details>
-            <button className="is-primary" disabled={saving} onClick={() => void addEvaluation()}>평가 추가</button>
-          </details>
+          <label><span>평가 목적</span><select value={review.purpose} onChange={(event) => setReview({ ...review, purpose: event.target.value as EvaluationPurpose })}>{Object.entries(purposeLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <label><span>최종 결과</span><select value={review.status} onChange={(event) => setReview({ ...review, status: event.target.value as EvaluationStatus })}><option value="inconclusive">미정</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="running">진행 중</option></select></label>
+          <label><span>연결할 이전 평가</span><select value={review.parentId} onChange={(event) => setReview({ ...review, parentId: event.target.value })}><option value="">연결하지 않음</option>{memory.nodes.filter((node) => !selectedGroup.nodes.some((current) => current.id === node.id)).map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>
+          <label className="evaluation-memory-view__narrative"><span>평가 해석</span><textarea value={review.interpretation} onChange={(event) => setReview({ ...review, interpretation: event.target.value })} placeholder="실패가 집중된 조건, 비교 결과, 다음 확인 항목" /></label>
+          <button className="evaluation-memory-view__save is-primary" disabled={saving} onClick={() => void saveReview()}><Check size={14} />{saving ? '저장 중…' : '평가 저장'}</button>
         </> : <p>평가를 선택하세요.</p>}
       </aside>
     </div>

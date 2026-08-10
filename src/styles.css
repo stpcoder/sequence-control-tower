@@ -169,7 +169,6 @@ button:disabled {
 .project-form input:focus, .project-form textarea:focus, .project-meta-input:focus { border-color: var(--blue); outline: none; }
 .form-hint { margin: 0; line-height: 1.45; }
 .project-primary-action { justify-content: center; padding: 8px; border-radius: 5px; color: #10151c; background: var(--blue); font-weight: 720; }
-.project-section-label { margin-top: 5px; color: var(--dim); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .project-step-head, .project-step-actions, .project-choice-row, .project-next-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .project-step-head { color: var(--muted); font-size: 12px; }
 .project-step-actions { min-height: 38px; margin-top: 2px; }
@@ -186,7 +185,11 @@ button:disabled {
 .project-settings-block details { border-bottom: 1px solid var(--line); }
 .project-settings-block summary { padding: 8px 2px; color: var(--muted); cursor: pointer; font-size: 11.5px; font-weight: 650; }
 .project-settings-block summary span { margin-left: 5px; color: var(--dim); font-weight: 500; }
-.project-advanced-content { display: grid; gap: 8px; padding-bottom: 10px; }
+.project-advanced-content { display: grid; gap: 12px; padding: 4px 2px 12px; }
+.project-field { display: grid; gap: 5px; color: var(--muted); font-size: 11.5px; }
+.project-analysis-fields { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.project-analysis-fields legend { margin-bottom: 7px; padding: 0; color: var(--muted); font-size: 11.5px; }
+.project-details .project-primary-action { min-height: 34px; margin-top: 2px; }
 .project-folder-content { padding-bottom: 8px; }
 .folder-status-list { margin: 0; padding: 8px 9px; border-left: 2px solid var(--line-strong); color: var(--muted); font: inherit; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .folder-status-line { display: flex; align-items: center; justify-content: space-between; padding: 7px 2px; border-top: 1px solid #262c34; color: var(--text); font-size: 12px; }
