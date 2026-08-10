@@ -225,8 +225,9 @@ export class ProjectStore {
   }
   private context(value: ProjectLpddrDevelopmentContext): ProjectLpddrDevelopmentContext {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('LPDDR 개발 context가 올바르지 않습니다.')
+    const legacy = value as ProjectLpddrDevelopmentContext & { sku?: unknown }
     return {
-      product: optionalText(value.product, 'product', 120), sku: optionalText(value.sku, 'sku', 120),
+      product: optionalText(value.product, 'product', 120), skew: optionalText(value.skew ?? legacy.sku, 'skew', 120),
       program: optionalText(value.program, 'program', 120), phase: optionalText(value.phase, 'phase', 120),
       customer: optionalText(value.customer, 'customer', 160), targetDevice: optionalText(value.targetDevice, 'targetDevice', 160),
       densityGb: optionalPositiveNumber(value.densityGb, 'densityGb'), nominalVoltage: optionalPositiveNumber(value.nominalVoltage, 'nominalVoltage'),
@@ -235,7 +236,7 @@ export class ProjectStore {
   private dimensions(value: unknown): ProjectEvaluationDimensions {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('평가 조건이 올바르지 않습니다.')
     const v = value as Record<string, unknown>
-    return { sku: optionalText(v.sku, 'sku', 120), lot: optionalText(v.lot, 'lot', 120), material: optionalText(v.material, 'material', 120), die: optionalText(v.die, 'die', 120), sample: optionalText(v.sample, 'sample', 120), socVendor: optionalVendor(v.socVendor, 'socVendor'), socModel: optionalText(v.socModel, 'socModel', 120), bootProfileId: optionalText(v.bootProfileId, 'bootProfileId', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), skewPs: optionalNumber(v.skewPs, 'skewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
+    return { skew: optionalText(v.skew ?? v.sku, 'skew', 120), lot: optionalText(v.lot, 'lot', 120), material: optionalText(v.material, 'material', 120), die: optionalText(v.die, 'die', 120), sample: optionalText(v.sample, 'sample', 120), socVendor: optionalVendor(v.socVendor, 'socVendor'), socModel: optionalText(v.socModel, 'socModel', 120), bootProfileId: optionalText(v.bootProfileId, 'bootProfileId', 120), bl: optionalDimension(v.bl, 'bl'), dq: optionalDimension(v.dq, 'dq'), channel: optionalDimension(v.channel, 'channel'), subChannel: optionalDimension(v.subChannel, 'subChannel'), rank: optionalDimension(v.rank, 'rank'), bank: optionalDimension(v.bank, 'bank'), bankGroup: optionalDimension(v.bankGroup, 'bankGroup'), row: optionalDimension(v.row, 'row'), column: optionalDimension(v.column, 'column'), pattern: optionalDimension(v.pattern, 'pattern'), frequencyMHz: optionalNumber(v.frequencyMHz, 'frequencyMHz'), temperatureC: optionalNumber(v.temperatureC, 'temperatureC'), vdd: optionalNumber(v.vdd, 'vdd'), timingSkewPs: optionalNumber(v.timingSkewPs ?? v.skewPs, 'timingSkewPs'), testMode: optionalText(v.testMode, 'testMode', 120) }
   }
   private memory(hypothesesValue: unknown, nodesValue: unknown, evidenceValue: unknown, artifacts: ProjectArtifactSourceRef[]): { hypotheses: ProjectFailureHypothesis[]; nodes: ProjectEvaluationNode[]; evidence: ProjectEvidenceRecord[] } {
     if (!Array.isArray(hypothesesValue) || !Array.isArray(nodesValue) || !Array.isArray(evidenceValue) || hypothesesValue.length > 200 || nodesValue.length > 1_000 || evidenceValue.length > 5_000) throw new Error('평가 메모리 크기가 올바르지 않습니다.')

@@ -11,4 +11,5 @@ coverage/
 !tests/fixtures/soc-logs/**/*.log
 !tests/fixtures/engineer-workflow/**/*.log
 !tests/fixtures/qualcomm-bringup/**/*.log
+!tests/fixtures/long-soc/**/*.log
 omh-store-upload/

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evaluationProposalTitle, mergeEvaluationAgentMemory, shouldRetainAgentSession, toolsForAssistantMessage } from './AgentPanel'
+import { evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, shouldRetainAgentSession, toolsForAssistantMessage } from './AgentPanel'
 import type { EvaluationAgentMemoryPayloadView, NativeAgentMessageView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
@@ -19,7 +19,10 @@ describe('mergeEvaluationAgentMemory', () => {
   })
 
   it('uses a useful Korean-style trend title from confirmed dimensions', () => {
-    expect(evaluationProposalTitle({ outcome: 'FAIL', dimensions: { testMode: 'VPERI', dq: 9 }, rationale: '', evidenceIds: [], sourceIds: [] })).toBe('VPERI · DQ9 경향')
+    expect(evaluationProposalTitle({ outcome: 'TEST_FAIL', dimensions: { testMode: 'VPERI', dq: 9 }, rationale: '', evidenceIds: [], sourceIds: [] })).toBe('VPERI · DQ9 경향')
+    expect(proposalDecisionResult('TEST_FAIL')).toBe('TEST_FAIL')
+    expect(proposalDecisionResult('UNKNOWN')).toBeNull()
+    expect(evaluationDimensionSummary({ skew: 'SS', channel: 0, subChannel: 1, bank: 5 })).toEqual(['SKEW SS', 'CH 0', 'Sub CH 1', 'Bank 5'])
   })
 
   it('keeps a live agent session for revision updates but clears it on project switch', () => {

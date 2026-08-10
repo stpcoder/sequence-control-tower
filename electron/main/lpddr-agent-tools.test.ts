@@ -4,19 +4,19 @@ import { extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineerin
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
-    { sourceId: 's1', artifactId: 'a'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKU-SS-16GB-X16_SKEW-12PS_LOT-A1_MAT-WAF12_SMP-01_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_FAIL.log' },
-    { sourceId: 's2', artifactId: 'b'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKU-X6_LOT-B4_MAT-WAF27_SMP-11_T-20_VDD1p275_F8533_TM-BOOT_PAT-TRAIN_DQ20_BL32_CH1.log' }
+    { sourceId: 's1', artifactId: 'a'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKEW-SS_TSKEW-12PS_LOT-A1_MAT-WAF12_SMP-01_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_FAIL.log' },
+    { sourceId: 's2', artifactId: 'b'.repeat(64), rootId: 'r', relativePath: 'LPDDR6_SKEW-FF_LOT-B4_MAT-WAF27_SMP-11_T-20_VDD1p275_F8533_TM-BOOT_PAT-TRAIN_DQ20_BL32_CH1.log' }
   ], failureHypotheses: [], evaluationNodes: [], evidenceRecords: [], lpddrDevelopmentContext: {}, folders: [], equipmentProfiles: [], templatePins: [], exportPresets: [], revision: 0, archived: false, createdAt: '', updatedAt: '', schemaVersion: 2 as const
 }
 
 describe('LPDDR agent tools', () => {
   it('extracts LPDDR conditions without swallowing adjacent tokens', () => {
     expect(extractLpddrFilenameDimensions(project.artifacts[0].relativePath)).toMatchObject({
-      sku: 'SS-16GB-X16', skewPs: 12, lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,
-      vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR', dq: '9', bl: '16', channel: '0'
+      skew: 'SS', timingSkewPs: 12, lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,
+      vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR', dq: '9', bl: '16', channel: '0', subChannel: '1', rank: '0', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14'
     })
     expect(extractLpddrFilenameDimensions(project.artifacts[1].relativePath).temperatureC).toBe(-20)
-    expect(extractLpddrFilenameDimensions('LPDDR6_SM-8975_SKU-X6_DIE03_SMP-01.log')).toMatchObject({
+    expect(extractLpddrFilenameDimensions('LPDDR6_SM-8975_SKEW-SS_DIE03_SMP-01.log')).toMatchObject({
       socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', die: '03', sample: '01',
     })
     expect(sourceEngineeringContext('MTK-24D_SMP-01_RT2.log', { fingerprint: { structuralHash: 'same', commandCount: 1, commandSignatures: ['voltage-control:set_rail'] } } as never)).toMatchObject({
@@ -26,7 +26,7 @@ describe('LPDDR agent tools', () => {
   })
 
   it('applies the MediaTek boot profile instead of UEFI stages', async () => {
-    const mtkProject = { ...project, artifacts: [{ ...project.artifacts[0], relativePath: 'LPDDR6_MTK-24D_SKU-X6_DIE03_SMP-01.log' }] }
+    const mtkProject = { ...project, artifacts: [{ ...project.artifacts[0], relativePath: 'LPDDR6_MTK-24D_SKEW-SS_DIE03_SMP-01.log' }] }
     const inspectEvidence = vi.fn(async (input: { specs: Array<{ id: string }> }) => ({ sources: [{
       sourceId: 's1', artifactId: project.artifacts[0].artifactId, fileName: 'mtk.log',
       evidence: input.specs.map((spec) => ({ specId: spec.id, occurrenceCount: /post-pbl|\-lk$|\-os$/.test(spec.id) ? 1 : 0, firstOccurrence: { lineNumber: spec.id.includes('post-pbl') ? 5 : spec.id.endsWith('-lk') ? 10 : 20 } })),
@@ -64,7 +64,8 @@ describe('LPDDR agent tools', () => {
       agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'pass_fail_scan' })
-    expect(result.summary).toContain('FAST_FAIL 1')
+    expect(result.summary).toContain('TEST_FAIL 1')
+    expect((result.data as { rows: Array<{ fastFail?: boolean }> }).rows[0].fastFail).toBe(true)
     expect(result.summary).toContain('SYSTEM_HALT 1')
     expect(inspectEvidence).toHaveBeenCalledTimes(1)
   })
@@ -72,7 +73,7 @@ describe('LPDDR agent tools', () => {
   it('computes condition failure rates from definitive live-log denominators', async () => {
     const third = {
       sourceId: 's3', artifactId: 'c'.repeat(64), rootId: 'r',
-      relativePath: 'LPDDR6_SKU-X6_LOT-A2_MAT-WAF12_SMP-02_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_PASS.log'
+      relativePath: 'LPDDR6_SKEW-SS_LOT-A2_MAT-WAF12_SMP-02_T85_VDD1p295_F9600_TM-VPERI_PAT-WR-DQ9_BL16_CH0_PASS.log'
     }
     const trendProject = { ...project, artifacts: [...project.artifacts, third] }
     const evidence = (sourceId: string, status: 'pass' | 'fail') => ({
@@ -99,9 +100,10 @@ describe('LPDDR agent tools', () => {
     const result = await tools.execute('p', { name: 'failure_trends_get' })
     const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
     expect(data.denominator).toBe(3)
-    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'temperatureC', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
-    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKU', value: 'SS-16GB-X16' }))
-    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: '12' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: '온도', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: 'SS' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Sub Channel', value: '1' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Timing SKEW (ps)', value: '12' }))
     expect(data.live.some((item) => item.dimension === 'sku')).toBe(false)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
     expect(result.summary).toContain('1/2 fail (50.0%)')

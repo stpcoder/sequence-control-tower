@@ -36,14 +36,14 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   const calls: LpddrAgentToolCall[] = [
     { name: 'project_context_get' }, { name: 'project_history_get' }
   ]
-  if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|sku|주파수|skew|tm|mode)/i.test(text)) {
+  if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|주파수|skew|tm|mode|sub.?channel|rank|row|column)/i.test(text)) {
     calls.push({ name: 'filename_dimensions_scan' })
   }
   if (/(soc|퀄컴|qualcomm|미디어텍|mediatek|mtk|sm[-_ ]?\d|부팅|boot|pbl|xbl|abl|uefi|post.?pbl|lk2?)/i.test(text)) calls.push({ name: 'soc_boot_profile_scan' })
   if (/(콘솔|console|명령|command|입력|prompt|sleep|uefi\s*>|lk2?\s*>)/i.test(text)) calls.push({ name: 'console_transcript_scan' })
   if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
   if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
-  if (/(경향|집중|불량률|dq|bl|channel|채널|bank|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
+  if (/(경향|집중|불량률|dq|bl|channel|채널|sub.?channel|rank|bank|row|column|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
   if (/(과거|이전|유사|lpddr5|다음|추천|어떻게|시도)/i.test(text)) calls.push({ name: 'similar_case_search', args: { query: content.slice(0, 240) } })
   if (/(무슨 평가|어떤 평가|평가 목적|검색 기록|ctrl.?f|정규식|regex|찾아봤|분석 절차|boot|uefi|training|retest|\brt\b)/i.test(text)) {
     calls.push({ name: 'engineer_workflow_memory_get' })

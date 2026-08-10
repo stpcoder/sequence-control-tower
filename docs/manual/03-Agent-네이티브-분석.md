@@ -10,14 +10,16 @@ Agent가 별도 채팅 사이트에서 파일을 받아 답하는 구조가 아�
 
 Agent는 최대 100개 로그를 한 질문의 범위로 사용합니다. 전체 원문을 LLM에 보내지 않고 검색 위치와 최대 24줄 구간만 읽습니다.
 
+![Agent 분석 시작](../images/manual-v098-agent.png)
+
 ## Agent가 할 수 있는 일
 
-- 파일명에서 Sample, Lot, Material, Die, SKU, 온도, VDD, 주파수, test mode, pattern, DQ, BL, Channel, Bank, Bank Group, SKEW 후보 추출
+- 파일명에서 Sample, Lot, Material, Die, SKEW, 온도, VDD, 주파수, test mode, pattern, DQ, BL, Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column 후보 추출
 - SM-8975 같은 Qualcomm SoC와 MTK 24D 같은 MediaTek SoC 후보 및 부팅 profile 선택
 - Qualcomm UEFI 계열과 MediaTek Post-PBL/LK 계열의 마지막 도달 단계 구분
 - 콘솔 입력 명령과 장비 출력·상태 marker 분리
-- PASS, FAIL, training fail, reboot, halt, fast fail의 결정적 판정
-- 온도·VDD·DQ·BL·Channel·Pattern·주파수·SKEW·SKU·Lot·Sample·Die·SoC별 실패 분자와 분모 계산
+- PASS, test fail, training fail, reboot, halt의 결정적 판정과 fast fail marker 구분
+- 온도·VDD·DQ·BL·Channel·Sub Channel·Rank·Bank Group·Bank·Row·Column·Pattern·주파수·SKEW·Lot·Sample·Die·SoC별 실패 분자와 분모 계산
 - 같은 Sample과 같은 Sequence signature로 이전 FAIL을 다시 수행한 RT 관계 확인
 - 확정된 엔지니어 검색 절차를 새 로그에 재적용
 - 현재 LPDDR6 프로젝트와 과거 LPDDR5/LPDDR6 프로젝트의 유사 평가 검색
@@ -44,6 +46,17 @@ RT는 부팅 단계가 아닙니다. 동일 Sample·동일 Sequence로 수행된
 | `failure_trends_get` | 조건별 실패 분자·분모와 집중도 계산 |
 
 내장 LPDDR 분석 Skill은 파일명은 후보로 취급하고, 수치에는 항상 분모를 표시하며, Qualcomm과 MediaTek 부팅 단계를 섞지 않고, 불확실한 인과관계는 `추정`으로 표시하도록 강제합니다.
+
+## 결과와 평가 이력 저장
+
+Agent 첫 화면의 `결과와 평가 이력 정리`는 파일명 조건을 먼저 읽고, marker 검색과 최대 24줄 근거 창을 제한적으로 사용합니다. 다음 항목을 제안합니다.
+
+- 결과: `PASS`, `DIAG_FAIL`, `TEST_FAIL`, `TRAINING_FAIL`, `SYSTEM_HALT`, `SYSTEM_REBOOT`, `INCOMPLETE`, `UNKNOWN`
+- 목적: 불량 검출 강화, 개선 조건 확인, 동일 불량 재현, 불량 경향 파악, 개선 효과 검증
+- 조건: SKEW와 DRAM 위치, 온도, VDD, 주파수, Mode, Pattern
+- 근거: source ID와 결정 marker의 줄 번호
+
+결론을 바꾸는 정보가 부족하면 Agent가 한 가지를 먼저 질문합니다. 제안은 저장되지 않은 상태로 표시됩니다. `결과·이력 저장`을 누르면 근거 줄과 함께 결과가 저장되고, 같은 source ID가 평가 이력에 연결됩니다. `다시 분석`을 누르면 제안을 폐기하고 다시 확인합니다.
 
 ## Agent가 먼저 묻는 경우
 
@@ -94,4 +107,4 @@ OpenCode가 설치되고 LLM이 연결되면 앱이 OpenCode headless sidecar를
 - LLM 응답에 필요한 범위를 벗어난 절대경로
 - 로그 원문 전체
 
-Agent 대화는 읽기 전용입니다. Agent가 결과나 평가 이력을 임의로 확정하지 않습니다. 결과 변경과 평가 이력 저장은 엔지니어가 앱 화면에서 확인한 뒤 수행합니다. 유사 사례 검색은 현재 로컬 프로젝트의 단어 중첩 기반이며 embedding 검색은 아직 사용하지 않습니다.
+Agent의 조회 도구는 읽기 전용입니다. Agent가 결과나 평가 이력을 임의로 확정하지 않습니다. 구조화된 제안을 엔지니어가 `결과·이력 저장`으로 승인한 경우에만 결과와 평가 이력을 함께 기록합니다. 유사 사례 검색은 현재 로컬 프로젝트의 단어 중첩 기반이며 embedding 검색은 아직 사용하지 않습니다.

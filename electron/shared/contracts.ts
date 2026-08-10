@@ -789,14 +789,15 @@ export interface ProjectOnboardingAnswers {
 export type ProjectEvaluationStatus = 'pass' | 'fail' | 'inconclusive' | 'running'
 export type ProjectAssessmentOrigin = 'engineer-confirmed' | 'ai-proposed'
 export interface ProjectLpddrDevelopmentContext {
-  product?: string; sku?: string; program?: string; phase?: string; customer?: string; targetDevice?: string
+  product?: string; skew?: string; program?: string; phase?: string; customer?: string; targetDevice?: string
   densityGb?: number; nominalVoltage?: number
 }
 export interface ProjectEvaluationDimensions {
-  sku?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor
+  skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor
   socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number
-  channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number
-  frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string
+  channel?: string | number; subChannel?: string | number; rank?: string | number
+  bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number
+  frequencyMHz?: number; temperatureC?: number; vdd?: number; timingSkewPs?: number; testMode?: string
 }
 export interface ProjectFailureHypothesis {
   id: string; title: string; description?: string; origin: ProjectAssessmentOrigin; evaluationNodeIds?: string[]
@@ -960,14 +961,14 @@ export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'prefere
 
 /** Renderer-safe, bounded projection of the native evaluation-agent session. */
 export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
-export type EvaluationAgentPublicOutcome = 'PASS' | 'FAIL' | 'UNKNOWN'
+export type EvaluationAgentPublicOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
-export interface EvaluationAgentDimensions { sku?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; bank?: string | number; bankGroup?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; skewPs?: number; testMode?: string }
+export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; timingSkewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
 export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[] }
-export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string }
+export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string; lineNumbers: number[] }
 export interface EvaluationAgentSessionView {
   schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number
   files: Array<{ sourceId: string; name: string; lineCount?: number; size?: number; dimensions?: Partial<EvaluationAgentDimensions> }>

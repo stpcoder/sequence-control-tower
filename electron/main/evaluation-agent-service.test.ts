@@ -15,7 +15,7 @@ function setup(actions: string[], selectedProject: ProjectSnapshot = project) {
 describe('EvaluationAgentService', () => {
   it('rejects cross-project sources before accessing artifacts', async () => { const { service } = setup([]); await expect(service.start({ projectId: 'p1', sourceIds: ['other'] })).rejects.toThrow('not authorized') })
   it('binds search/window to exact authorized artifact and does not leak paths or keys', async () => {
-    const { service, prompts, windows, searches } = setup(['{"action":"search","fileId":"s1","query":"FAIL"}', '{"action":"window","fileId":"s1","startLine":1,"lineCount":500}', '{"action":"propose","outcome":"FAIL","rationale":"failure","evidenceIds":["search-1","window-2"]}'])
+    const { service, prompts, windows, searches } = setup(['{"action":"search","fileId":"s1","query":"FAIL"}', '{"action":"window","fileId":"s1","startLine":1,"lineCount":500}', '{"action":"propose","outcome":"TEST_FAIL","rationale":"failure","evidenceIds":["search-1","window-2"]}'])
     const result = await service.start({ projectId: 'p1', sourceIds: ['s1'] })
     expect(result.status).toBe('waiting_confirmation'); expect(searches).toEqual([6]); expect(windows).toEqual([24])
     expect(prompts.join('\n')).not.toContain('/Users/private'); expect(prompts.join('\n')).not.toContain('key=abc')

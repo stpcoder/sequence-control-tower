@@ -126,12 +126,20 @@ function safeEvidenceSummary(value: unknown): string {
     .replace(/\b(?:api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, '<SECRET>')
 }
 
+function evaluationEvidenceLines(evidence: import('../../src/domain/evaluation-agent').EvaluationEvidence): number[] {
+  if (evidence.kind !== 'search' || !evidence.excerpt) return []
+  return [...evidence.excerpt.matchAll(/(?:^|\n)L(\d+):/g)]
+    .map((match) => Number(match[1]))
+    .filter((line) => Number.isSafeInteger(line) && line > 0)
+    .slice(0, 8)
+}
+
 /** Removes excerpts/aggregates so the renderer sees decisions, not raw log text. */
 function evaluationAgentView(session: import('../../src/domain/evaluation-agent').EvaluationAgentSession): EvaluationAgentSessionView {
   return {
     schemaVersion: 1, id: session.id, status: session.status, depth: session.depth, calls: session.calls, searches: session.searches,
     files: session.files.map((file) => ({ sourceId: file.id, name: safeAgentText(file.name, 240), lineCount: file.lineCount, size: file.size, dimensions: file.metadata })),
-    evidence: session.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, sourceId: evidence.fileId, summary: safeAgentText(evidence.detail, 400) })),
+    evidence: session.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, sourceId: evidence.fileId, summary: safeAgentText(evidence.detail, 400), lineNumbers: evaluationEvidenceLines(evidence) })),
     transcript: session.transcript.map((item) => ({ at: item.at, role: item.role, type: item.type })),
     dimensions: session.context.dimensions, question: session.question, proposal: session.proposal, failure: session.failure ? safeAgentText(session.failure, 300) : undefined
   }

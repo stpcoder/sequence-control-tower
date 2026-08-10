@@ -31,13 +31,13 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
   engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
-  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKU, SKEW, Die, Sample, 조건, Sequence signature와 명령 후보를 추출합니다.',
+  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKEW, Die, Sample, DRAM 위치, Sequence signature와 명령 후보를 추출합니다.',
   soc_boot_profile_scan: '파일명에서 선택한 Qualcomm/MediaTek profile의 단계 marker를 검사하고 로그가 도달한 부팅 구간을 반환합니다.',
   console_transcript_scan: '콘솔 prompt 뒤의 엔지니어 입력과 장비 출력·상태 marker를 분리하고, 프로젝트에서 확정한 prompt 규칙을 적용합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
   log_read_window: '검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
-  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 SKU, SKEW, Die, Sample, 명령, DQ, BL, channel, pattern, 온도, VDD별 실패 집중도를 계산합니다.'
+  failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 저장된 평가 근거를 함께 사용해 SKEW, Die, Sample, 명령, DQ, BL, Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column, Pattern, 온도, VDD별 실패 집중도를 계산합니다.'
 }
 
 const safe = (value: unknown, max = 500): string => typeof value === 'string'
@@ -49,7 +49,13 @@ const promptSafe = (value: unknown, max = 500): string => safe(value, max).repla
 )
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
 const agentDimensionView = (dimensions: ProjectEvaluationDimensions | undefined) => ({ ...dimensions })
-const agentDimensionName = (dimension: string) => dimension === 'sku' ? 'SKU' : dimension === 'skewPs' ? 'SKEW' : dimension
+const AGENT_DIMENSION_LABELS: Record<string, string> = {
+  skew: 'SKEW', timingSkewPs: 'Timing SKEW (ps)', temperatureC: '온도', frequencyMHz: '주파수',
+  testMode: 'Mode', material: '자재', sample: 'Sample', die: 'Die', lot: 'Lot', socModel: 'SoC', bootProfileId: 'Boot profile',
+  channel: 'Channel', subChannel: 'Sub Channel', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank', row: 'Row', column: 'Column',
+  dq: 'DQ', bl: 'BL', pattern: 'Pattern', vdd: 'VDD',
+}
+const agentDimensionName = (dimension: string) => AGENT_DIMENSION_LABELS[dimension] ?? dimension
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const bootAliasPattern = (alias: string): string => {
   const body = regexEscape(alias).replace(/ +/g, '[ _-]*')
@@ -78,9 +84,9 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
   const vdd = capture(name, /(?:^|[_\-.])VDD(?:=|_|-)?(\d+(?:[p.]\d+)?)(?:V)?(?:[_\-.]|$)/i)
   const frequency = capture(name, /(?:^|[_\-.])(?:FREQ|F)(?:=|_|-)?(\d{3,5})(?:MHZ|MT)?(?:[_\-.]|$)/i)
     ?? capture(name, /(?:^|[_\-.])(\d{3,5})MT(?:[_\-.]|$)/i)
-  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9-]+)/i)?.replace(/-(?:DQ|BL|CH|CHANNEL|BANK|BG|FREQ|TEMP|VDD|SKEW|TM|MODE|PASS|FAIL|HALT|TRAIN).*$/i, '')
+  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9-]+)/i)?.replace(/-(?:DQ|BL|CH|CHANNEL|SUBCH|SCH|RANK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|PASS|FAIL|HALT|TRAIN).*$/i, '')
   return {
-    sku: capture(name, /(?:^|[_\-.])SKU(?:=|_|-)?([A-Z0-9-]+)/i),
+    skew: capture(name, /(?:^|[_\-.])SKEW(?:=|_|-)?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
     lot: capture(name, /(?:^|[_\-.])LOT(?:=|_|-)?([A-Z0-9-]+)/i),
     material: capture(name, /(?:^|[_\-.])(?:MAT|MATERIAL)(?:=|_|-)?([A-Z0-9-]+)/i),
     die: capture(name, /(?:^|[_\-.])DIE(?:=|_|-)?([A-Z0-9-]+)/i),
@@ -88,11 +94,15 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
     bl: capture(name, /(?:^|[_\-.])BL(?:=|_|-)?(\d+)/i),
     dq: capture(name, /(?:^|[_\-.])DQ(?:=|_|-)?(\d+)/i),
     channel: capture(name, /(?:^|[_\-.])(?:CH|CHANNEL)(?:=|_|-)?(\d+)/i),
+    subChannel: capture(name, /(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)(?:=|_|-)?(\d+)/i),
+    rank: capture(name, /(?:^|[_\-.])(?:RANK|RK)(?:=|_|-)?(\d+)/i),
     bank: capture(name, /(?:^|[_\-.])BANK(?:=|_|-)?(\d+)/i),
     bankGroup: capture(name, /(?:^|[_\-.])(?:BG|BANKGROUP)(?:=|_|-)?(\d+)/i),
+    row: capture(name, /(?:^|[_\-.])ROW(?:=|_|-)?([A-F0-9x]+)/i),
+    column: capture(name, /(?:^|[_\-.])(?:COL|COLUMN)(?:=|_|-)?([A-F0-9x]+)/i),
     pattern,
     frequencyMHz: decimal(frequency), temperatureC: decimal(temperature), vdd: decimal(vdd),
-    skewPs: decimal(capture(name, /(?:^|[_\-.])SKEW(?:=|_|-)?(-?\d+(?:[p.]\d+)?)(?:PS)?/i)),
+    timingSkewPs: decimal(capture(name, /(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)(?:=|_|-)?(-?\d+(?:[p.]\d+)?)(?:PS)?/i)),
     testMode: capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i),
     ...(() => {
       const soc = projectSocContext(name, profiles)
@@ -128,7 +138,7 @@ function sourceContextWithBinding(fileName: string, artifact: ArtifactRecord | u
   return { ...context, dimensions: { ...context.dimensions, socVendor: binding.vendor, bootProfileId: binding.profileId } }
 }
 
-const STATUS_SPECS: ArtifactEvidenceSpec[] = [
+export const LPDDR_STATUS_SPECS: ArtifactEvidenceSpec[] = [
   { id: 'at-pass', query: '@PASS', mode: 'literal' },
   { id: 'at-fail', query: '@FAIL', mode: 'literal' },
   { id: 'stress-pass', query: 'stressapp(?:test)?[^\n]{0,80}\bPASS\b', mode: 'regex', caseSensitive: false },
@@ -140,9 +150,9 @@ const STATUS_SPECS: ArtifactEvidenceSpec[] = [
   { id: 'normal-end', query: '(?:TEST|SEQUENCE|RUN)[ _:-]*(?:COMPLETE|END|DONE)', mode: 'regex', caseSensitive: false }
 ]
 
-function classifyStatus(counts: Record<string, number>): { status: string; confidence: number; reason: string } {
+export function classifyLpddrStatus(counts: Record<string, number>): { status: string; confidence: number; reason: string; fastFail?: boolean } {
   if (counts['training-fail'] > 0) return { status: 'TRAINING_FAIL', confidence: 0.99, reason: 'training fail marker 검출' }
-  if (counts['at-fail'] > 0) return { status: counts['fast-fail'] > 0 ? 'FAST_FAIL' : 'TEST_FAIL', confidence: 0.99, reason: '@FAIL marker 검출' }
+  if (counts['at-fail'] > 0) return { status: 'TEST_FAIL', confidence: 0.99, reason: counts['fast-fail'] > 0 ? '@FAIL 및 fast fail marker 검출' : '@FAIL marker 검출', ...(counts['fast-fail'] > 0 ? { fastFail: true } : {}) }
   if (counts.reboot > 0) return { status: 'SYSTEM_REBOOT', confidence: 0.97, reason: 'reboot/watchdog marker 검출' }
   if (counts.halt > 0) return { status: 'SYSTEM_HALT', confidence: 0.97, reason: 'halt/fatal marker 검출' }
   if (counts['at-pass'] > 0) return { status: 'PASS', confidence: 0.99, reason: '@PASS marker 검출' }
@@ -280,8 +290,8 @@ export class LpddrAgentToolService {
       data: { rows: [] }, evidenceSourceIds: [],
     }
     const dimensionKeys: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId',
-      'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId',
+      'dq', 'bl', 'channel', 'subChannel', 'rank', 'bank', 'bankGroup', 'row', 'column', 'pattern', 'timingSkewPs',
     ]
     const selectedBySource = new Map(sources.map((source) => {
       const binding = bindings.find((item) => item.sourceIds.includes(source.sourceId))
@@ -335,8 +345,8 @@ export class LpddrAgentToolService {
     const [workflows, artifacts, bindings] = await Promise.all([this.deps.agentStore.workflowMemories(project.id, 50), this.deps.artifacts.list(), this.deps.agentStore.profileBindings(project.id)])
     const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId',
-      'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern', 'skewPs',
+      'testMode', 'temperatureC', 'vdd', 'frequencyMHz', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId',
+      'dq', 'bl', 'channel', 'subChannel', 'rank', 'bank', 'bankGroup', 'row', 'column', 'pattern', 'timingSkewPs',
     ]
     const rows = sources.map((source) => {
       const binding = bindings.find((item) => item.sourceIds.includes(source.sourceId))
@@ -394,14 +404,14 @@ export class LpddrAgentToolService {
     if (!sources.length) return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: '검사할 로그 없음', data: { rows: [] }, evidenceSourceIds: [] }
     const inspected = await this.deps.artifacts.inspectEvidence({
       sources: sources.map((source) => ({ sourceId: source.sourceId, artifactId: source.artifactId, rootId: source.artifactRootId ?? source.rootId, relativePath: source.relativePath })),
-      specs: STATUS_SPECS
+      specs: LPDDR_STATUS_SPECS
     })
     const rows = inspected.sources.map((source) => {
       const counts = Object.fromEntries(source.evidence.map((item) => [item.specId, item.occurrenceCount ?? 0]))
-      return { sourceId: source.sourceId, fileName: promptSafe(source.fileName, 240), counts, ...classifyStatus(counts) }
+      return { sourceId: source.sourceId, fileName: promptSafe(source.fileName, 240), counts, ...classifyLpddrStatus(counts) }
     })
     const totals = rows.reduce<Record<string, number>>((all, row) => ({ ...all, [row.status]: (all[row.status] ?? 0) + 1 }), {})
-    return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: STATUS_SPECS.map((item) => item.id), rows, totals }, evidenceSourceIds: rows.map((row) => row.sourceId) }
+    return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: LPDDR_STATUS_SPECS.map((item) => item.id), rows, totals }, evidenceSourceIds: rows.map((row) => row.sourceId) }
   }
 
   private async consoleTranscript(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
@@ -479,11 +489,11 @@ export class LpddrAgentToolService {
     const statusResult = await this.statuses(sources)
     const statusRows = (statusResult.data as { rows?: Array<{ sourceId: string; status: string }> }).rows ?? []
     const statusBySource = new Map(statusRows.map((row) => [row.sourceId, row.status]))
-    const failureStatuses = new Set(['FAST_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
+    const failureStatuses = new Set(['TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
     const definitiveStatuses = new Set(['PASS', ...failureStatuses])
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
-      'temperatureC', 'vdd', 'dq', 'bl', 'channel', 'bank', 'bankGroup', 'pattern',
-      'frequencyMHz', 'skewPs', 'testMode', 'material', 'die', 'sku', 'lot', 'sample', 'socModel', 'bootProfileId'
+      'temperatureC', 'vdd', 'dq', 'bl', 'channel', 'subChannel', 'rank', 'bank', 'bankGroup', 'row', 'column', 'pattern',
+      'frequencyMHz', 'timingSkewPs', 'testMode', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId'
     ]
     const buckets = new Map<string, { dimension: string; value: string; total: number; failures: number; sourceIds: string[] }>()
     filenameRows.forEach((row) => {

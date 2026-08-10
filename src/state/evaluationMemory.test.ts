@@ -5,7 +5,7 @@ import { evaluationMemoryToProjectSave, projectSnapshotToEvaluationMemory } from
 const snapshot: ProjectSnapshot = {
   schemaVersion: 2, id: "project-a", name: "LPDDR6", revision: 7, archived: false, createdAt: "2026-01-01", updatedAt: "2026-01-02",
   folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [],
-  lpddrDevelopmentContext: { product: "LPDDR6", sku: "H9", program: "VPERI", phase: "EVT", customer: "Acme", targetDevice: "Orion", densityGb: 16, nominalVoltage: 1.1 },
+  lpddrDevelopmentContext: { product: "LPDDR6", skew: "SS", program: "VPERI", phase: "EVT", customer: "Acme", targetDevice: "Orion", densityGb: 16, nominalVoltage: 1.1 },
   failureHypotheses: [{ id: "h1", title: "DQ9", origin: "ai-proposed", evaluationNodeIds: ["n1"] }],
   evaluationNodes: [{ id: "n1", hypothesisId: "h1", name: "DQ9", dimensions: { dq: 9 } }],
   evidenceRecords: [

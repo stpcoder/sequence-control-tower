@@ -1,7 +1,7 @@
 .evaluation-lineage {
-  --el-border: #303640;
-  --el-text: #edf0f4;
-  --el-dim: #858d99;
+  --el-border: var(--sct-line);
+  --el-text: var(--sct-text);
+  --el-dim: var(--sct-dim);
   color: var(--el-text);
   background: transparent;
   font: 13px/1.45 Pretendard, 'Segoe UI', sans-serif;
@@ -16,9 +16,9 @@
 .evaluation-lineage__edge--proposed { stroke: #737e8b; stroke-dasharray: 4 3; }
 .evaluation-lineage__nodes { margin: 0; padding: 0; list-style: none; }
 .evaluation-lineage__nodes > li { position: absolute; left: var(--node-x); top: var(--node-y); transform: translate(-50%, -50%); }
-.evaluation-lineage__node { display: flex; max-width: 166px; align-items: center; gap: 7px; padding: 5px 7px; border: 0; border-radius: 5px; color: inherit; text-align: left; background: #121419; cursor: pointer; }
-.evaluation-lineage__node:hover, .evaluation-lineage__node:focus-visible { background: #1c2027; outline: none; }
-.evaluation-lineage__node.is-selected { outline: 1px solid #4b5563; outline-offset: 0; background: #232831; box-shadow: none; }
+.evaluation-lineage__node { display: flex; max-width: 166px; align-items: center; gap: 7px; padding: 5px 7px; border: 0; border-radius: 5px; color: inherit; text-align: left; background: var(--sct-bg); cursor: pointer; }
+.evaluation-lineage__node:hover, .evaluation-lineage__node:focus-visible { background: var(--sct-control); outline: none; }
+.evaluation-lineage__node.is-selected { outline: 1px solid var(--sct-line-strong); outline-offset: 0; background: var(--sct-hover); box-shadow: none; }
 .evaluation-lineage__point { display: grid; width: 12px; height: 12px; flex: 0 0 auto; place-items: center; border: 2px solid #121419; border-radius: 50%; background: #8993a0; box-shadow: 0 0 0 1px #66717e; }
 .evaluation-lineage__point i { width: 3px; height: 3px; border-radius: 50%; background: #121419; }
 .evaluation-lineage__node--pass .evaluation-lineage__point { background: #8da7c7; box-shadow: 0 0 0 1px #60768f; }

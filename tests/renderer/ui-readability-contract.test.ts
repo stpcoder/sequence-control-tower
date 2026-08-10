@@ -79,7 +79,7 @@ describe('UI readability contract', () => {
     expect(project).not.toContain('>재검증</button>')
   })
 
-  it('keeps setup copy concise and separates SKU from timing SKEW', async () => {
+  it('keeps setup copy concise and separates SKEW from numeric timing offset', async () => {
     const [settings, memory, tools] = (await Promise.all([
       readFile(resolve(root, 'src/views/SettingsView.tsx'), 'utf8'),
       readFile(resolve(root, 'src/views/EvaluationMemoryView.tsx'), 'utf8'),
@@ -88,8 +88,9 @@ describe('UI readability contract', () => {
     expect(settings).not.toContain('<small>sec</small>')
     expect(settings).not.toContain('응답 예약 1,200 토큰')
     expect(settings).toContain("? '연결됨' : '로컬 분석'")
-    expect(memory).toContain("['sku', 'SKU', 'text']")
-    expect(memory).toContain("['skewPs', 'SKEW (ps)', 'number']")
+    expect(memory).toContain("['skew', 'SKEW', 'text']")
+    expect(memory).toContain("['timingSkewPs', 'Timing SKEW (ps)', 'number']")
+    expect(memory).not.toContain("['sku', 'SKU', 'text']")
     expect(tools).not.toContain("{ SKEW: sku }")
   })
 
@@ -98,10 +99,10 @@ describe('UI readability contract', () => {
       readFile(resolve(root, 'src/data-views.css'), 'utf8'),
       readFile(resolve(root, 'src/views/evaluation-memory-view.css'), 'utf8'),
     ])).map(normalizeNewlines)
-    expect(dataViews).toContain('border: 1px solid #454b56;')
-    expect(dataViews).toContain('background: #1e2229;')
-    expect(memoryStyles).toContain('border: 1px solid #454b56;')
-    expect(memoryStyles).toContain('background: #1e2229;')
+    expect(dataViews).toContain('border: 1px solid var(--sct-line-strong);')
+    expect(dataViews).toContain('background: var(--sct-control);')
+    expect(memoryStyles).toContain('border: 1px solid var(--sct-line-strong);')
+    expect(memoryStyles).toContain('background: var(--sct-control);')
   })
 
   it('keeps result stages concise and history in a resizable qualitative workspace', async () => {

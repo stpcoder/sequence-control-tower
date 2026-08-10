@@ -41,14 +41,15 @@ function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
   const capture = (expression: RegExp): string | undefined => expression.exec(name)?.[1]
   const numberCapture = (expression: RegExp): number | undefined => numeric(capture(expression) ?? null)
   return {
+    skew: capture(/(?:^|[_\-.])SKEW[=:_-]?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
     material: capture(/(?:^|[_\-.])(?:MAT|MATERIAL)[=:_-]?([A-Z0-9-]+)/i),
     die: capture(/(?:^|[_\-.])DIE[=:_-]?([A-Z0-9-]+)/i),
     temperatureC: numeric(parsed.temperature.value),
     testMode: parsed.mode.value ?? undefined,
     bl: capture(/(?:^|[_\-.])BL[=:_-]?(\d+)/i), dq: capture(/(?:^|[_\-.])DQ[=:_-]?(\d+)/i),
-    channel: capture(/(?:^|[_\-.])(?:CH|CHANNEL)[=:_-]?(\d+)/i), bank: capture(/(?:^|[_\-.])BANK[=:_-]?(\d+)/i), bankGroup: capture(/(?:^|[_\-.])(?:BG|BANKGROUP)[=:_-]?(\d+)/i),
+    channel: capture(/(?:^|[_\-.])(?:CH|CHANNEL)[=:_-]?(\d+)/i), subChannel: capture(/(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)[=:_-]?(\d+)/i), rank: capture(/(?:^|[_\-.])(?:RANK|RK)[=:_-]?(\d+)/i), bank: capture(/(?:^|[_\-.])BANK[=:_-]?(\d+)/i), bankGroup: capture(/(?:^|[_\-.])(?:BG|BANKGROUP)[=:_-]?(\d+)/i), row: capture(/(?:^|[_\-.])ROW[=:_-]?([A-F0-9x]+)/i), column: capture(/(?:^|[_\-.])(?:COL|COLUMN)[=:_-]?([A-F0-9x]+)/i),
     pattern: capture(/(?:^|[_\-.])PATTERN[=:_-]?([A-Z0-9-]+)/i), frequencyMHz: numberCapture(/(?:^|[_\-.])(?:FREQ|FREQUENCY)[=:_-]?(\d+(?:\.\d+)?)/i) ?? numberCapture(/(?:^|[_\-.])(\d{3,5})MT/i),
-    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:\.\d+)?)/i), skewPs: numberCapture(/(?:^|[_\-.])SKEW[=:_-]?(\d+(?:\.\d+)?)/i),
+    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:\.\d+)?)/i), timingSkewPs: numberCapture(/(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)[=:_-]?(\d+(?:\.\d+)?)(?:PS)?/i),
     ...(soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId })
   }
 }

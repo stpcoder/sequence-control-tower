@@ -28,12 +28,12 @@ export interface EvaluationMemoryViewProps {
 }
 
 const dimensionFields: Array<[keyof EvaluationDimensions, string, 'text' | 'number']> = [
-  ['sku', 'SKU', 'text'], ['lot', 'Lot', 'text'], ['material', '자재', 'text'], ['die', 'Die', 'text'], ['sample', 'Sample', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['bank', 'Bank', 'text'], ['bankGroup', 'Bank group', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['skewPs', 'SKEW (ps)', 'number'], ['testMode', 'Mode', 'text'],
+  ['skew', 'SKEW', 'text'], ['lot', 'Lot', 'text'], ['material', '자재', 'text'], ['die', 'Die', 'text'], ['sample', 'Sample', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['subChannel', 'Sub Channel', 'text'], ['rank', 'Rank', 'text'], ['bankGroup', 'Bank Group', 'text'], ['bank', 'Bank', 'text'], ['row', 'Row', 'text'], ['column', 'Column', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', 'MHz', 'number'], ['temperatureC', '°C', 'number'], ['vdd', 'VDD (V)', 'number'], ['timingSkewPs', 'Timing SKEW (ps)', 'number'], ['testMode', 'Mode', 'text'],
 ]
 
 const emptyDimensions = (): EvaluationDimensions => ({})
 const id = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`}`
-const trendDimensionLabel = (dimension: string) => ({ sku: 'SKU', skewPs: 'SKEW', vdd: 'VDD', bl: 'BL', dq: 'DQ', frequencyMHz: 'MHz', socModel: 'SoC', channel: 'Channel', bank: 'Bank', bankGroup: 'Bank group', pattern: 'Pattern', temperatureC: '온도' }[dimension] ?? dimension)
+const trendDimensionLabel = (dimension: string) => ({ skew: 'SKEW', timingSkewPs: 'Timing skew', vdd: 'VDD', bl: 'BL', dq: 'DQ', frequencyMHz: 'MHz', socModel: 'SoC', channel: 'Channel', subChannel: 'Sub Channel', rank: 'Rank', bank: 'Bank', bankGroup: 'Bank Group', row: 'Row', column: 'Column', pattern: 'Pattern', temperatureC: '온도' }[dimension] ?? dimension)
 
 export function trendInterpretation(trend: ReturnType<typeof inferEvaluationTrends>[number]): string {
   const condition = `${trendDimensionLabel(trend.dimension)} ${trend.value}`
@@ -70,7 +70,7 @@ export function openIdForEvidenceLog(logId: string, logs: readonly AvailableEval
 function csvCell(value: unknown) { return `"${String(value ?? '').replaceAll('"', '""')}"` }
 export function evaluationMemoryCsv(memory: EvaluationMemory): string {
   const evidenceById = new Map(memory.evidence.map((record) => [record.id, record]))
-  const header = ['projectId', 'projectName', 'product', 'projectSku', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'nodeName', 'nodePurpose', 'nodeStatus', 'sequenceSignature', 'attemptNo', 'retestOf', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'sku', 'lot', 'material', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'bl', 'dq', 'channel', 'bank', 'bankGroup', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'skewPs', 'testMode']
+  const header = ['projectId', 'projectName', 'product', 'projectSkew', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'nodeName', 'nodePurpose', 'nodeStatus', 'sequenceSignature', 'attemptNo', 'retestOf', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'skew', 'lot', 'material', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'bl', 'dq', 'channel', 'subChannel', 'rank', 'bankGroup', 'bank', 'row', 'column', 'pattern', 'frequencyMHz', 'temperatureC', 'vdd', 'timingSkewPs', 'testMode']
   const rows = flattenEvaluationMemory(memory).map((row) => {
     const sourceIds = evidenceById.get(row.evidenceId)?.sourceIds?.join('|') ?? ''
     return [...header].map((key) => csvCell(key === 'sourceIds' ? sourceIds : row[key as keyof typeof row])).join(',')
@@ -84,7 +84,7 @@ export function buildEvaluationContextMarkdown(memory: EvaluationMemory): string
   const failureEvidence = memory.evidence.filter((record) => record.status === 'fail')
   const projectContext = [
     memory.project.product && `Product: ${memory.project.product}`,
-    memory.project.sku && `SKU: ${memory.project.sku}`,
+    memory.project.skew && `SKEW: ${memory.project.skew}`,
     memory.project.customer && `Customer: ${memory.project.customer}`,
     memory.project.targetDevice && `Target device: ${memory.project.targetDevice}`,
     memory.project.densityGb !== undefined && `Density: ${memory.project.densityGb}Gb`,
@@ -127,7 +127,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     if (await save(next)) { setSelectedNodeId(added?.id); setEvaluation({ name: '', purpose: 'characterization', hypothesisId: '', parentId: '', branchId: '', status: 'inconclusive', origin: 'ai-proposed', dimensions: emptyDimensions(), logIds: [] }) }
   }
   const copyContext = async () => { const context = buildEvaluationContextMarkdown(memory); try { await navigator.clipboard.writeText(context); onNotify('AI 맥락을 클립보드에 복사했습니다.') } catch { onNotify('클립보드를 사용할 수 없습니다. AI 맥락 복사를 다시 시도하세요.') } }
-  const updateProjectDraft = (key: 'product' | 'sku' | 'customer' | 'targetDevice' | 'densityGb' | 'nominalVoltage', raw: string) => setProjectDraft((current) => ({ ...current, [key]: raw === '' ? undefined : key === 'densityGb' || key === 'nominalVoltage' ? Number(raw) : raw }))
+  const updateProjectDraft = (key: 'product' | 'skew' | 'customer' | 'targetDevice' | 'densityGb' | 'nominalVoltage', raw: string) => setProjectDraft((current) => ({ ...current, [key]: raw === '' ? undefined : key === 'densityGb' || key === 'nominalVoltage' ? Number(raw) : raw }))
   const saveProjectConditions = async () => { await save(withProjectConditions(memory, projectDraft)) }
 
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -144,12 +144,12 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     const request = agentRequest.trim()
     if (!request) return onNotify('정리할 평가 내용을 입력하세요.')
     if (!onAskAgent) return onNotify('Agent를 사용할 수 없습니다.')
-    onAskAgent(`다음 평가 내용을 분석해 평가 이력으로 정리해줘. 먼저 평가 목적을 불량 검출 강화, 개선 조건 확인, 동일 불량 재현, 불량 경향 파악, 개선 효과 검증 중 하나로 분류해줘. SKU, 온도, VDD, SKEW, 자재, Die, Sample, SoC, 부팅 단계, Pattern, DQ, BL, Channel과 단계별 Pass/Fail 근거를 확인하고 불확실한 핵심 항목만 질문해줘.\n\n${request}`)
+    onAskAgent(`다음 평가 내용을 분석해 결과와 평가 이력으로 정리해줘. 먼저 평가 목적을 불량 검출 강화, 개선 조건 확인, 동일 불량 재현, 불량 경향 파악, 개선 효과 검증 중 하나로 분류해줘. SKEW, 온도, VDD, 자재, Die, Sample, SoC, 부팅 단계, Pattern, DQ, BL, Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column과 단계별 결과 근거를 확인하고 불확실한 핵심 항목만 질문해줘. 확정 가능한 결과와 평가 이력은 저장 전 제안으로 보여줘.\n\n${request}`)
   }
 
   return <div className="data-view evaluation-memory-view">
     <header className="data-view-header evaluation-memory-view__header"><div><h1>평가 이력</h1></div><div className="data-actions evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}>CSV</button><button onClick={() => void copyContext()}>AI 맥락</button></div></header>
-    <details className="evaluation-memory-view__project-context"><summary>조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKU<input value={projectDraft.sku ?? ''} onChange={(event) => updateProjectDraft('sku', event.target.value)} placeholder="예: SS · 16Gb · x16" /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void saveProjectConditions()}>{saving ? '저장 중…' : '저장'}</button></div></details>
+    <details className="evaluation-memory-view__project-context"><summary>조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} placeholder="예: SS" /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void saveProjectConditions()}>{saving ? '저장 중…' : '저장'}</button></div></details>
     <div className="evaluation-memory-view__layout" ref={layoutRef} style={{ '--evaluation-editor-width': `${editorWidth}px` } as React.CSSProperties}>
       <main><EvaluationLineage memory={memory} selectedNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} />
         {trends.length ? <section className="evaluation-memory-view__signals"><div className="evaluation-memory-view__section-label">반복된 불량 경향</div>{trends.map((trend) => <div className="evaluation-memory-view__trend" key={`${trend.dimension}-${trend.value}`}><p>{trendInterpretation(trend)}</p><span>{trend.origin === 'engineer-confirmed' ? '엔지니어 확인' : 'AI 제안'}</span></div>)}</section> : null}

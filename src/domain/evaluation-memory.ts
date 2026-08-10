@@ -7,7 +7,7 @@ export type AssessmentOrigin = "engineer-confirmed" | "ai-proposed";
 export type EvaluationPurpose = "screening" | "improvement" | "reproduction" | "characterization" | "verification";
 
 export interface EvaluationDimensions {
-  sku?: string;
+  skew?: string;
   lot?: string;
   material?: string;
   die?: string;
@@ -18,13 +18,17 @@ export interface EvaluationDimensions {
   bl?: string | number;
   dq?: string | number;
   channel?: string | number;
+  subChannel?: string | number;
+  rank?: string | number;
   bank?: string | number;
   bankGroup?: string | number;
+  row?: string | number;
+  column?: string | number;
   pattern?: string | number;
   frequencyMHz?: number;
   temperatureC?: number;
   vdd?: number;
-  skewPs?: number;
+  timingSkewPs?: number;
   testMode?: string;
 }
 
@@ -32,7 +36,7 @@ export interface ProductProject {
   id: string;
   name: string;
   product?: string;
-  sku?: string;
+  skew?: string;
   customer?: string;
   targetDevice?: string;
   densityGb?: number;
@@ -91,7 +95,7 @@ export interface EvaluationMemory {
 }
 
 export const DOMINANCE_DIMENSIONS = [
-  "sku", "lot", "material", "die", "sample", "socModel", "dq", "bl", "pattern", "channel", "bank", "bankGroup", "frequencyMHz", "temperatureC", "vdd", "skewPs", "testMode",
+  "skew", "lot", "material", "die", "sample", "socModel", "dq", "bl", "pattern", "channel", "subChannel", "rank", "bank", "bankGroup", "row", "column", "frequencyMHz", "temperatureC", "vdd", "timingSkewPs", "testMode",
 ] as const;
 export type DominanceDimension = (typeof DOMINANCE_DIMENSIONS)[number];
 
@@ -181,12 +185,12 @@ export function inferEvaluationTrends(memory: EvaluationMemory): DominanceFindin
 }
 
 export interface EvaluationExportRow {
-  projectId: string; projectName: string; product: string; projectSku: string; customer: string; targetDevice: string; densityGb: string; nominalVoltage: string; program: string; phase: string;
+  projectId: string; projectName: string; product: string; projectSkew: string; customer: string; targetDevice: string; densityGb: string; nominalVoltage: string; program: string; phase: string;
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
   nodeId: string; parentNodeId: string; branchId: string; nodeName: string; nodePurpose: string; nodeStatus: string; sequenceSignature: string; attemptNo: string; retestOf: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
-  sku: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; bl: string; dq: string; channel: string; bank: string; bankGroup: string;
-  pattern: string; frequencyMHz: string; temperatureC: string; vdd: string; skewPs: string; testMode: string;
+  skew: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; bl: string; dq: string; channel: string; subChannel: string; rank: string; bank: string; bankGroup: string; row: string; column: string;
+  pattern: string; frequencyMHz: string; temperatureC: string; vdd: string; timingSkewPs: string; testMode: string;
 }
 
 /** One row per evidence record, ready for CSV/XLSX writers without nested values. */
@@ -200,11 +204,11 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
     const hypothesis = node.hypothesisId ? hypotheses.get(node.hypothesisId) : undefined;
     const d = effectiveDimensions(node, record, nodes, memory.project.id);
     return {
-      projectId: memory.project.id, projectName: memory.project.name, product: text(memory.project.product), projectSku: text(memory.project.sku), customer: text(memory.project.customer), targetDevice: text(memory.project.targetDevice), densityGb: text(memory.project.densityGb), nominalVoltage: text(memory.project.nominalVoltage), program: text(memory.project.program), phase: text(memory.project.phase),
+      projectId: memory.project.id, projectName: memory.project.name, product: text(memory.project.product), projectSkew: text(memory.project.skew), customer: text(memory.project.customer), targetDevice: text(memory.project.targetDevice), densityGb: text(memory.project.densityGb), nominalVoltage: text(memory.project.nominalVoltage), program: text(memory.project.program), phase: text(memory.project.phase),
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
       nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
-      sku: text(d.sku), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), bank: text(d.bank), bankGroup: text(d.bankGroup), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), skewPs: text(d.skewPs), testMode: text(d.testMode),
+      skew: text(d.skew), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), subChannel: text(d.subChannel), rank: text(d.rank), bank: text(d.bank), bankGroup: text(d.bankGroup), row: text(d.row), column: text(d.column), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), timingSkewPs: text(d.timingSkewPs), testMode: text(d.testMode),
     };
   });
 }

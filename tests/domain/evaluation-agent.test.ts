@@ -14,16 +14,17 @@ function setup(actions: string[]) {
 
 describe('EvaluationAgentRuntime', () => {
   it('plans bounded metadata/search/window evidence and requires human acceptance', async () => {
-    const { runtime, prompts } = setup(['{"action":"search","fileId":"a","query":"FAIL"}', '{"action":"window","fileId":"a","startLine":195,"lineCount":999}', '{"action":"propose","outcome":"FAIL","purpose":"screening","dimensions":{"pattern":"checkerboard","bank":"3","skewPs":"12"},"rationale":"failure evidence","evidenceIds":["search-1","window-2"]}'])
+    const { runtime, prompts } = setup(['{"action":"search","fileId":"a","query":"FAIL"}', '{"action":"window","fileId":"a","startLine":195,"lineCount":999}', '{"action":"propose","outcome":"TEST_FAIL","purpose":"screening","dimensions":{"pattern":"checkerboard","bank":"3","subChannel":"1","timingSkewPs":"12"},"rationale":"failure evidence","evidenceIds":["search-1","window-2"]}'])
     const session = await runtime.start('s1')
     expect(session.status).toBe('waiting_confirmation')
-    expect(session.proposal?.outcome).toBe('FAIL')
+    expect(session.proposal).toMatchObject({ outcome: 'TEST_FAIL', dimensions: { bank: '3', subChannel: '1', timingSkewPs: '12' } })
     expect(session.evidence.find((item) => item.kind === 'window')?.excerpt?.split('\n')).toHaveLength(24)
     expect(prompts.every((prompt) => prompt.length <= 8_000)).toBe(true)
     expect(prompts.join('\n')).not.toContain('late secret')
     const accepted = await runtime.resume(session, { confirm: 'accept' }); expect(accepted.status).toBe('completed')
     const memory = proposalToEvaluationMemory(accepted, { projectId: 'p1', hypothesisId: 'h1', nodeId: 'n1', evidenceId: (id) => `persisted-${id}` })
     expect(memory?.node.purpose).toBe('screening')
+    expect(memory?.node.status).toBe('fail')
     expect(memory?.evidence[0]).toMatchObject({ logRef: 'a', id: 'persisted-search-1' })
   })
 

@@ -63,7 +63,7 @@ describe('ProjectStore', () => {
     expect(reconnected.revision).toBe(connected.revision)
     const payload = {
       projectId: project.id, expectedRevision: reconnected.revision,
-      lpddrDevelopmentContext: { product: 'LPDDR6', sku: 'H9L6', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
+      lpddrDevelopmentContext: { product: 'LPDDR6', skew: 'SS', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
       equipmentProfiles: [{ alias: 'SM-8975 실장기', profileId: 'qualcomm-default', vendor: 'qualcomm' as const, socModels: ['SM-8975'], filenameAliases: ['SM8975'], updatedAt: '2026-08-10T00:00:00.000Z' }],
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [

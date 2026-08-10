@@ -15,7 +15,7 @@
 
 [사용자 매뉴얼](docs/manual/README.md) · [Agent 네이티브 분석](docs/manual/03-Agent-네이티브-분석.md) · [LLM·OpenCode 설정](docs/manual/05-LLM-OpenCode-설정.md) · [모든 Release](https://github.com/stpcoder/sequence-control-tower/releases)
 
-![Log Workbench](docs/images/manual-lw-00-overview.png)
+![Log Workbench](docs/images/manual-v098-log.png)
 
 ## 핵심 작업
 
@@ -36,7 +36,7 @@ Agent는 일반 채팅에 로그 전체를 올리는 방식이 아닙니다. 프
 - Qualcomm/MediaTek SoC 및 부팅 profile
 - 콘솔 입력 명령과 장비 출력 분리
 - 결정적 Pass/Fail·training fail·reboot·halt 판정
-- 온도, VDD, DQ, BL, Channel, Bank, Pattern, 주파수, SKEW, SKU, Lot, Sample, Die별 분자·분모
+- 온도, VDD, DQ, BL, Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column, Pattern, 주파수, SKEW, Lot, Sample, Die별 분자·분모
 - 제한 검색과 최대 24줄 근거 확인
 - 확정된 엔지니어 분석 절차 적용
 
@@ -84,7 +84,7 @@ npm run dist:mac
 
 ## 현재 제한
 
-- Agent 대화는 읽기 전용이며 결과와 평가 이력은 엔지니어가 확정합니다.
+- Agent 조회 도구는 읽기 전용입니다. 결과와 평가 이력은 Agent의 구조화된 제안을 엔지니어가 승인한 경우에만 함께 저장됩니다.
 - 유사 사례 검색은 로컬 프로젝트의 단어 중첩 방식입니다.
 - Agent 한 질문의 로그 범위는 최대 100개입니다.
 - Serial 장비 직접 제어와 원격 장비 모니터링은 포함하지 않습니다.

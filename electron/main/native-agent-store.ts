@@ -429,7 +429,7 @@ export class NativeAgentStore {
       const existingIndex = rows.findIndex((item) => item.sourceId === input.sourceId)
       const dimensions = structuredClone(input.dimensions ?? {})
       const signature = clean(input.sequenceSignature, 200)
-      const identityKeys: Array<keyof ProjectEvaluationDimensions> = ['sku', 'lot', 'material', 'die']
+      const identityKeys: Array<keyof ProjectEvaluationDimensions> = ['skew', 'lot', 'material', 'die']
       const related = rows.filter((item) => item.sourceId !== input.sourceId && signature && item.sequenceSignature === signature
         && Boolean(dimensions.sample) && item.dimensions.sample === dimensions.sample
         && identityKeys.every((key) => dimensions[key] === undefined || item.dimensions[key] === undefined || String(dimensions[key]) === String(item.dimensions[key])))

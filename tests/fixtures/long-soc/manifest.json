@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "description": "Public boot-flow and Linux RAS terminology shaped synthetic corpus. It contains no vendor capture.",
+  "scenarios": [
+    {
+      "file": "LPDDR6_SM-8975_SKEW-SS_LOT-LA_DIE03_SMP-Q01_T25_VDD1p295_F9600_TM-HDIAG_PAT-PRBS31_DQ9_BL16_CH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_PASS.log",
+      "vendor": "qualcomm",
+      "expected": "PASS",
+      "lineCount": 8200
+    },
+    {
+      "file": "LPDDR6_SM-8975_SKEW-SF_LOT-LA_DIE03_SMP-Q02_T85_VDD1p275_F9600_TM-HDIAG_PAT-WR_DQ9_BL16_CH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_FAIL.log",
+      "vendor": "qualcomm",
+      "expected": "TEST_FAIL",
+      "lineCount": 9100
+    },
+    {
+      "file": "LPDDR6_SM-8850_SKEW-FF_LOT-LB_DIE11_SMP-Q03_T-20_VDD1p275_F8533_TM-BOOT_PAT-TRAIN_DQ20_BL32_CH1_SCH0_RK1_BG1_BANK3_ROW0x18_COL0x08_TRAIN_FAIL.log",
+      "vendor": "qualcomm",
+      "expected": "TRAINING_FAIL",
+      "lineCount": 7600
+    },
+    {
+      "file": "LPDDR6_MTK-24D_SKEW-SS_LOT-LC_DIE05_SMP-M01_T25_VDD1p295_F8533_TM-HDIAG_PAT-PRBS7_DQ4_BL8_CH1_SCH0_RK0_BG0_BANK2_ROW0x31_COL0x10_PASS.log",
+      "vendor": "mediatek",
+      "expected": "PASS",
+      "lineCount": 8300
+    },
+    {
+      "file": "LPDDR6_MTK-5D_SKEW-FS_LOT-LC_DIE06_SMP-M02_T105_VDD1p275_F8533_TM-STRESS_PAT-MARCH_DQ12_BL8_CH1_SCH1_RK0_BG3_BANK7_ROW0x44_COL0x20_REBOOT.log",
+      "vendor": "mediatek",
+      "expected": "SYSTEM_REBOOT",
+      "lineCount": 8800
+    },
+    {
+      "file": "LPDDR6_MTK-24D_SKEW-SS_LOT-LD_DIE09_SMP-M03_T85_VDD1p295_F9600_TM-HDIAG_PAT-ROW_HAMMER_DQ9_BL16_CH0_SCH1_RK1_BG2_BANK5_ROW0x7F_COL0x30_HALT.log",
+      "vendor": "mediatek",
+      "expected": "SYSTEM_HALT",
+      "lineCount": 7900
+    }
+  ]
+}

@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import { flattenEvaluationMemory, inferEvaluationTrends, type EvaluationMemory } from "../../src/domain/evaluation-memory";
 
 const memory: EvaluationMemory = {
-  project: { id: "lp6-a", name: "LPDDR6 VPERI", product: "LPDDR6", sku: "H9L6", customer: "Customer A", targetDevice: "SoC-X", densityGb: 16, nominalVoltage: 1.1, program: "P1", phase: "ES" },
+  project: { id: "lp6-a", name: "LPDDR6 VPERI", product: "LPDDR6", skew: "SS", customer: "Customer A", targetDevice: "SoC-X", densityGb: 16, nominalVoltage: 1.1, program: "P1", phase: "ES" },
   hypotheses: [{ id: "h-vperi", projectId: "lp6-a", title: "VPERI DQ9 marginality", origin: "engineer-confirmed" }],
   nodes: [
-    { id: "base", projectId: "lp6-a", name: "baseline", branchId: "main", dimensions: { sku: "H9L6", lot: "L24", sample: "S01", bl: 16, dq: 9, channel: 0, bank: 2, bankGroup: 1, pattern: "PRBS31", frequencyMHz: 8533, temperatureC: 85, vdd: 1.1, skewPs: 18, testMode: "VPERI" } },
+    { id: "base", projectId: "lp6-a", name: "baseline", branchId: "main", dimensions: { skew: "SS", lot: "L24", sample: "S01", bl: 16, dq: 9, channel: 0, subChannel: 1, rank: 0, bank: 2, bankGroup: 1, row: "0x2A", column: "0x14", pattern: "PRBS31", frequencyMHz: 8533, temperatureC: 85, vdd: 1.1, timingSkewPs: 18, testMode: "VPERI" } },
     { id: "dq9", projectId: "lp6-a", hypothesisId: "h-vperi", parentId: "base", branchId: "dq9-vperi", name: "DQ9 retry", dimensions: { dq: 9, pattern: "PRBS31", frequencyMHz: 8533, testMode: "VPERI" } },
     { id: "dq20", projectId: "lp6-a", parentId: "base", branchId: "control", name: "DQ20 control", dimensions: { dq: 20, pattern: "PRBS7", frequencyMHz: 6400, testMode: "VPERI" } },
   ],
   evidence: [
     { id: "e1", projectId: "lp6-a", evaluationNodeId: "dq9", status: "fail", result: "CA fail", origin: "engineer-confirmed" },
     { id: "e2", projectId: "lp6-a", evaluationNodeId: "dq9", status: "fail", result: "CA fail" },
-    { id: "e3", projectId: "lp6-a", evaluationNodeId: "dq9", status: "pass", result: "recovered", dimensions: { skewPs: 5 } },
+    { id: "e3", projectId: "lp6-a", evaluationNodeId: "dq9", status: "pass", result: "recovered", dimensions: { timingSkewPs: 5 } },
     { id: "e4", projectId: "lp6-a", evaluationNodeId: "dq20", status: "pass", result: "clean" },
   ],
 };
@@ -28,7 +28,7 @@ describe("evaluation memory", () => {
 
   it("flattens node defaults and evidence overrides for CSV/XLSX export", () => {
     const row = flattenEvaluationMemory(memory).find((item) => item.evidenceId === "e3")!;
-    expect(row).toMatchObject({ projectName: "LPDDR6 VPERI", customer: "Customer A", targetDevice: "SoC-X", densityGb: "16", nominalVoltage: "1.1", program: "P1", phase: "ES", parentNodeId: "base", branchId: "dq9-vperi", dq: "9", bl: "16", skewPs: "5", status: "pass", hypothesisOrigin: "engineer-confirmed" });
+    expect(row).toMatchObject({ projectName: "LPDDR6 VPERI", customer: "Customer A", targetDevice: "SoC-X", densityGb: "16", nominalVoltage: "1.1", program: "P1", phase: "ES", parentNodeId: "base", branchId: "dq9-vperi", dq: "9", bl: "16", subChannel: "1", rank: "0", row: "0x2A", column: "0x14", timingSkewPs: "5", status: "pass", hypothesisOrigin: "engineer-confirmed" });
     expect(Object.values(row).every((value) => typeof value === "string")).toBe(true);
   });
 
