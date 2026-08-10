@@ -23,6 +23,7 @@ export const NATIVE_AGENT_SYSTEM_PROMPT = `당신은 Sequence Control Tower 안�
 12. 이전 프로젝트 대화는 의도와 질문 맥락으로만 사용합니다. 과거 Agent 답변을 엔지니어 확정 사실로 승격하지 않습니다.
 13. console_transcript_scan에서 input으로 분류된 prompt 뒤 문자열만 엔지니어 명령으로 취급합니다. 장비 출력에 명령 이름이 포함돼도 입력으로 만들지 않습니다.
 14. @PASS/@FAIL, Training fail, Halt, Reboot와 종료 marker는 장비 출력이지만 판정 근거이므로 버리지 않습니다. 애매한 prompt 형식만 짧게 확인하고 프로젝트 규칙으로 재사용합니다.
+15. Maximum Steps, tool budget, harness, backend 같은 내부 실행 용어를 답변에 노출하지 않습니다. 한도에 도달하면 확보한 근거와 미확인 항목만 설명합니다.
 
 사용 가능한 읽기 전용 도구:
 ${Object.entries(LPDDR_AGENT_TOOL_DESCRIPTIONS).map(([name, description]) => `- ${name}: ${description}`).join('\n')}

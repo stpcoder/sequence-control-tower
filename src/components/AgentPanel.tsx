@@ -61,6 +61,13 @@ export function evaluationProposalTitle(proposal: EvaluationAgentSessionView['pr
   return `${lead.join(' · ') || proposal.outcome} 경향`
 }
 
+export function agentEvaluationPurposeLabel(purpose: NonNullable<NonNullable<EvaluationAgentSessionView['proposal']>['purpose']>): string {
+  return {
+    screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현',
+    characterization: '불량 경향 파악', verification: '개선 효과 검증',
+  }[purpose]
+}
+
 export function proposalDecisionResult(outcome: EvaluationAgentPublicOutcome): EvaluationResultLabel | null {
   if (!outcome || outcome === 'UNKNOWN') return null
   return outcome
@@ -564,7 +571,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
         <div className="agent-evaluation-review-head"><strong>결과와 평가 이력</strong><button type="button" onClick={() => setEvaluationRun(null)} aria-label="검토 닫기"><X size={14} /></button></div>
         {projectPending ? <div className="agent-evaluation-progress"><span>{evaluationRun.status === 'paused' ? boundedError(new Error(evaluationRun.failure ?? '분석을 이어갈 수 있습니다.')) : '분석 중'}</span>{evaluationRun.status === 'paused' ? <button type="button" onClick={() => void resumeProjectTrend({})} disabled={busy}><RotateCcw size={14} />다시 시도</button> : null}</div> : null}
         {evaluationRun.question ? <div className="agent-evaluation-question"><AgentMarkdown>{evaluationRun.question.prompt}</AgentMarkdown>{evaluationRun.question.choices?.length ? <div className="quick-answers">{evaluationRun.question.choices.map((choice) => <button type="button" key={choice} onClick={() => void resumeProjectTrend({ answer: choice })} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div> : <form onSubmit={(event) => { event.preventDefault(); if (evaluationAnswer.trim()) void resumeProjectTrend({ answer: evaluationAnswer.trim() }) }}><input value={evaluationAnswer} onChange={(event) => setEvaluationAnswer(event.target.value)} placeholder="확인할 값 입력" /><button type="submit" disabled={busy || !evaluationAnswer.trim()}>확인</button></form>}</div> : null}
-        {evaluationRun.proposal ? <div className="agent-evaluation-proposal"><div><strong>{evaluationRun.proposal.outcome}</strong>{evaluationRun.proposal.purpose ? <span>{evaluationRun.proposal.purpose}</span> : null}</div><p>{evaluationRun.proposal.rationale}</p>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).length ? <ul>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).map((item) => <li key={item}>{item}</li>)}</ul> : null}<div className="agent-review-actions"><button type="button" onClick={() => void saveProjectProposal()} disabled={busy}><Check size={14} />결과·이력 저장</button>{evaluationRun.status === 'waiting_confirmation' ? <button type="button" onClick={() => void resumeProjectTrend({ confirm: 'reject' })} disabled={busy}>다시 분석</button> : null}</div></div> : null}
+        {evaluationRun.proposal ? <div className="agent-evaluation-proposal"><div><strong>{evaluationRun.proposal.outcome}</strong>{evaluationRun.proposal.purpose ? <span>{agentEvaluationPurposeLabel(evaluationRun.proposal.purpose)}</span> : null}</div><p>{evaluationRun.proposal.rationale}</p>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).length ? <ul>{evaluationDimensionSummary(evaluationRun.proposal.dimensions).map((item) => <li key={item}>{item}</li>)}</ul> : null}<div className="agent-review-actions"><button type="button" onClick={() => void saveProjectProposal()} disabled={busy}><Check size={14} />결과·이력 저장</button>{evaluationRun.status === 'waiting_confirmation' ? <button type="button" onClick={() => void resumeProjectTrend({ confirm: 'reject' })} disabled={busy}>다시 분석</button> : null}</div></div> : null}
       </section> : null}
       {scope === 'project' && error ? <div className="agent-error" role="alert">{error}</div> : null}
       {savedMessage ? <div className="agent-saved" role="status">{savedMessage}</div> : null}

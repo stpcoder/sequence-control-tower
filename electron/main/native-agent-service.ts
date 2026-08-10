@@ -59,6 +59,12 @@ function fallbackSummary(results: LpddrAgentToolResult[]): string {
   return `확인된 사실\n${facts.join('\n') || '- 저장된 근거가 없습니다.'}\n\n추정 또는 미확인\n- LLM 응답을 받지 못해 인과관계와 다음 평가 제안은 보류했습니다. 아래 도구 결과는 로컬에서 계산된 값입니다.`
 }
 
+export function userFacingAgentContent(value: string): string {
+  const content = safe(value)
+  const visible = content.split('\n').filter((line) => !/(?:Maximum Steps|최대 분석 단계|tool budget|도구 예산)/i.test(line)).join('\n').trim()
+  return visible || '확보한 근거 안에서 분석을 마쳤습니다. 미확인 항목은 확정하지 않았습니다.'
+}
+
 export class NativeAgentService {
   private readonly controllers = new Map<string, AbortController>()
   private readonly listeners = new Set<(session: NativeAgentSessionView) => void>()
@@ -295,7 +301,7 @@ export class NativeAgentService {
             draft.externalSessionId = response.externalSessionId
             for (const name of response.toolNames.slice(0, 20)) draft.tools.push({ id: randomUUID(), name, label: name, state: 'completed', startedAt: now(), completedAt: now() })
           })
-          session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: response.content })
+          session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: userFacingAgentContent(response.content) })
           session = await this.deps.store.setStatus(session.id, 'idle'); this.emit(session); return
         } catch (error) {
           if (controller.signal.aborted) throw error
@@ -344,7 +350,7 @@ export class NativeAgentService {
     try {
       const completed = await this.deps.llm.complete(prompt, signal, () => undefined)
       session = await this.deps.store.appendMessage(session.id, {
-        role: 'assistant', content: completed.content,
+        role: 'assistant', content: userFacingAgentContent(completed.content),
         evidenceSourceIds: [...new Set(results.flatMap((item) => item.evidenceSourceIds))]
       })
       session = await this.deps.store.setStatus(session.id, 'idle'); this.emit(session)
