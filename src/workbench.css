@@ -450,9 +450,9 @@
 .evidence-list > button:hover { background: var(--wb-hover); }
 .evidence-list b { color: var(--wb-blue); font-size: var(--wb-type-body); font-weight: 600; }
 .evidence-list code { overflow: hidden; color: var(--wb-muted); font-size: var(--wb-type-code); text-overflow: ellipsis; white-space: nowrap; }
-.evidence-hint { display: flex; padding: 18px 0; border-bottom: 1px solid var(--wb-line-soft); color: var(--wb-dim); font-size: var(--wb-type-secondary); line-height: 1.5; }
+.evidence-hint { display: flex; padding: 15px 0 7px; color: var(--wb-dim); font-size: var(--wb-type-secondary); line-height: 1.5; }
 .evidence-hint svg { flex: 0 0 auto; margin-top: 2px; }
-.recipe-reopen { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-top: 16px; padding: 0; border: 0 !important; border-top: 1px solid var(--wb-line-soft) !important; border-radius: 0; color: var(--wb-text) !important; text-align: left; background: transparent !important; }
+.recipe-reopen { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-top: 8px; padding: 0; border: 0 !important; border-radius: 0; color: var(--wb-text) !important; text-align: left; background: transparent !important; }
 .recipe-reopen:hover { color: var(--wb-blue) !important; background: transparent !important; }
 .recipe-reopen > svg:first-child { color: var(--wb-blue); }
 .recipe-reopen > svg:last-child { color: var(--wb-dim); }
@@ -460,8 +460,8 @@
 .recipe-reopen strong { font-size: var(--wb-type-body); font-weight: 600; }
 .recipe-reopen small { color: var(--wb-dim); font-size: var(--wb-type-secondary); }
 
-.recipe-suggestion { margin-top: 16px; overflow: hidden; border: 0; border-top: 1px solid var(--wb-line-soft); border-radius: 0; background: transparent; }
-.recipe-title { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0; border-bottom: 1px solid var(--wb-line-soft); }
+.recipe-suggestion { margin-top: 10px; overflow: hidden; border: 0; border-radius: 0; background: transparent; }
+.recipe-title { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0; }
 .recipe-title > svg { flex: 0 0 auto; color: var(--wb-blue); }
 .recipe-title > div { display: grid; flex: 1; gap: 3px; }
 .recipe-title strong { font-size: var(--wb-type-body); font-weight: 600; }
@@ -511,7 +511,7 @@
 .recipe-order-modal li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 0 7px 0 9px; border-radius: 8px; background: #222832; }
 .recipe-order-modal li code { overflow: hidden; color: var(--wb-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .recipe-order-modal li span { display: flex; gap: 3px; }
-.recipe-order-modal li button { width: 28px; height: 28px; border-radius: 7px; color: var(--wb-muted); background: #2b323d; }
+.recipe-order-modal li button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--wb-muted); background: #2b323d; line-height: 1; }
 .recipe-order-modal li button:hover:not(:disabled) { color: var(--wb-text); background: #374252; }
 .recipe-order-modal > .save { min-height: 36px; border-radius: 9px; color: #e7f0ff; background: #2d4c70; font-size: 12px; }
 .recipe-manager-scrim { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(8, 10, 14, .68); }
@@ -540,6 +540,7 @@
 .recipe-logic p svg { flex: 0 0 auto; color: var(--wb-dim); }
 .recipe-logic p span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recipe-logic b { color: var(--wb-text); }
+.recipe-logic .recipe-result { align-items: center; }
 .recipe-actions { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 0 0 8px; }
 .recipe-actions button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; border: 1px solid var(--wb-line); border-radius: 7px; color: var(--wb-muted); font-size: var(--wb-type-body); }
 .recipe-actions button:hover { color: var(--wb-text); background: var(--wb-hover); }

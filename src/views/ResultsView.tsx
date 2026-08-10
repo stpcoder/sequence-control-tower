@@ -386,7 +386,7 @@ function MetadataReviewDialog({ row, field, value, busy, onValueChange, onClose,
   }, [busy, onClose])
   return <div className="export-preview-modal metadata-review-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-review-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
     <form ref={dialogRef} className="export-preview-dialog metadata-review-dialog" onSubmit={(event) => { event.preventDefault(); onSave() }}>
-      <header><div><h2 id="metadata-review-title">{METADATA_LABEL[field]} 검토</h2><span title={row.fileName}>{row.fileName}</span></div><button type="button" onClick={onClose} aria-label="닫기"><X size={16} /></button></header>
+      <header><div><h2 id="metadata-review-title">{METADATA_LABEL[field]} 검토</h2></div><button type="button" onClick={onClose} aria-label="닫기"><X size={16} /></button></header>
       <div className="metadata-review-body">
         <label><span>값</span><input autoFocus value={value} onChange={(event) => onValueChange(event.target.value)} placeholder="값 입력" /></label>
         <p>{current.state === 'approved' ? '엔지니어가 승인한 값입니다.' : current.value ? '로그에서 찾은 후보입니다.' : '값을 찾지 못했습니다. 직접 입력할 수 있습니다.'}</p>
@@ -401,6 +401,8 @@ function MetadataReviewDialog({ row, field, value, busy, onValueChange, onClose,
 
 function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogRecordExportPreview; onClose: () => void; onCopy: (preview: LogRecordExportPreview) => void; onCsv: (preview: LogRecordExportPreview) => void }) {
   const dialogRef = useRef<HTMLDivElement>(null)
+  const conciseColumns = preview.columns.filter((column) => column !== 'filename' && column !== 'relative_path')
+  const previewColumns = conciseColumns.length ? conciseColumns : preview.columns
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
@@ -418,8 +420,8 @@ function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogR
     return () => dialog.removeEventListener('keydown', onKeyDown)
   }, [onClose])
   return <div className="export-preview-modal" role="dialog" aria-modal="true" aria-labelledby="export-preview-title" ref={dialogRef}>
-        <div className="export-preview-dialog"><header><div><h2 id="export-preview-title">{preview.format.toUpperCase()} 내보내기 확인</h2><span>{preview.rows.length}개 행 · {preview.columns.length}개 열 · 첫 5행 미리보기</span></div><button onClick={onClose} aria-label="내보내기 미리보기 닫기"><X size={16} /></button></header>
-          <div className="export-preview-table"><table><thead><tr>{preview.columns.map((column) => <th key={column}>{PREVIEW_LABELS.get(column) ?? column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 5).map((row) => <tr key={row.id}>{preview.columns.map((column) => <td key={column}>{exportCellValue(row, column)}</td>)}</tr>)}</tbody></table></div>
+        <div className="export-preview-dialog"><header><div><h2 id="export-preview-title">{preview.format.toUpperCase()} 내보내기 확인</h2><span>{preview.rows.length}개 행 · {preview.columns.length}개 열 · 파일 정보 제외 미리보기</span></div><button onClick={onClose} aria-label="내보내기 미리보기 닫기"><X size={16} /></button></header>
+          <div className="export-preview-table"><table><thead><tr>{previewColumns.map((column) => <th key={column}>{PREVIEW_LABELS.get(column) ?? column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 5).map((row) => <tr key={row.id}>{previewColumns.map((column) => <td key={column}>{exportCellValue(row, column)}</td>)}</tr>)}</tbody></table></div>
           <footer><button onClick={onClose}>취소</button><button onClick={() => preview.format === 'tsv' ? void onCopy(preview) : onCsv(preview)}>확정</button></footer>
         </div>
       </div>

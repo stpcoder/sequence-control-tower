@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
+import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationFolderFlow, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
 import type { DominanceFinding, EvaluationMemory } from '../../src/domain/evaluation-memory'
 
 const memory: EvaluationMemory = { project: { id: 'p', name: 'LPDDR6', customer: 'Customer A', targetDevice: 'SoC-X', densityGb: 16, nominalVoltage: 1.1 }, hypotheses: [], nodes: [], evidence: [] }
@@ -14,7 +14,7 @@ describe('evaluation memory workflow helpers', () => {
       nodes: [
         { id: 'n-a1', projectId: 'p', evaluationScopeId: 'root-a', name: 'baseline', dimensions: {}, status: 'fail' },
         { id: 'n-a2', projectId: 'p', evaluationScopeId: 'root-a', name: 'RT2', dimensions: {}, status: 'fail' },
-        { id: 'n-b', projectId: 'p', evaluationScopeId: 'root-b', name: 'VDD improvement', dimensions: {}, status: 'pass' },
+        { id: 'n-b', projectId: 'p', evaluationScopeId: 'root-b', parentId: 'n-a2', name: 'VDD improvement', dimensions: {}, status: 'pass' },
       ],
       evidence: [
         { id: 'e-a1', projectId: 'p', evaluationNodeId: 'n-a1', status: 'fail', sourceIds: ['a-1'] },
@@ -29,6 +29,9 @@ describe('evaluation memory workflow helpers', () => {
     ])
     expect(groups.map((group) => ({ id: group.id, logs: group.logs.length, nodes: group.nodes.length }))).toEqual([
       { id: 'root-a', logs: 2, nodes: 2 }, { id: 'root-b', logs: 1, nodes: 1 },
+    ])
+    expect(evaluationFolderFlow(scoped, groups).map((item) => ({ id: item.group.id, parent: item.parentGroupId }))).toEqual([
+      { id: 'root-a', parent: undefined }, { id: 'root-b', parent: 'root-a' },
     ])
   })
   it('exports concise client context and complete CSV', () => { const next = addEvaluationWithEvidence(memory, { name: 'fail run', status: 'fail', dimensions: { dq: 7 }, logIds: ['log-1'], origin: 'ai-proposed' }); const context = buildEvaluationContextMarkdown(next); expect(context).toContain('fail run'); expect(context).toContain('Customer: Customer A'); expect(context).toContain('Target device: SoC-X'); expect(context).toContain('Density: 16Gb'); expect(context).toContain('Nominal voltage: 1.1V'); expect(context).toContain('log-1'); const csv = evaluationMemoryCsv(next); expect(csv).toContain('customer,targetDevice,densityGb,nominalVoltage,program,phase'); expect(csv).toContain('sourceIds'); expect(csv).toContain('"log-1"') })

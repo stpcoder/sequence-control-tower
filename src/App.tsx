@@ -13,7 +13,7 @@ import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
 import { SettingsView } from './views/SettingsView'
 import { ProjectControl } from './components/ProjectControl'
-import { AgentPanel } from './components/AgentPanel'
+import { AgentPanel, type EvaluationAgentLaunchRequest } from './components/AgentPanel'
 import {
   artifactFiles,
   DEMO_LOGS,
@@ -264,7 +264,7 @@ function previewEvaluationMemory(): EvaluationMemory {
     ],
     nodes: [
       { id: 'preview-n-85', projectId: PROJECT_ID, hypothesisId: 'preview-h-85', evaluationScopeId: 'Qualcomm_A / 85C', name: '85°C DIAG 확인', purpose: 'verification', status: 'pass', interpretation: '85°C의 두 로그에서 stress test PASS가 확인됐습니다. 한 로그는 종료 marker가 없어 정상 종료 여부를 추가 확인해야 합니다.', authorship: 'engineer', reviewState: 'confirmed', dimensions: { temperatureC: 85, testMode: 'DIAG' } },
-      { id: 'preview-n-105', projectId: PROJECT_ID, hypothesisId: 'preview-h-105', evaluationScopeId: 'Qualcomm_A / 105C', name: '105°C 실패 경향', purpose: 'characterization', status: 'fail', interpretation: '105°C에서 Training fail과 watchdog reboot가 각각 확인됐습니다. 동일 원인으로 확정하지 않고 Sample과 전압 조건을 분리해 재평가해야 합니다.', authorship: 'agent', reviewState: 'proposed', dimensions: { temperatureC: 105, testMode: 'DIAG' } },
+      { id: 'preview-n-105', projectId: PROJECT_ID, hypothesisId: 'preview-h-105', parentId: 'preview-n-85', evaluationScopeId: 'Qualcomm_A / 105C', name: '105°C 실패 경향', purpose: 'characterization', status: 'fail', interpretation: '105°C에서 Training fail과 watchdog reboot가 각각 확인됐습니다. 동일 원인으로 확정하지 않고 Sample과 전압 조건을 분리해 재평가해야 합니다.', authorship: 'agent', reviewState: 'proposed', dimensions: { temperatureC: 105, testMode: 'DIAG' } },
     ],
     evidence: [
       { id: 'preview-e-01', projectId: PROJECT_ID, evaluationNodeId: 'preview-n-85', status: 'pass', result: 'PASS', dimensions: { sample: '01', temperatureC: 85 }, sourceIds: ['demo-pass-01'], origin: 'engineer-confirmed' },
@@ -322,6 +322,7 @@ export default function App() {
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [evaluationAgentLaunch, setEvaluationAgentLaunch] = useState<EvaluationAgentLaunchRequest | null>(null)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -837,6 +838,11 @@ export default function App() {
       onChange={saveEvaluationMemory}
       onOpenLog={openFile}
       onSelectLog={(id) => setSelectedFileId(id)}
+      onAnalyzeEvaluation={(request) => {
+        if (request.openId) setSelectedFileId(request.openId)
+        setEvaluationAgentLaunch({ id: `${Date.now()}-${request.evaluationScopeId}`, evaluationScopeId: request.evaluationScopeId, title: request.title, sourceIds: request.sourceIds })
+        setAgentOpen(true)
+      }}
       onNotify={notify}
     />
   ) : <SettingsView />
@@ -850,7 +856,7 @@ export default function App() {
           {content}
         </div>
       </main>
-      <AgentPanel
+      {activePage !== 'history' || agentOpen ? <AgentPanel
         open={agentOpen}
         onOpen={() => setAgentOpen(true)}
         onClose={() => setAgentOpen(false)}
@@ -859,7 +865,8 @@ export default function App() {
         evaluationSnapshot={evaluationSnapshot}
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
         onProjectUpdated={projectUpdated}
-      />
+        evaluationLaunchRequest={evaluationAgentLaunch}
+      /> : null}
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}
         {toast.message}

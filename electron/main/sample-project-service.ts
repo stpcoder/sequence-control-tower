@@ -8,6 +8,13 @@ import type { ProjectStore } from './project-store'
 const SAMPLE_MARKER = 'SCT_SAMPLE_LPDDR6_XIAOMI_V2'
 const REFERENCE_MARKER = 'SCT_SAMPLE_LPDDR5_REFERENCE_V2'
 const SAMPLE_FOLDER = 'lpddr6-xiaomi-v2'
+const SAMPLE_EVALUATIONS = [
+  { key: 'screen', folder: '01-vperi-screening', matches: (name: string) => !/RT2|VDD1p315|TM-RETENTION|TRAINFAIL/i.test(name) },
+  { key: 'retest', folder: '02-vperi-retest', matches: (name: string) => /RT2/i.test(name) },
+  { key: 'improvement', folder: '03-vdd-improvement', matches: (name: string) => /VDD1p315/i.test(name) },
+  { key: 'retention', folder: '04-retention', matches: (name: string) => /TM-RETENTION/i.test(name) },
+  { key: 'boot', folder: '05-boot-training', matches: (name: string) => /TRAINFAIL/i.test(name) },
+] as const
 const stamp = '2026-08-01T09:00:00.000Z'
 
 function bootLines(run: string, condition: string): string[] {
@@ -87,25 +94,41 @@ const SAMPLE_LOGS: Record<string, string> = {
 export class SampleProjectService {
   constructor(private readonly dataRoot: string, private readonly deps: {
     artifacts: Pick<ArtifactService, 'importFolder'>
-    projects: Pick<ProjectStore, 'create' | 'list' | 'get' | 'save' | 'archive' | 'attachFolder' | 'connectArtifacts' | 'validateFolders'>
+    projects: Pick<ProjectStore, 'create' | 'list' | 'get' | 'save' | 'archive' | 'attachFolder' | 'detachFolder' | 'connectArtifacts' | 'validateFolders'>
   }) {}
 
   async create(): Promise<ProjectLoadResult> {
-    const folder = join(this.dataRoot, 'samples', SAMPLE_FOLDER)
-    await mkdir(folder, { recursive: true })
-    await Promise.all(Object.entries(SAMPLE_LOGS).map(([name, content]) => writeFile(join(folder, name), content, { encoding: 'utf8', mode: 0o600 })))
+    const sampleRoot = join(this.dataRoot, 'samples', SAMPLE_FOLDER)
+    await mkdir(sampleRoot, { recursive: true })
+    await Promise.all(SAMPLE_EVALUATIONS.map(({ folder }) => mkdir(join(sampleRoot, folder), { recursive: true })))
+    await Promise.all(Object.entries(SAMPLE_LOGS).map(([name, content]) => {
+      const evaluation = SAMPLE_EVALUATIONS.find((item) => item.matches(name)) ?? SAMPLE_EVALUATIONS[0]
+      return writeFile(join(sampleRoot, evaluation.folder, name), content, { encoding: 'utf8', mode: 0o600 })
+    }))
     let project = (await this.deps.projects.list(true)).find((item) => item.description?.includes(SAMPLE_MARKER))
     if (!project) project = await this.deps.projects.create({ name: 'LPDDR6 Xiaomi 16Gb VPERI 개발', description: `${SAMPLE_MARKER} · Agent Native 기능 확인용 샘플`, onboardingAnswers: { evaluationTarget: 'VPERI 불량 검출 조건과 개선 전압 확인', importantMetadata: 'material, sample, lot, DQ, BL, channel, pattern, temperature, VDD, frequency, test mode', reuseRules: '@FAIL/training/reboot/halt 우선 판정; @PASS 확정' } })
-    if (!project.folders.some((item) => item.displayLabel === SAMPLE_FOLDER)) project = await this.deps.projects.attachFolder(project.id, project.revision, folder)
-    const imported = await this.deps.artifacts.importFolder(folder, { extensions: ['log'], maxFiles: 100 })
+    const legacyRoot = project.folders.find((item) => item.displayLabel === SAMPLE_FOLDER)
+    if (legacyRoot) project = await this.deps.projects.detachFolder(project.id, project.revision, legacyRoot.rootId)
+    for (const evaluation of SAMPLE_EVALUATIONS) {
+      if (!project.folders.some((item) => item.displayLabel === evaluation.folder)) project = await this.deps.projects.attachFolder(project.id, project.revision, join(sampleRoot, evaluation.folder))
+    }
+    const imports = await Promise.all(SAMPLE_EVALUATIONS.map(async (evaluation) => ({ evaluation, result: await this.deps.artifacts.importFolder(join(sampleRoot, evaluation.folder), { extensions: ['log'], maxFiles: 100 }) })))
+    const imported = {
+      artifacts: imports.flatMap((item) => item.result.artifacts),
+      failures: imports.flatMap((item) => item.result.failures),
+      skippedCount: imports.reduce((sum, item) => sum + item.result.skippedCount, 0),
+    }
     const current = await this.deps.projects.get(project.id)
     if (!current) throw new Error('샘플 프로젝트를 만들지 못했습니다.')
-    const root = current.folders.find((item) => item.displayLabel === SAMPLE_FOLDER)
-    if (!root) throw new Error('샘플 로그 폴더를 연결하지 못했습니다.')
-    const sources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).filter((source) => source.folderLabel === SAMPLE_FOLDER).map((source) => ({
-      sourceId: createHash('sha256').update(`${current.id}\0${root.rootId}\0${source.relativePath}`).digest('hex').slice(0, 40),
-      rootId: root.rootId, artifactRootId: source.rootId, artifactId: artifact.id, relativePath: source.relativePath
-    })))
+    const roots = new Map(SAMPLE_EVALUATIONS.map((evaluation) => [evaluation.key, current.folders.find((item) => item.displayLabel === evaluation.folder)] as const))
+    if ([...roots.values()].some((root) => !root)) throw new Error('샘플 평가 폴더를 연결하지 못했습니다.')
+    const sources = imports.flatMap(({ evaluation, result }) => {
+      const root = roots.get(evaluation.key)!
+      return result.artifacts.flatMap((artifact) => (artifact.sources ?? []).filter((source) => source.folderLabel === evaluation.folder).map((source) => ({
+        sourceId: createHash('sha256').update(`${current.id}\0${root.rootId}\0${source.relativePath}`).digest('hex').slice(0, 40),
+        rootId: root.rootId, artifactRootId: source.rootId, artifactId: artifact.id, relativePath: source.relativePath
+      })))
+    })
     let connected = sources.length ? await this.deps.projects.connectArtifacts({ projectId: current.id, expectedRevision: current.revision, artifacts: sources }) : current
     const ids = (fragment: string): string[] => connected.artifacts.filter((item) => item.relativePath.includes(fragment)).map((item) => item.sourceId)
     const idsWhere = (match: (name: string) => boolean): string[] => connected.artifacts.filter((item) => match(item.relativePath)).map((item) => item.sourceId)
@@ -118,10 +141,10 @@ export class SampleProjectService {
         { id: 'sample-h-retention', title: '105°C retention DQ4', description: '동일 조건 2개 중 1개 halt. 추가 반복 필요.', origin: 'engineer-confirmed', evaluationNodeIds: ['sample-n-retention'] }
       ],
       evaluationNodes: [
-        { id: 'sample-n-screen', hypothesisId: 'sample-h-vperi-dq9', branchId: 'vperi-screen', evaluationScopeId: root.rootId, name: 'VPERI 불량 가속 조건 확인', purpose: 'screening', dimensions: { skew: 'SS', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, subChannel: 0, rank: 0, bankGroup: 1, bank: 2, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.295, testMode: 'VPERI' }, interpretation: '85°C·VDD 1.295V의 WR 평가에서 DQ9 실패가 2/2로 확인됐습니다. 검출 조건으로는 유효하지만 동일 기인 확정에는 비교 조건이 더 필요합니다.', authorship: 'agent', reviewState: 'confirmed', sequenceSignature: 'sample-vperi-screen', attemptNo: 1, status: 'fail' },
-        { id: 'sample-n-screen-rt2', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', retestOf: 'sample-n-screen', branchId: 'vperi-screen', evaluationScopeId: root.rootId, name: 'SMP-01 동일 조건 RT2', purpose: 'reproduction', dimensions: { sample: '01' }, interpretation: '같은 Sample과 Sequence로 재평가했지만 다시 실패했습니다. 단발성 오류보다는 반복 가능한 불량 가능성이 높습니다.', authorship: 'engineer', reviewState: 'confirmed', sequenceSignature: 'sample-vperi-screen', attemptNo: 2, status: 'fail' },
-        { id: 'sample-n-vdd-up', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen-rt2', branchId: 'vperi-improvement', evaluationScopeId: root.rootId, name: 'VDD 1.315V 개선 확인', purpose: 'improvement', dimensions: { skew: 'SS', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, subChannel: 0, rank: 0, bankGroup: 1, bank: 2, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.315, testMode: 'VPERI' }, interpretation: 'VDD를 1.315V로 높인 조건에서는 2/2 PASS로 바뀌었습니다. 개선 경향은 보이지만 전압 효과를 확정하려면 중간 전압과 반복 평가가 필요합니다.', authorship: 'agent', reviewState: 'confirmed', status: 'pass' },
-        { id: 'sample-n-retention', hypothesisId: 'sample-h-retention', branchId: 'retention', evaluationScopeId: root.rootId, name: '고온 retention 재현', purpose: 'characterization', dimensions: { skew: 'SS', lot: 'C2', material: 'WAF31', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 4, bl: 16, channel: 2, subChannel: 1, rank: 0, bankGroup: 2, bank: 4, pattern: 'MARCH', frequencyMHz: 9600, temperatureC: 105, vdd: 1.295, testMode: 'RETENTION' }, interpretation: '105°C retention에서 2회 중 1회 halt와 DQ4 marker가 확인됐습니다. 분모가 작아 추가 반복 전에는 경향으로만 유지합니다.', authorship: 'agent', reviewState: 'proposed', status: 'inconclusive' }
+        { id: 'sample-n-screen', hypothesisId: 'sample-h-vperi-dq9', branchId: 'vperi-screen', evaluationScopeId: roots.get('screen')!.rootId, name: 'VPERI 불량 가속 조건 확인', purpose: 'screening', dimensions: { skew: 'SS', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, subChannel: 0, rank: 0, bankGroup: 1, bank: 2, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.295, testMode: 'VPERI' }, interpretation: '85°C·VDD 1.295V의 WR 평가에서 DQ9 실패가 2/2로 확인됐습니다. 검출 조건으로는 유효하지만 동일 기인 확정에는 비교 조건이 더 필요합니다.', authorship: 'agent', reviewState: 'confirmed', sequenceSignature: 'sample-vperi-screen', attemptNo: 1, status: 'fail' },
+        { id: 'sample-n-screen-rt2', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen', retestOf: 'sample-n-screen', branchId: 'vperi-screen', evaluationScopeId: roots.get('retest')!.rootId, name: 'SMP-01 동일 조건 RT2', purpose: 'reproduction', dimensions: { sample: '01' }, interpretation: '같은 Sample과 Sequence로 재평가했지만 다시 실패했습니다. 단발성 오류보다는 반복 가능한 불량 가능성이 높습니다.', authorship: 'engineer', reviewState: 'confirmed', sequenceSignature: 'sample-vperi-screen', attemptNo: 2, status: 'fail' },
+        { id: 'sample-n-vdd-up', hypothesisId: 'sample-h-vperi-dq9', parentId: 'sample-n-screen-rt2', branchId: 'vperi-improvement', evaluationScopeId: roots.get('improvement')!.rootId, name: 'VDD 1.315V 개선 확인', purpose: 'improvement', dimensions: { skew: 'SS', lot: 'A1', material: 'WAF12', die: '03', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 9, bl: 16, channel: 0, subChannel: 0, rank: 0, bankGroup: 1, bank: 2, pattern: 'WR', frequencyMHz: 9600, temperatureC: 85, vdd: 1.315, testMode: 'VPERI' }, interpretation: 'VDD를 1.315V로 높인 조건에서는 2/2 PASS로 바뀌었습니다. 개선 경향은 보이지만 전압 효과를 확정하려면 중간 전압과 반복 평가가 필요합니다.', authorship: 'agent', reviewState: 'confirmed', status: 'pass' },
+        { id: 'sample-n-retention', hypothesisId: 'sample-h-retention', branchId: 'retention', evaluationScopeId: roots.get('retention')!.rootId, name: '고온 retention 재현', purpose: 'characterization', dimensions: { skew: 'SS', lot: 'C2', material: 'WAF31', socVendor: 'qualcomm', socModel: 'SM-8975', bootProfileId: 'qualcomm-default', dq: 4, bl: 16, channel: 2, subChannel: 1, rank: 0, bankGroup: 2, bank: 4, pattern: 'MARCH', frequencyMHz: 9600, temperatureC: 105, vdd: 1.295, testMode: 'RETENTION' }, interpretation: '105°C retention에서 2회 중 1회 halt와 DQ4 marker가 확인됐습니다. 분모가 작아 추가 반복 전에는 경향으로만 유지합니다.', authorship: 'agent', reviewState: 'proposed', status: 'inconclusive' }
       ],
       evidenceRecords: [
         { id: 'sample-e-screen-fail', evaluationNodeId: 'sample-n-screen', occurredAt: stamp, status: 'fail', result: '2/2 FAIL at DQ9', sourceIds: idsWhere((name) => name.includes('T85_VDD1p295_F9600_TM-VPERI') && !name.includes('RT2')), note: '결정 규칙 @FAIL; 85°C 최초 평가 분모 2, 실패 2', origin: 'engineer-confirmed' },

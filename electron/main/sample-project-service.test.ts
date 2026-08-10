@@ -15,9 +15,13 @@ describe('SampleProjectService', () => {
     const result = await new SampleProjectService(root, { artifacts, projects }).create()
     expect(result.project.lpddrDevelopmentContext).toMatchObject({ product: 'LPDDR6', customer: 'Xiaomi', densityGb: 16 })
     expect(result.project.artifacts).toHaveLength(9)
+    expect(result.project.folders.map((item) => item.displayLabel).sort()).toEqual([
+      '01-vperi-screening', '02-vperi-retest', '03-vdd-improvement', '04-retention', '05-boot-training',
+    ])
     expect(result.project.evaluationNodes).toHaveLength(4)
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-screen-rt2')).toMatchObject({ retestOf: 'sample-n-screen', attemptNo: 2 })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-vdd-up')).toMatchObject({ parentId: 'sample-n-screen-rt2', purpose: 'improvement' })
+    expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(4)
     expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-8975'] })
     const allArtifacts = new Map((await artifacts.list()).map((artifact) => [artifact.id, artifact]))
     const initial = result.project.artifacts.find((item) => item.relativePath.includes('SMP-01_T85_VDD1p295') && item.relativePath.includes('RUN1'))!

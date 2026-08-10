@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Beaker, ChevronDown, FolderPlus, LoaderCircle, Plus, RefreshCw, Unplug, X } from 'lucide-react'
+import { Beaker, ChevronDown, FolderPlus, LoaderCircle, Plus, Unplug, X } from 'lucide-react'
 import type { ProjectLoadResult, ProjectSaveInput, ProjectSnapshot } from '../../electron/shared/contracts'
 
 export const PROJECT_INIT_ITEMS = ['Sample', '온도', 'Mode', 'Grid', 'PASS/FAIL', 'Reboot/Halt'] as const
@@ -147,12 +147,6 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
     catch (error) { onError(error instanceof Error ? error.message : '폴더를 연결하지 못했습니다.') }
     finally { setBusy(false) }
   }
-  const validate = async () => {
-    if (!project) return; setBusy(true)
-    try { const folders = await api.projects.validateFolders({ projectId: project.id }); onProjectUpdated(applyValidatedFolders(project, folders)) }
-    catch (error) { onError(error instanceof Error ? error.message : '폴더 상태를 확인하지 못했습니다.') }
-    finally { setBusy(false) }
-  }
   const detach = async (rootId: string) => {
     if (!project) return; setBusy(true)
     try {
@@ -209,14 +203,13 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
       {project && !showNew ? <div className="project-settings-block">
         <details className="project-folders"><summary>연결 폴더 <span>{project.folders.length}</span></summary><div className="project-folder-content">
           {project.folders.length ? project.folders.map((folder) => <div className="folder-status-line" key={folder.rootId}><span>{folder.displayLabel}<small>{folder.status === 'available' ? '연결됨' : folder.status === 'permission-denied' ? '권한 없음' : '없음'}</small></span><button onClick={() => void detach(folder.rootId)} disabled={busy} aria-label={`${folder.displayLabel} 해제`}><Unplug size={13} /></button></div>) : <p className="project-empty">연결된 폴더가 없습니다.</p>}
-          <button className="project-validate-action" onClick={() => void validate()} disabled={busy}><RefreshCw size={13} />폴더 상태 확인</button>
           {project.folders.filter((folder) => folder.status !== 'available').map((folder) => <div className="folder-warning" key={folder.rootId}>{folder.displayLabel}: {folder.status === 'permission-denied' ? '권한 없음' : '폴더 없음'}</div>)}
         </div></details>
         <details className="project-details"><summary>프로젝트 정보 수정</summary><div className="project-advanced-content">
           <label className="project-field"><span>프로젝트 이름</span><input className="project-meta-input" value={metaName} onChange={(event) => setMetaName(event.target.value)} aria-label="현재 프로젝트 이름" /></label>
           <label className="project-field"><span>평가 목적</span><textarea className="project-meta-input" value={metaDescription} onChange={(event) => setMetaDescription(event.target.value)} placeholder="예: VPERI 불량 재현 조건 확인" aria-label="현재 프로젝트 설명" rows={2} /></label>
-          <fieldset className="project-analysis-fields"><legend>로그에서 정리할 항목</legend><div className="project-chips">{PROJECT_INIT_ITEMS.map((item) => <button type="button" className={metaAnswerItems.includes(item) ? 'selected' : ''} key={item} onClick={() => toggleItem(item, metaAnswerItems, setMetaAnswerItems)}>{item}</button>)}</div><input className="project-meta-input" value={metaCustom} onChange={(event) => setMetaCustom(event.target.value)} placeholder="기타 항목" aria-label="현재 프로젝트 항목 직접 입력" /></fieldset>
-          <label className="project-field"><span>실장기 구분명</span><input className="project-meta-input" value={equipmentAlias} onChange={(event) => setEquipmentAlias(event.target.value)} placeholder="예: Qualcomm SM8975 #1" aria-label="실장기 구분명" /></label>
+          <fieldset className="project-analysis-fields"><legend>결과에 표시할 항목<small>분석표와 CSV에 우선 표시됩니다.</small></legend><div className="project-chips">{PROJECT_INIT_ITEMS.map((item) => <button type="button" className={metaAnswerItems.includes(item) ? 'selected' : ''} key={item} onClick={() => toggleItem(item, metaAnswerItems, setMetaAnswerItems)}>{item}</button>)}</div><input className="project-meta-input" value={metaCustom} onChange={(event) => setMetaCustom(event.target.value)} placeholder="기타 항목" aria-label="현재 프로젝트 항목 직접 입력" /></fieldset>
+          <label className="project-field"><span>실장기 명</span><input className="project-meta-input" value={equipmentAlias} onChange={(event) => setEquipmentAlias(event.target.value)} placeholder="예: Qualcomm SM8975 #1" aria-label="실장기 명" /></label>
           <button className="project-primary-action" onClick={() => void saveMeta()} disabled={busy}>변경사항 저장</button>
         </div></details>
       </div> : null}

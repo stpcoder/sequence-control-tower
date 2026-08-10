@@ -265,7 +265,7 @@ export const STAGE_LABEL_KO: Record<EvaluationStage, string> = {
 }
 
 export const RESULT_STAGE_GROUP_LABEL: Record<ResultStageGroup, string> = {
-  firmware: '펌웨어',
+  firmware: '부팅',
   os: 'OS',
   test: '테스트',
 }
@@ -289,15 +289,22 @@ export function resultStageCheckpoints(
     : vendor === 'qualcomm'
       ? ['uefi', 'abl', 'xbl', 'pbl']
       : ['uefi', 'lk2', 'lk', 'abl', 'xbl', 'pbl']
-  const firmware = firmwareOrder.map((stage) => byStage.get(stage)).find(Boolean)
-  const os = byStage.get('os')
+  const platformFirmware = firmwareOrder.map((stage) => byStage.get(stage)).find(Boolean)
+  const training = byStage.get('training')
+  const firmware = training?.status === 'fail' ? training : platformFirmware
+  let os = byStage.get('os')
   const testCandidates = ['test', 'hdiag', 'diag']
     .map((stage) => byStage.get(stage as EvaluationStage))
     .filter((item): item is EvaluationStageResult => Boolean(item))
     .sort((left, right) => statusPriority[right.status] - statusPriority[left.status])
-  const test = testCandidates.find((item) => item.status === 'fail')
+  let test = testCandidates.find((item) => item.status === 'fail')
     ?? (finalResult === 'PASS' ? testCandidates.find((item) => item.status === 'pass') : undefined)
     ?? (finalResult !== 'TRAINING_FAIL' ? testCandidates.find((item) => item.status === 'reached') : undefined)
+  const interrupted = finalResult === 'SYSTEM_REBOOT' || finalResult === 'SYSTEM_HALT'
+  if (interrupted) {
+    if (test) test = { ...test, status: 'fail' }
+    else if (os) os = { ...os, status: 'fail' }
+  }
   const checkpoints: ResultStageCheckpoint[] = [
     ...(firmware ? [{ group: 'firmware' as const, label: STAGE_LABEL_KO[firmware.stage], status: firmware.status, evidenceCount: firmware.evidenceCount }] : []),
     ...(os ? [{ group: 'os' as const, label: 'OS', status: os.status, evidenceCount: os.evidenceCount }] : []),
@@ -492,6 +499,7 @@ export function inferStageResults(file: WorkbenchFile): EvaluationStageResult[] 
     { stage: 'diag', status: 'reached', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:START|BEGIN)\b/i },
     { stage: 'diag', status: 'pass', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:@?PASS|SUCCESS)\b/i },
     { stage: 'diag', status: 'fail', pattern: /\bDIAG(?:NOSTIC)?[^\n]*(?:@?FAIL|ERROR)\b/i },
+    { stage: 'test', status: 'reached', pattern: /(?:\bTEST[^\n]*(?:START|BEGIN)\b|\bSTRESSAPP[^\n]*(?:START|BEGIN)\b)/i },
     { stage: 'test', status: 'pass', pattern: /(?:\bTEST[_ ]?PASS\b|\bSTRESSAPP[^\n]*(?:@?PASS|SUCCESS)\b|\bTERMINAL_RESULT=PASS\b|@PASS\b)/i },
     { stage: 'test', status: 'fail', pattern: /(?:\bTEST[_ ]?FAIL\b|\bSTRESSAPP[^\n]*(?:@?FAIL|ERROR)\b|@FAIL\b)/i },
     { stage: 'os', status: 'reached', pattern: /(?:\b(?:SYN_)?OS[_ ]?(?:READY|BOOTED|BOOT_START)\b|Linux\s+(?:boot\s+)?complete|\bExitBootServices\b)/i },

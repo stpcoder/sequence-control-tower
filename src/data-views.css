@@ -835,7 +835,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: clamp(12px, 3vw, 24px);
   background: rgba(5, 7, 10, .72);
   backdrop-filter: blur(6px);
 }
@@ -865,7 +865,7 @@
 .export-preview-dialog > header span { display: block; margin-top: 4px; color: var(--data-dim); font-size: 11px; }
 .export-preview-dialog > header button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--data-muted); }
 .export-preview-dialog > header button:hover { color: #fff; background: #242933; }
-.export-preview-table { overflow: auto; padding: 4px 18px 14px; }
+.export-preview-table { overflow: auto; padding: 4px 12px 14px; }
 .export-preview-table table { min-width: 100%; border-collapse: collapse; }
 .export-preview-table th,
 .export-preview-table td { max-width: 240px; padding: 10px; border-bottom: 1px solid var(--data-line-soft); overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
@@ -876,7 +876,7 @@
 .export-preview-dialog > footer button:last-child { color: #111722; background: var(--sct-blue); }
 .export-preview-dialog > footer button:hover { filter: brightness(1.12); }
 
-.metadata-review-dialog { width: min(480px, 100%); }
+.metadata-review-dialog { width: min(440px, calc(100vw - 24px)); }
 .metadata-review-body { padding: 18px; }
 .metadata-review-body label { display: grid; gap: 7px; color: var(--data-dim); font-size: 11px; }
 .metadata-review-body input {

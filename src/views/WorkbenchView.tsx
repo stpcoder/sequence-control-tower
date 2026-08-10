@@ -8,6 +8,9 @@ import {
 } from 'react'
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
   Braces,
   CaseSensitive,
   Check,
@@ -2923,7 +2926,7 @@ export function WorkbenchView({
           {activeFile ? (
             <>
               <section className="decision-picker" aria-label="결과 선택">
-                <div className="section-label"><label htmlFor="decision-select">결과</label><span>검색 {searchHistory[activeFile.id]?.length ?? 0} · 근거 {evidenceLines.length}</span></div>
+                <div className="section-label"><label htmlFor="decision-select">결과</label></div>
                 <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
                 {activeFile.decision && candidateDecisions[activeFile.id] && candidateDecisions[activeFile.id] !== activeFile.decision ? <button className="confirm-decision-revision" onClick={() => void confirmDecisionRevision()}>기존 {activeFile.decision} → {candidateDecisions[activeFile.id]} 변경 확정</button> : null}
               </section>
@@ -3035,9 +3038,8 @@ export function WorkbenchView({
 
               {recipeVisible && draft ? (
                 <section className="recipe-suggestion">
-                  <div className="recipe-title"><strong>분석 규칙</strong><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
+                  <div className="recipe-title"><div><strong>분석 규칙</strong><span>판정에 사용할 검색을 선택하세요</span></div><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
-                    <span>판정에 사용할 검색을 선택하세요</span>
                     {recipeObservations.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]
@@ -3060,7 +3062,7 @@ export function WorkbenchView({
                   <div className="recipe-logic">
                     {draft.positiveTerms.length ? <p><Check size={12} /><span>{draft.positiveTerms.join(' · ')}</span></p> : null}
                     {draft.missingTerms.length ? <p><X size={12} /><span>{draft.missingTerms.join(' · ')} 없음</span></p> : null}
-                    <p><Play size={12} /><span>그러면 <b>{draft.decision}</b></span></p>
+                    <p className="recipe-result"><ArrowRight size={13} /><span>결과 <b>{draft.decision}</b></span></p>
                   </div>
                   <div className="recipe-actions">
                     <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Braces size={14} />}{recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장됨' : '규칙 저장'}</button>
@@ -3074,7 +3076,7 @@ export function WorkbenchView({
                   <div className="recipe-title"><strong id="recipe-order-title">판정 조건 순서</strong><button type="button" onClick={() => setClauseOrderOpen(false)} aria-label="순서 설정 닫기"><X size={15} /></button></div>
                   <p>검색 기록 순서와 무관하게 A → B → C 판정 순서를 정하세요.</p>
                   <ol>
-                    {selectedRecipeObservations.map((observation, index) => <li key={observation.id}><code>{observation.query}</code><span><button type="button" onClick={() => movePinnedClause(index, -1)} disabled={index === 0} aria-label={`${observation.query} 위로 이동`}>↑</button><button type="button" onClick={() => movePinnedClause(index, 1)} disabled={index === selectedRecipeObservations.length - 1} aria-label={`${observation.query} 아래로 이동`}>↓</button></span></li>)}
+                    {selectedRecipeObservations.map((observation, index) => <li key={observation.id}><code>{observation.query}</code><span><button type="button" onClick={() => movePinnedClause(index, -1)} disabled={index === 0} aria-label={`${observation.query} 위로 이동`}><ArrowUp size={14} /></button><button type="button" onClick={() => movePinnedClause(index, 1)} disabled={index === selectedRecipeObservations.length - 1} aria-label={`${observation.query} 아래로 이동`}><ArrowDown size={14} /></button></span></li>)}
                   </ol>
                   <button type="button" className="save" onClick={() => { setRequireMarkerOrder(true); setClauseOrderOpen(false); setRecipeSaved(false) }}><Check size={14} />이 순서 확정</button>
                 </div>

@@ -176,7 +176,7 @@ button:disabled {
 .project-step-head button, .project-step-actions > button:not(.project-primary-action) { padding: 5px 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .project-question { color: var(--text); font-size: 13px; font-weight: 700; }
 .project-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.project-chips button, .project-choice-row button, .project-choice-row select { min-height: 36px; padding: 6px 10px; border: 1px solid #454b56; border-radius: 7px; color: var(--muted); background: #1e2229; cursor: pointer; color-scheme: dark; font: inherit; font-size: 12px; }
+.project-chips button, .project-choice-row button, .project-choice-row select { min-height: 31px; padding: 4px 9px; border: 1px solid #454b56; border-radius: 7px; color: var(--muted); background: #1e2229; cursor: pointer; color-scheme: dark; font: inherit; font-size: 11.5px; white-space: nowrap; }
 .project-chips button:hover, .project-chips button.selected, .project-choice-row button.selected { border-color: var(--blue); color: var(--text); background: rgba(77, 171, 247, .12); }
 .project-choice-row { justify-content: flex-start; }
 .project-choice-row select { flex: 1; min-width: 0; }
@@ -189,6 +189,7 @@ button:disabled {
 .project-field { display: grid; gap: 5px; color: var(--muted); font-size: 11.5px; }
 .project-analysis-fields { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .project-analysis-fields legend { margin-bottom: 7px; padding: 0; color: var(--muted); font-size: 11.5px; }
+.project-analysis-fields legend small { display: block; margin-top: 3px; color: var(--dim); font-size: 10.5px; font-weight: 400; }
 .project-details .project-primary-action { min-height: 34px; margin-top: 2px; }
 .project-folder-content { padding-bottom: 8px; }
 .folder-status-list { margin: 0; padding: 8px 9px; border-left: 2px solid var(--line-strong); color: var(--muted); font: inherit; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }

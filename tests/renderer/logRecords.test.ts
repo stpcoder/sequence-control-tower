@@ -439,6 +439,26 @@ describe('renderer log result projection', () => {
     ])
   })
 
+  it('shows training failure as the stopped boot checkpoint', () => {
+    expect(resultStageCheckpoints([
+      { stage: 'uefi', status: 'pass', evidenceCount: 1 },
+      { stage: 'training', status: 'fail', evidenceCount: 2 },
+      { stage: 'test', status: 'fail', evidenceCount: 1 },
+    ], 'SM8975_training.log', 'TRAINING_FAIL')).toEqual([
+      { group: 'firmware', label: 'Training', status: 'fail', evidenceCount: 2 },
+    ])
+  })
+
+  it('marks the active test checkpoint failed when the system reboots', () => {
+    const [row] = projectLogRecords([{ id: 'reboot', name: 'SM8975_reboot.log', text: 'UEFI_EXIT\nOS_READY\nstressapp: start\nWATCHDOG_RESET' }])
+    expect(row.result).toBe('SYSTEM_REBOOT')
+    expect(resultStageCheckpoints(row.stageResults, row.fileName, row.result)).toEqual([
+      { group: 'firmware', label: 'UEFI', status: 'pass', evidenceCount: 1 },
+      { group: 'os', label: 'OS', status: 'reached', evidenceCount: 1 },
+      { group: 'test', label: '테스트', status: 'fail', evidenceCount: 1 },
+    ])
+  })
+
   it('uses bounded native stage inspection when artifact text stays outside the renderer', () => {
     const [row] = projectLogRecords(
       [{ id: 'native', artifactId: 'a'.repeat(64), name: 'native.log', text: undefined }],
