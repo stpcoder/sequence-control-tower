@@ -106,7 +106,7 @@ describe('UI readability contract', () => {
     expect(memoryStyles).toContain('background: var(--sct-control);')
   })
 
-  it('keeps result stages concise and history in a resizable qualitative workspace', async () => {
+  it('keeps result stages concise and history in a folder-scoped qualitative workspace', async () => {
     const [results, patterns, memory, memoryStyles, lineageStyles] = (await Promise.all([
       readFile(resolve(root, 'src/views/ResultsView.tsx'), 'utf8'),
       readFile(resolve(root, 'src/views/PatternsView.tsx'), 'utf8'),
@@ -120,11 +120,14 @@ describe('UI readability contract', () => {
     expect(results).toContain('검토 필요만')
     expect(patterns).not.toContain('className="stage-summary"')
     expect(patterns).not.toContain('미승인 후보로 계산한 미리보기입니다')
-    expect(memory).toContain('로그 기반 경향')
-    expect(memory).toContain('나머지 {remainingTrends.length}개')
+    expect(memory).toContain('groupEvaluationFolders')
+    expect(memory).toContain('조건별 경향')
+    expect(memory).toContain('나머지 {trends.length - 6}개')
+    expect(memory).toContain('AI 작성 · 엔지니어 확인')
     expect(memory).not.toContain('evaluation-memory-view__agent-composer')
-    expect(memory).toContain('role="separator"')
-    expect(memoryStyles).toContain('var(--evaluation-editor-width')
+    expect(memory).not.toContain('role="separator"')
+    expect(memoryStyles).toContain('grid-template-columns: 260px minmax(420px,1fr) 340px')
+    expect(memoryStyles).not.toContain('var(--evaluation-editor-width')
     expect(lineageStyles).not.toContain('box-shadow: inset 2px 0 #75a7ff')
   })
 })

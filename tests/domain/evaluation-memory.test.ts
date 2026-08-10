@@ -6,7 +6,7 @@ const memory: EvaluationMemory = {
   hypotheses: [{ id: "h-vperi", projectId: "lp6-a", title: "VPERI DQ9 marginality", origin: "engineer-confirmed" }],
   nodes: [
     { id: "base", projectId: "lp6-a", name: "baseline", branchId: "main", dimensions: { skew: "SS", lot: "L24", sample: "S01", bl: 16, dq: 9, channel: 0, subChannel: 1, rank: 0, bank: 2, bankGroup: 1, row: "0x2A", column: "0x14", pattern: "PRBS31", frequencyMHz: 8533, temperatureC: 85, vdd: 1.1, timingSkewPs: 18, testMode: "VPERI" } },
-    { id: "dq9", projectId: "lp6-a", hypothesisId: "h-vperi", parentId: "base", branchId: "dq9-vperi", name: "DQ9 retry", dimensions: { dq: 9, pattern: "PRBS31", frequencyMHz: 8533, testMode: "VPERI" } },
+    { id: "dq9", projectId: "lp6-a", hypothesisId: "h-vperi", parentId: "base", branchId: "dq9-vperi", evaluationScopeId: "folder-dq9", name: "DQ9 retry", interpretation: "DQ9에서 고온 실패가 반복됩니다.", authorship: "agent", reviewState: "confirmed", dimensions: { dq: 9, pattern: "PRBS31", frequencyMHz: 8533, testMode: "VPERI" } },
     { id: "dq20", projectId: "lp6-a", parentId: "base", branchId: "control", name: "DQ20 control", dimensions: { dq: 20, pattern: "PRBS7", frequencyMHz: 6400, testMode: "VPERI" } },
   ],
   evidence: [
@@ -28,7 +28,7 @@ describe("evaluation memory", () => {
 
   it("flattens node defaults and evidence overrides for CSV/XLSX export", () => {
     const row = flattenEvaluationMemory(memory).find((item) => item.evidenceId === "e3")!;
-    expect(row).toMatchObject({ projectName: "LPDDR6 VPERI", customer: "Customer A", targetDevice: "SoC-X", densityGb: "16", nominalVoltage: "1.1", program: "P1", phase: "ES", parentNodeId: "base", branchId: "dq9-vperi", dq: "9", bl: "16", subChannel: "1", rank: "0", row: "0x2A", column: "0x14", timingSkewPs: "5", status: "pass", hypothesisOrigin: "engineer-confirmed" });
+    expect(row).toMatchObject({ projectName: "LPDDR6 VPERI", customer: "Customer A", targetDevice: "SoC-X", densityGb: "16", nominalVoltage: "1.1", program: "P1", phase: "ES", parentNodeId: "base", branchId: "dq9-vperi", evaluationScopeId: "folder-dq9", interpretation: "DQ9에서 고온 실패가 반복됩니다.", authorship: "agent", reviewState: "confirmed", dq: "9", bl: "16", subChannel: "1", rank: "0", row: "0x2A", column: "0x14", timingSkewPs: "5", status: "pass", hypothesisOrigin: "engineer-confirmed" });
     expect(Object.values(row).every((value) => typeof value === "string")).toBe(true);
   });
 

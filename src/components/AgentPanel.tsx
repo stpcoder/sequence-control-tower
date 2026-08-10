@@ -509,7 +509,18 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
         if (nextEvaluation !== evaluationSnapshot) onSnapshotSaved(nextEvaluation)
       }
       const title = evaluationProposalTitle(evaluationRun.proposal)
-      const namedPayload: EvaluationAgentMemoryPayloadView = { ...payload, hypothesis: { ...payload.hypothesis, title }, node: { ...payload.node, name: title } }
+      const namedPayload: EvaluationAgentMemoryPayloadView = {
+        ...payload,
+        hypothesis: { ...payload.hypothesis, title },
+        node: {
+          ...payload.node,
+          name: title,
+          ...(evaluationScopeId ? { evaluationScopeId } : {}),
+          interpretation: evaluationRun.proposal.rationale,
+          authorship: 'agent',
+          reviewState: 'confirmed',
+        },
+      }
       const persist = (target: ProjectSnapshot) => {
         const merged = mergeEvaluationAgentMemory(target, namedPayload)
         return window.sequenceIntelligence!.projects.save({ projectId: target.id, expectedRevision: target.revision, failureHypotheses: merged.failureHypotheses, evaluationNodes: merged.evaluationNodes, evidenceRecords: merged.evidenceRecords })

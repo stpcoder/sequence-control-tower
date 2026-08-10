@@ -68,7 +68,7 @@ describe('ProjectStore', () => {
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [
         { id: 'base', name: 'baseline', purpose: 'screening' as const, dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
-        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', name: 'DQ9 RT', purpose: 'reproduction' as const, dimensions: { dq: 9, testMode: 'VPERI' }, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
+        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', evaluationScopeId: attached.folders[0].rootId, name: 'DQ9 RT', purpose: 'reproduction' as const, dimensions: { dq: 9, testMode: 'VPERI' }, interpretation: 'DQ9에서 동일 조건 재평가도 실패했습니다.', authorship: 'agent' as const, reviewState: 'confirmed' as const, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
       ],
       evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
     }

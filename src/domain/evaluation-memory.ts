@@ -5,6 +5,8 @@
 export type EvaluationStatus = "pass" | "fail" | "inconclusive" | "running";
 export type AssessmentOrigin = "engineer-confirmed" | "ai-proposed";
 export type EvaluationPurpose = "screening" | "improvement" | "reproduction" | "characterization" | "verification";
+export type EvaluationAuthorship = "automatic" | "agent" | "engineer";
+export type EvaluationReviewState = "proposed" | "confirmed";
 
 export interface EvaluationDimensions {
   skew?: string;
@@ -61,11 +63,18 @@ export interface EvaluationNode {
   hypothesisId?: string;
   parentId?: string;
   branchId?: string;
+  /** Connected project root. One root normally represents one evaluation folder. */
+  evaluationScopeId?: string;
   name: string;
   /** Why the evaluation was run, kept separate from its PASS/FAIL outcome. */
   purpose?: EvaluationPurpose;
   dimensions: EvaluationDimensions;
   status?: EvaluationStatus;
+  /** Qualitative engineering description authored by Agent or an engineer. */
+  interpretation?: string;
+  /** Creation source and review state are kept separately for clear provenance. */
+  authorship?: EvaluationAuthorship;
+  reviewState?: EvaluationReviewState;
   sequenceSignature?: string;
   attemptNo?: number;
   /** The previous failed evaluation node repeated with the same sample and sequence. */
@@ -187,7 +196,7 @@ export function inferEvaluationTrends(memory: EvaluationMemory): DominanceFindin
 export interface EvaluationExportRow {
   projectId: string; projectName: string; product: string; projectSkew: string; customer: string; targetDevice: string; densityGb: string; nominalVoltage: string; program: string; phase: string;
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
-  nodeId: string; parentNodeId: string; branchId: string; nodeName: string; nodePurpose: string; nodeStatus: string; sequenceSignature: string; attemptNo: string; retestOf: string;
+  nodeId: string; parentNodeId: string; branchId: string; evaluationScopeId: string; nodeName: string; nodePurpose: string; nodeStatus: string; interpretation: string; authorship: string; reviewState: string; sequenceSignature: string; attemptNo: string; retestOf: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
   skew: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; bl: string; dq: string; channel: string; subChannel: string; rank: string; bank: string; bankGroup: string; row: string; column: string;
   pattern: string; frequencyMHz: string; temperatureC: string; vdd: string; timingSkewPs: string; testMode: string;
@@ -206,7 +215,7 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
     return {
       projectId: memory.project.id, projectName: memory.project.name, product: text(memory.project.product), projectSkew: text(memory.project.skew), customer: text(memory.project.customer), targetDevice: text(memory.project.targetDevice), densityGb: text(memory.project.densityGb), nominalVoltage: text(memory.project.nominalVoltage), program: text(memory.project.program), phase: text(memory.project.phase),
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
-      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf),
+      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), evaluationScopeId: text(node.evaluationScopeId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), interpretation: text(node.interpretation), authorship: text(node.authorship), reviewState: text(node.reviewState), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
       skew: text(d.skew), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), subChannel: text(d.subChannel), rank: text(d.rank), bank: text(d.bank), bankGroup: text(d.bankGroup), row: text(d.row), column: text(d.column), pattern: text(d.pattern), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), vdd: text(d.vdd), timingSkewPs: text(d.timingSkewPs), testMode: text(d.testMode),
     };

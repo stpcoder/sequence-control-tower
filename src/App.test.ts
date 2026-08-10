@@ -91,7 +91,7 @@ describe('project UI state updates', () => {
     const rendererFile: WorkbenchFile = { id: 'renderer-row-a', name: row.fileName, artifactId: 'artifact-a', rootId: 'root-a', relativePath: 'VPERI_DQ9.log' }
     const mappedRow = { ...row, id: rendererFile.id }
     expect(availableEvaluationLogs([mappedRow], [rendererFile], projectWithSource)).toEqual([{
-      id: 'durable-source-a', openId: 'renderer-row-a', name: 'VPERI_DQ9.log', result: 'TEST_FAIL', sample: 'S01', temperatureC: 85, mode: 'VPERI', grid: 'DQ9',
+      id: 'durable-source-a', openId: 'renderer-row-a', rootId: 'root-a', folderName: 'root-a', name: 'VPERI_DQ9.log', result: 'TEST_FAIL', sample: 'S01', temperatureC: 85, mode: 'VPERI', grid: 'DQ9',
     }])
     expect(availableEvaluationLogs([mappedRow], [rendererFile], { ...projectWithSource, artifacts: [] })).toEqual([])
   })

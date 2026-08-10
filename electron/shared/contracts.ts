@@ -788,6 +788,8 @@ export interface ProjectOnboardingAnswers {
  * duplicated here rather than importing domain code into preload/main. */
 export type ProjectEvaluationStatus = 'pass' | 'fail' | 'inconclusive' | 'running'
 export type ProjectAssessmentOrigin = 'engineer-confirmed' | 'ai-proposed'
+export type ProjectEvaluationAuthorship = 'automatic' | 'agent' | 'engineer'
+export type ProjectEvaluationReviewState = 'proposed' | 'confirmed'
 export interface ProjectLpddrDevelopmentContext {
   product?: string; skew?: string; program?: string; phase?: string; customer?: string; targetDevice?: string
   densityGb?: number; nominalVoltage?: number
@@ -803,9 +805,10 @@ export interface ProjectFailureHypothesis {
   id: string; title: string; description?: string; origin: ProjectAssessmentOrigin; evaluationNodeIds?: string[]
 }
 export interface ProjectEvaluationNode {
-  id: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string
+  id: string; hypothesisId?: string; parentId?: string; branchId?: string; evaluationScopeId?: string; name: string
   purpose?: 'screening' | 'improvement' | 'reproduction' | 'characterization' | 'verification'
   dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
+  interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState
   sequenceSignature?: string; attemptNo?: number; retestOf?: string
 }
 export interface ProjectEvidenceRecord {
@@ -998,7 +1001,7 @@ export interface EvaluationAgentSessionView {
 export interface EvaluationAgentMemoryPayloadRequest { sessionId: string; projectId: string; hypothesisId: string; nodeId: string; evidenceIdPrefix: string }
 export interface EvaluationAgentMemoryPayloadView {
   hypothesis: { id: string; projectId: string; title: string; description?: string; origin: 'ai-proposed' | 'engineer-confirmed'; evaluationNodeIds?: string[] }
-  node: { id: string; projectId: string; hypothesisId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running' }
+  node: { id: string; projectId: string; hypothesisId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running'; evaluationScopeId?: string; interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState }
   evidence: Array<{ id: string; projectId: string; evaluationNodeId: string; status: 'pass' | 'fail' | 'inconclusive' | 'running'; result?: string; dimensions?: Partial<EvaluationAgentDimensions>; sourceIds: string[]; summary?: string; origin?: 'ai-proposed' | 'engineer-confirmed' }>
 }
 

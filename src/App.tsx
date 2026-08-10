@@ -270,6 +270,7 @@ export function availableEvaluationLogs(records: readonly LogResultRecord[], fil
     const temperature = record.temperature.value === null ? Number.NaN : Number(record.temperature.value)
     return [{
       id: source?.sourceId ?? record.id, openId: file?.id ?? record.id, name: record.fileName, result: record.result,
+      ...(source?.rootId ? { rootId: source.rootId, folderName: project?.folders.find((folder) => folder.rootId === source.rootId)?.displayLabel ?? source.rootId } : {}),
       ...(record.sample.value ? { sample: record.sample.value } : {}),
       ...(Number.isFinite(temperature) ? { temperatureC: temperature } : {}),
       ...(record.mode.value ? { mode: record.mode.value } : {}),
@@ -812,7 +813,14 @@ export default function App() {
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
   ) : activePage === 'history' ? (
-    <EvaluationMemoryView memory={memory} availableLogs={availableLogs} onChange={saveEvaluationMemory} onOpenLog={openFile} onNotify={notify} />
+    <EvaluationMemoryView
+      memory={memory}
+      availableLogs={availableLogs}
+      onChange={saveEvaluationMemory}
+      onOpenLog={openFile}
+      onSelectLog={(id) => setSelectedFileId(id)}
+      onNotify={notify}
+    />
   ) : <SettingsView />
 
   return (

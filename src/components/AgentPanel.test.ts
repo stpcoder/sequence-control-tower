@@ -8,13 +8,14 @@ describe('mergeEvaluationAgentMemory', () => {
   it('adds confirmed hypothesis, node, and source-linked evidence without replacing existing memory', () => {
     const payload: EvaluationAgentMemoryPayloadView = {
       hypothesis: { id: 'h2', projectId: 'p1', title: 'FAIL', origin: 'ai-proposed', evaluationNodeIds: ['n2'] },
-      node: { id: 'n2', projectId: 'p1', hypothesisId: 'h2', name: 'Agent proposal', dimensions: { dq: 8 }, status: 'fail' },
+      node: { id: 'n2', projectId: 'p1', hypothesisId: 'h2', name: 'Agent proposal', dimensions: { dq: 8 }, status: 'fail', evaluationScopeId: 'folder-a', interpretation: 'DQ8에서 반복 실패했으며 추가 전압 비교가 필요합니다.', authorship: 'agent', reviewState: 'confirmed' },
       evidence: [{ id: 'e2', projectId: 'p1', evaluationNodeId: 'n2', status: 'fail', result: 'FAIL', sourceIds: ['s1'], summary: 'bounded summary', origin: 'ai-proposed' }]
     }
     const next = mergeEvaluationAgentMemory({ ...project, failureHypotheses: [{ id: 'h1', title: 'old', origin: 'engineer-confirmed' }] }, payload)
     expect(next.failureHypotheses).toHaveLength(2)
     const retried = mergeEvaluationAgentMemory(next, payload)
     expect(retried.failureHypotheses).toHaveLength(2)
+    expect(retried.evaluationNodes?.[0]).toMatchObject({ evaluationScopeId: 'folder-a', authorship: 'agent', reviewState: 'confirmed', interpretation: expect.stringContaining('추가 전압') })
     expect(retried.evidenceRecords).toEqual([expect.objectContaining({ id: 'e2', sourceIds: ['s1'], note: 'bounded summary', origin: 'engineer-confirmed' })])
   })
 

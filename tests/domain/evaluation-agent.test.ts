@@ -36,6 +36,7 @@ describe('EvaluationAgentRuntime', () => {
     const memory = proposalToEvaluationMemory(accepted, { projectId: 'p1', hypothesisId: 'h1', nodeId: 'n1', evidenceId: (id) => `persisted-${id}` })
     expect(memory?.node.purpose).toBe('screening')
     expect(memory?.node.status).toBe('fail')
+    expect(memory?.node).toMatchObject({ interpretation: 'failure evidence', authorship: 'agent', reviewState: 'proposed' })
     expect(memory?.evidence[0]).toMatchObject({ logRef: 'a', id: 'persisted-search-1' })
   })
 
