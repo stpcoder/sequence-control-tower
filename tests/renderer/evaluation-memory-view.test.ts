@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationFolderFlow, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
+import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationFolderBranches, evaluationFolderFlow, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
 import type { DominanceFinding, EvaluationMemory } from '../../src/domain/evaluation-memory'
 
 const memory: EvaluationMemory = { project: { id: 'p', name: 'LPDDR6', customer: 'Customer A', targetDevice: 'SoC-X', densityGb: 16, nominalVoltage: 1.1 }, hypotheses: [], nodes: [], evidence: [] }
@@ -32,6 +32,30 @@ describe('evaluation memory workflow helpers', () => {
     ])
     expect(evaluationFolderFlow(scoped, groups).map((item) => ({ id: item.group.id, parent: item.parentGroupId }))).toEqual([
       { id: 'root-a', parent: undefined }, { id: 'root-b', parent: 'root-a' },
+    ])
+  })
+  it('renders persisted branch ids as separate horizontal evaluation lanes', () => {
+    const scoped: EvaluationMemory = {
+      ...memory,
+      nodes: [
+        { id: 'n-fail', projectId: 'p', evaluationScopeId: 'root-fail', branchId: 'screen', name: 'screen', purpose: 'screening', dimensions: {}, status: 'fail' },
+        { id: 'n-pass', projectId: 'p', evaluationScopeId: 'root-pass', parentId: 'n-fail', branchId: 'improve', name: 'improve', purpose: 'improvement', dimensions: {}, status: 'pass' },
+        { id: 'n-unknown', projectId: 'p', evaluationScopeId: 'root-unknown', parentId: 'n-fail', branchId: 'pending', name: 'retention', purpose: 'characterization', dimensions: {}, status: 'inconclusive' },
+      ], evidence: [],
+    }
+    const groups = groupEvaluationFolders(scoped, [
+      { id: 'f', rootId: 'root-fail', folderName: 'FAIL 평가', name: 'fail.log' },
+      { id: 'p', rootId: 'root-pass', folderName: 'PASS 평가', name: 'pass.log' },
+      { id: 'u', rootId: 'root-unknown', folderName: '미정 평가', name: 'unknown.log' },
+      { id: 'n', rootId: 'root-new', folderName: '분석 전 평가', name: 'new.log' },
+      { id: 'n2', rootId: 'root-new-2', folderName: '추가 분석 평가', name: 'new-2.log' },
+    ])
+    const branches = evaluationFolderBranches(evaluationFolderFlow(scoped, groups))
+    expect(branches.map((branch) => ({ id: branch.id, label: branch.label, parent: branch.parentGroupId, groups: branch.items.map((item) => item.group.id) }))).toEqual([
+      { id: 'screen', label: '불량 검출 · 재현', parent: undefined, groups: ['root-fail'] },
+      { id: 'improve', label: '개선 조건 검증', parent: 'root-fail', groups: ['root-pass'] },
+      { id: 'pending', label: '불량 경향 확인', parent: 'root-fail', groups: ['root-unknown'] },
+      { id: 'unclassified', label: '추가 분석', parent: undefined, groups: ['root-new', 'root-new-2'] },
     ])
   })
   it('exports concise client context and complete CSV', () => { const next = addEvaluationWithEvidence(memory, { name: 'fail run', status: 'fail', dimensions: { dq: 7 }, logIds: ['log-1'], origin: 'ai-proposed' }); const context = buildEvaluationContextMarkdown(next); expect(context).toContain('fail run'); expect(context).toContain('Customer: Customer A'); expect(context).toContain('Target device: SoC-X'); expect(context).toContain('Density: 16Gb'); expect(context).toContain('Nominal voltage: 1.1V'); expect(context).toContain('log-1'); const csv = evaluationMemoryCsv(next); expect(csv).toContain('customer,targetDevice,densityGb,nominalVoltage,program,phase'); expect(csv).toContain('sourceIds'); expect(csv).toContain('"log-1"') })

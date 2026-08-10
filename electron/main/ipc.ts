@@ -23,6 +23,7 @@ import type {
   EvaluationSaveRecipeInput,
   EvaluationSaveRecipeAndBatchInput,
   EvaluationAgentMemoryPayloadRequest,
+  EvaluationAgentRestoreRequest,
   EvaluationAgentResumeRequest,
   EvaluationAgentStartRequest,
   EvaluationAgentMemoryPayloadView,
@@ -473,6 +474,13 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.evaluationAgentStart, async (event, input) => {
     const session = await evaluationAgent().start(input as EvaluationAgentStartRequest)
     if (event.sender.isDestroyed()) return evaluationAgentView(session)
+    registerEvaluationAgentOwner(event.sender, session.id)
+    return evaluationAgentView(session)
+  })
+  handle(IPC_CHANNELS.evaluationAgentRestore, async (event, input) => {
+    const value = input as EvaluationAgentRestoreRequest
+    const session = await evaluationAgent().restoreLatest(value.projectId, value.evaluationScopeId)
+    if (!session || event.sender.isDestroyed()) return session ? evaluationAgentView(session) : null
     registerEvaluationAgentOwner(event.sender, session.id)
     return evaluationAgentView(session)
   })

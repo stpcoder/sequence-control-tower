@@ -21,6 +21,8 @@ describe('SampleProjectService', () => {
     expect(result.project.evaluationNodes).toHaveLength(4)
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-screen-rt2')).toMatchObject({ retestOf: 'sample-n-screen', attemptNo: 2 })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-vdd-up')).toMatchObject({ parentId: 'sample-n-screen-rt2', purpose: 'improvement' })
+    expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-retention')).toMatchObject({ parentId: 'sample-n-screen', branchId: 'pending', status: 'inconclusive' })
+    expect(new Set(result.project.evaluationNodes?.map((item) => item.branchId))).toEqual(new Set(['vperi-screen', 'vperi-improvement', 'pending']))
     expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(4)
     expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-8975'] })
     const allArtifacts = new Map((await artifacts.list()).map((artifact) => [artifact.id, artifact]))

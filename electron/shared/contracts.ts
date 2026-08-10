@@ -98,6 +98,8 @@ export interface ArtifactSearchInput {
   caseSensitive?: boolean
   /** Number of detailed matches returned. Counts continue after this cap. */
   maxMatches?: number
+  /** Number of matching occurrences to skip before returning detailed matches. */
+  detailOffset?: number
   /** Context lines included before and after each returned match. */
   contextLines?: number
 }
@@ -129,6 +131,7 @@ export interface ArtifactSearchResult {
   caseSensitive: boolean
   matches: ArtifactSearchMatch[]
   totalMatchCount: number
+  detailOffset?: number
   truncated: boolean
   files: ArtifactSearchFileResult[]
 }
@@ -987,6 +990,7 @@ export type EvaluationAgentPublicOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
 export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; timingSkewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
+export interface EvaluationAgentRestoreRequest { projectId: string; evaluationScopeId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
 export interface EvaluationAgentSourceAssessmentView { sourceId: string; outcome: EvaluationAgentPublicOutcome; evidenceIds: string[] }
@@ -1039,6 +1043,7 @@ export interface SequenceIntelligenceApi {
   }
   evaluationAgent: {
     start(input: EvaluationAgentStartRequest): Promise<EvaluationAgentSessionView>
+    restore(input: EvaluationAgentRestoreRequest): Promise<EvaluationAgentSessionView | null>
     get(sessionId: string): Promise<EvaluationAgentSessionView | null>
     resume(input: EvaluationAgentResumeRequest): Promise<EvaluationAgentSessionView>
     memorySavePayload(input: EvaluationAgentMemoryPayloadRequest): Promise<EvaluationAgentMemoryPayloadView | null>
@@ -1085,7 +1090,7 @@ export const IPC_CHANNELS = {
   analysisUpdate: 'analysis:update',
   agentStart: 'agent:start', agentGet: 'agent:get', agentAnswer: 'agent:answer', agentMessage: 'agent:message',
   agentConfirm: 'agent:confirm', agentCancel: 'agent:cancel', agentUpdate: 'agent:update',
-  evaluationAgentStart: 'evaluation-agent:start', evaluationAgentGet: 'evaluation-agent:get',
+  evaluationAgentStart: 'evaluation-agent:start', evaluationAgentRestore: 'evaluation-agent:restore', evaluationAgentGet: 'evaluation-agent:get',
   evaluationAgentResume: 'evaluation-agent:resume', evaluationAgentMemorySavePayload: 'evaluation-agent:memory-save-payload',
   settingsGetLlm: 'settings:get-llm',
   settingsSaveLlm: 'settings:save-llm',

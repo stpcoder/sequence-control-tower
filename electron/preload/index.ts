@@ -20,6 +20,7 @@ import type {
   EvaluationSaveRecipeInput,
   EvaluationSaveRecipeAndBatchInput,
   EvaluationAgentStartRequest,
+  EvaluationAgentRestoreRequest,
   EvaluationAgentResumeRequest,
   EvaluationAgentMemoryPayloadRequest,
   LlmConfigInput,
@@ -99,6 +100,7 @@ const api: SequenceIntelligenceApi = {
   },
   evaluationAgent: {
     start: (input: EvaluationAgentStartRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentStart, input),
+    restore: (input: EvaluationAgentRestoreRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentRestore, input),
     get: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentGet, sessionId),
     resume: (input: EvaluationAgentResumeRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentResume, input),
     memorySavePayload: (input: EvaluationAgentMemoryPayloadRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentMemorySavePayload, input)

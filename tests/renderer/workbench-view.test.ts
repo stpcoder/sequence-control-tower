@@ -541,7 +541,8 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain("onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }}")
     expect(workbenchSource).toContain("onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }}")
     expect(workbenchSource).toContain('// Reset synchronously with result invalidation so an Enter pressed before')
-    expect(workbenchSource).toContain('resetSearchNavigation()\n    setBackendHits([])')
+    expect(workbenchSource).toContain('setCurrentHit(0)\n    searchHasNavigatedRef.current = false')
+    expect(workbenchSource).toContain('detailOffset: backendDetailOffset')
     expect(workbenchSource).toContain('if (event.key === \'Enter\') {\n      event.preventDefault()\n      moveToHit(event.shiftKey ? -1 : 1)')
   })
 

@@ -10,12 +10,17 @@ import type { OpenAiCompatibleClient } from './llm-service'
 import type { ProjectStore } from './project-store'
 
 export interface EvaluationAgentStartInput { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
-export interface EvaluationAgentSessionStore { load?(id: string): Promise<EvaluationAgentSession | null>; save?(session: EvaluationAgentSession): Promise<void> }
+export interface EvaluationAgentStoredSession { projectId: string; evaluationScopeId?: string; sourceIds: string[]; session: EvaluationAgentSession; updatedAt: string }
+export interface EvaluationAgentPersistence {
+  load?(id: string): Promise<EvaluationAgentStoredSession | null>
+  latest?(projectId: string, evaluationScopeId?: string): Promise<EvaluationAgentStoredSession | null>
+  save?(record: EvaluationAgentStoredSession): Promise<void>
+}
 export interface EvaluationAgentServiceDeps {
   artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'> & Partial<Pick<ArtifactService, 'inspectStages'>>
   projects: Pick<ProjectStore, 'get'>
   llm: Pick<OpenAiCompatibleClient, 'complete'>
-  sessions?: EvaluationAgentSessionStore
+  sessions?: EvaluationAgentPersistence
   id?: () => string
 }
 
@@ -71,6 +76,7 @@ export class EvaluationAgentService {
   private readonly runners = new Map<string, Promise<void>>()
   /** Internal provenance binding; never serialized into renderer session views. */
   private readonly projectIds = new Map<string, string>()
+  private readonly evaluationScopeIds = new Map<string, string | undefined>()
   private readonly id: () => string
   constructor(private readonly deps: EvaluationAgentServiceDeps) { this.id = deps.id ?? randomUUID }
 
@@ -80,6 +86,8 @@ export class EvaluationAgentService {
     const project = await this.project(input.projectId)
     const sources = await this.authorize(project, input.sourceIds)
     const id = this.id(); this.sourceMaps.set(id, sources); this.projectIds.set(id, project.id)
+    const roots = [...new Set(sources.map((source) => source.rootId))]
+    this.evaluationScopeIds.set(id, roots.length === 1 ? roots[0] : undefined)
     const runtime = this.runtime(sources)
     const session = await runtime.prepare(id)
     // Intent/issue are deliberately transcript labels only; neither can alter tool authority.
@@ -89,8 +97,20 @@ export class EvaluationAgentService {
     return session
   }
 
+  /** Restores only a still-authorized project/folder session after renderer or app restart. */
+  async restoreLatest(projectId: string, evaluationScopeId?: string): Promise<EvaluationAgentSession | null> {
+    const record = await this.deps.sessions?.latest?.(safe(projectId), safe(evaluationScopeId) || undefined) ?? null
+    if (!record) return null
+    return this.hydrate(record, safe(evaluationScopeId) || undefined)
+  }
+
   async resume(sessionId: string, input?: { answer?: string; confirm?: 'accept' | 'reject' }): Promise<EvaluationAgentSession> {
-    const id = safe(sessionId); let session = this.sessions.get(id) ?? await this.deps.sessions?.load?.(id) ?? null
+    const id = safe(sessionId)
+    let session = this.sessions.get(id) ?? null
+    if (!session) {
+      const record = await this.deps.sessions?.load?.(id) ?? null
+      session = record ? await this.hydrate(record) : null
+    }
     if (!session) throw new Error('evaluation agent session not found')
     const sources = this.sourceMaps.get(id)
     if (!sources) throw new Error('evaluation agent source scope is unavailable; start a new session')
@@ -109,7 +129,28 @@ export class EvaluationAgentService {
     return proposalToEvaluationMemory(session, input)
   }
 
-  private async remember(session: EvaluationAgentSession): Promise<EvaluationAgentSession> { this.sessions.set(session.id, session); await this.deps.sessions?.save?.(session); return session }
+  private async remember(session: EvaluationAgentSession): Promise<EvaluationAgentSession> {
+    this.sessions.set(session.id, session)
+    const projectId = this.projectIds.get(session.id)
+    const sources = this.sourceMaps.get(session.id)
+    if (projectId && sources) {
+      await this.deps.sessions?.save?.({ projectId, evaluationScopeId: this.evaluationScopeIds.get(session.id), sourceIds: sources.map((source) => source.sourceId), session, updatedAt: new Date().toISOString() })
+    }
+    return session
+  }
+  private async hydrate(record: EvaluationAgentStoredSession, requiredScopeId?: string): Promise<EvaluationAgentSession> {
+    const project = await this.project(record.projectId)
+    const sources = await this.authorize(project, record.sourceIds)
+    const scopeIds = [...new Set(sources.map((source) => source.rootId))]
+    const scopeId = record.evaluationScopeId ?? (scopeIds.length === 1 ? scopeIds[0] : undefined)
+    if (requiredScopeId && scopeId !== requiredScopeId) throw new Error('evaluation agent source scope mismatch')
+    if (scopeId && sources.some((source) => source.rootId !== scopeId)) throw new Error('evaluation agent source scope mismatch')
+    this.sessions.set(record.session.id, record.session)
+    this.sourceMaps.set(record.session.id, sources)
+    this.projectIds.set(record.session.id, project.id)
+    this.evaluationScopeIds.set(record.session.id, scopeId)
+    return record.session
+  }
   private schedule(id: string, runtime: EvaluationAgentRuntime): void {
     const previous = this.runners.get(id)
     if (previous) {

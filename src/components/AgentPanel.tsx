@@ -67,6 +67,10 @@ export function evaluationProposalTitle(proposal: EvaluationAgentSessionView['pr
   return `${lead.join(' · ') || proposal.outcome} 경향`
 }
 
+export function evaluationAgentRecordPrefix(projectId: string, sessionId: string): string {
+  return `ea-${projectId}-${sessionId}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120)
+}
+
 export function agentEvaluationPurposeLabel(purpose: NonNullable<NonNullable<EvaluationAgentSessionView['proposal']>['purpose']>): string {
   return {
     screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현',
@@ -241,6 +245,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const [savedMessage, setSavedMessage] = useState('')
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const handledEvaluationLaunch = useRef<string | null>(null)
+  const restoredEvaluationScope = useRef('')
   const activeRunId = useRef<string | null>(null)
   const projectRef = useRef<ProjectSnapshot | null>(project)
   projectRef.current = project
@@ -279,6 +284,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setError('')
     setSavedMessage('')
     setMentionedSourceIds([])
+    restoredEvaluationScope.current = ''
   }, [projectKey])
 
   useEffect(() => {
@@ -295,7 +301,25 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     setError('')
     setSavedMessage('')
     setMentionedSourceIds((current) => current.filter((sourceId) => project?.artifacts.some((source) => source.sourceId === sourceId)))
+    restoredEvaluationScope.current = ''
   }, [projectScopeKey])
+
+  useEffect(() => {
+    const api = window.sequenceIntelligence?.evaluationAgent
+    if (!api || !open || !project || !evaluationScopeId || evaluationRun || evaluationStarting) return undefined
+    const restoreKey = `${project.id}\u0000${evaluationScopeId}`
+    if (restoredEvaluationScope.current === restoreKey) return undefined
+    restoredEvaluationScope.current = restoreKey
+    let active = true
+    void api.restore({ projectId: project.id, evaluationScopeId }).then((session) => {
+      if (!active || !session || projectScopeKeyRef.current !== projectScopeKey) return
+      const savedNodeId = `${evaluationAgentRecordPrefix(project.id, session.id)}-n`
+      if (session.status === 'completed' && project.evaluationNodes?.some((node) => node.id === savedNodeId)) return
+      setEvaluationRunScopeId(evaluationScopeId)
+      setEvaluationRun(session)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [evaluationRun, evaluationScopeId, evaluationStarting, open, project, projectScopeKey])
 
   useEffect(() => {
     const api = window.sequenceIntelligence?.evaluationAgent
@@ -508,7 +532,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     try {
       const completed = evaluationRun.status === 'completed' ? evaluationRun : await window.sequenceIntelligence.evaluationAgent.resume({ sessionId: evaluationRun.id, confirm: 'accept' })
       setEvaluationRun(completed)
-      const prefix = `ea-${project.id}-${evaluationRun.id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120)
+      const prefix = evaluationAgentRecordPrefix(project.id, evaluationRun.id)
       const payload = await window.sequenceIntelligence.evaluationAgent.memorySavePayload({ sessionId: evaluationRun.id, projectId: project.id, hypothesisId: `${prefix}-h`, nodeId: `${prefix}-n`, evidenceIdPrefix: `${prefix}-e` })
       if (!payload) throw new Error('저장할 제안이 없습니다.')
       // A slow LLM may complete after another same-project write. Always save

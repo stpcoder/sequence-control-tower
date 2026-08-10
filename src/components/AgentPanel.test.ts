@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentEvaluationPurposeLabel, agentEvaluationSources, evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage } from './AgentPanel'
+import { agentEvaluationPurposeLabel, agentEvaluationSources, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage } from './AgentPanel'
 import type { EvaluationAgentMemoryPayloadView, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
@@ -25,6 +25,7 @@ describe('mergeEvaluationAgentMemory', () => {
     expect(proposalDecisionResult('UNKNOWN')).toBeNull()
     expect(evaluationDimensionSummary({ skew: 'SS', channel: 0, subChannel: 1, bank: 5 })).toEqual(['SKEW SS', 'CH 0', 'Sub CH 1', 'Bank 5'])
     expect(agentEvaluationPurposeLabel('characterization')).toBe('불량 경향 파악')
+    expect(evaluationAgentRecordPrefix('project/one', 'session:1')).toBe('ea-projectone-session1')
   })
 
   it('never applies one project-level outcome to several logs without per-source evidence', () => {

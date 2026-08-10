@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EvaluationAgentService } from './evaluation-agent-service'
+import { EvaluationAgentService, type EvaluationAgentStoredSession } from './evaluation-agent-service'
 import type { ProjectSnapshot } from '../shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'p', revision: 1, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [{ sourceId: 's1', rootId: 'r', artifactId: 'a1', relativePath: 'LPDDR_BL16_DQ8_CH0_TEMP85C_VDD1.1_DIAG.log' }], equipmentProfiles: [], templatePins: [], exportPresets: [] }
@@ -8,7 +8,7 @@ function setup(actions: string[], selectedProject: ProjectSnapshot = project) {
   const service = new EvaluationAgentService({
     projects: { get: async (id) => id === 'p1' ? selectedProject : null },
     artifacts: { list: async () => [{ id: 'a1', sha256: 'x', size: 10, extension: '.log', originalNames: ['x'], importedAt: '', lastSeenAt: '', importCount: 1 }], inspectStages: async () => ({ sources: [{ sourceId: 's1', artifactId: 'a1', stages: [{ stage: 'training', status: 'pass', evidenceCount: 1 }, { stage: 'test', status: 'fail', evidenceCount: 2 }] }] }), search: async (input) => { searches.push(input.maxMatches ?? 0); return { query: input.query, mode: 'literal', caseSensitive: false, matches: [{ artifactId: 'a1', fileName: 'x', lineNumber: 2, columnStart: 1, columnEnd: 4, lineText: 'FAIL token=secret /Users/private/log', lineTruncated: false, before: [], after: [] }], totalMatchCount: 1, truncated: false, files: [] } }, lineWindow: async (input) => { windows.push(input.lineCount ?? 0); return { artifactId: 'a1', startLine: 1, lines: Array.from({ length: input.lineCount ?? 0 }, (_, n) => ({ lineNumber: n + 1, text: n === 23 ? '/absolute/path/key=abc' : `line ${n}`, truncated: false })), hasMoreBefore: false, hasMoreAfter: true } } },
-    llm: { complete: async (prompt) => { prompts.push(prompt); return { content: actions[i++] ?? '{"action":"complete"}', model: 'fake' } } }, sessions: { save: async (session) => { saved.push(session.id) } }, id: () => 'session-1'
+    llm: { complete: async (prompt) => { prompts.push(prompt); return { content: actions[i++] ?? '{"action":"complete"}', model: 'fake' } } }, sessions: { save: async (record) => { saved.push(record.session.id) } }, id: () => 'session-1'
   })
   return { service, prompts, windows, searches, saved }
 }
@@ -75,5 +75,34 @@ describe('EvaluationAgentService', () => {
     expect(service.get(started.id)?.context.lastProviderState).toBe('waiting for provider')
     release({ content: '{"action":"complete"}', model: 'slow' })
     await waitForStatus(service, started.id, 'completed')
+  })
+
+  it('restores a question session only after re-authorizing its project folder sources', async () => {
+    let stored: EvaluationAgentStoredSession | null = null
+    const artifacts = {
+      list: async () => [{ id: 'a1', sha256: 'x', size: 10, extension: '.log', originalNames: ['x'], importedAt: '', lastSeenAt: '', importCount: 1 }],
+      search: async () => ({ query: '', mode: 'literal' as const, caseSensitive: false, matches: [], totalMatchCount: 0, truncated: false, files: [] }),
+      lineWindow: async () => ({ artifactId: 'a1', startLine: 1, lines: [], hasMoreBefore: false, hasMoreAfter: false }),
+    }
+    const first = new EvaluationAgentService({
+      projects: { get: async () => project }, artifacts,
+      llm: { complete: async () => ({ content: '{"action":"ask","dimension":"testMode","impact":"high","question":"mode?"}', model: 'fake' }) },
+      sessions: { save: async (record) => { stored = structuredClone(record) } }, id: () => 'restorable',
+    })
+    await first.start({ projectId: 'p1', sourceIds: ['s1'] })
+    await waitForStatus(first, 'restorable', 'waiting_question')
+    for (let attempt = 0; attempt < 50 && (stored as EvaluationAgentStoredSession | null)?.session.status !== 'waiting_question'; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect((stored as EvaluationAgentStoredSession | null)?.session.status).toBe('waiting_question')
+    const reopened = new EvaluationAgentService({
+      projects: { get: async () => project }, artifacts,
+      llm: { complete: async () => ({ content: '{"action":"propose","outcome":"PASS","rationale":"confirmed"}', model: 'fake' }) },
+      sessions: { latest: async () => stored, load: async () => stored },
+    })
+    const restored = await reopened.restoreLatest('p1', 'r')
+    expect(restored).toMatchObject({ id: 'restorable', status: 'waiting_question' })
+    await reopened.resume('restorable', { answer: 'HDIAG' })
+    expect(await waitForStatus(reopened, 'restorable', 'waiting_confirmation')).toMatchObject({ proposal: { outcome: 'PASS' } })
   })
 })

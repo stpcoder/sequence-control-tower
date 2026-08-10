@@ -50,6 +50,13 @@ export interface EvaluationFolderFlowItem {
   parentGroupId?: string
 }
 
+export interface EvaluationFolderBranch {
+  id: string
+  label: string
+  items: EvaluationFolderFlowItem[]
+  parentGroupId?: string
+}
+
 const purposeLabel: Record<EvaluationPurpose, string> = {
   screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현', characterization: '불량 경향 파악', verification: '개선 효과 검증',
 }
@@ -160,6 +167,42 @@ export function evaluationFolderFlow(memory: EvaluationMemory, groups: readonly 
   return ordered
 }
 
+function evaluationBranchLabel(items: readonly EvaluationFolderFlowItem[]): string {
+  const purposes = new Set(items.flatMap((item) => item.node?.purpose ? [item.node.purpose] : []))
+  if (purposes.has('screening') || purposes.has('reproduction')) return '불량 검출 · 재현'
+  if (purposes.has('improvement') || purposes.has('verification')) return '개선 조건 검증'
+  if (purposes.has('characterization')) return '불량 경향 확인'
+  return '추가 분석'
+}
+
+/** Turns persisted branch IDs into horizontal lanes without changing folder=node identity. */
+export function evaluationFolderBranches(flow: readonly EvaluationFolderFlowItem[]): EvaluationFolderBranch[] {
+  const branches = new Map<string, EvaluationFolderBranch>()
+  const branchByGroup = new Map(flow.map((item) => [
+    item.group.id,
+    item.node?.branchId?.trim() || 'unclassified',
+  ]))
+  flow.forEach((item) => {
+    const branchId = branchByGroup.get(item.group.id)!
+    const current = branches.get(branchId) ?? { id: branchId, label: '', items: [] }
+    current.items.push(item)
+    branches.set(branchId, current)
+  })
+  const ordered = [...branches.values()].map((branch) => {
+    const parentGroupId = branch.items
+      .map((item) => item.parentGroupId)
+      .find((groupId) => groupId && branchByGroup.get(groupId) !== branch.id)
+    return { ...branch, label: evaluationBranchLabel(branch.items), ...(parentGroupId ? { parentGroupId } : {}) }
+  })
+  const lanePriority = (branch: EvaluationFolderBranch): number => {
+    if (branch.label === '불량 검출 · 재현') return 0
+    if (branch.label === '개선 조건 검증') return 1
+    if (branch.label === '불량 경향 확인') return 2
+    return 3
+  }
+  return ordered.sort((left, right) => lanePriority(left) - lanePriority(right))
+}
+
 function csvCell(value: unknown) { return `"${String(value ?? '').replaceAll('"', '""')}"` }
 export function evaluationMemoryCsv(memory: EvaluationMemory): string {
   const evidenceById = new Map(memory.evidence.map((record) => [record.id, record]))
@@ -216,6 +259,7 @@ function folderInterpretation(group: EvaluationFolderGroup, trends: ReturnType<t
 export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLog, onSelectLog, onAnalyzeEvaluation, onNotify }: EvaluationMemoryViewProps) {
   const groups = useMemo(() => groupEvaluationFolders(memory, availableLogs), [availableLogs, memory])
   const flow = useMemo(() => evaluationFolderFlow(memory, groups), [groups, memory])
+  const branches = useMemo(() => evaluationFolderBranches(flow), [flow])
   const [selectedGroupId, setSelectedGroupId] = useState<string | undefined>(groups[0]?.id)
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? groups[0]
   const latestNode = selectedGroup?.nodes.at(-1)
@@ -260,8 +304,18 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     <header className="data-view-header evaluation-memory-view__header"><div><h1>평가 이력</h1></div><div className="data-actions evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}><Download size={16} />CSV</button></div></header>
     <details className="evaluation-memory-view__project-context"><summary>제품 조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void save(withProjectConditions(memory, projectDraft))}>저장</button></div></details>
     <section className="evaluation-memory-view__flow" aria-label="프로젝트 평가 흐름">
-      <header><strong>프로젝트 평가 흐름</strong><span>폴더 {flow.length}</span></header>
-      <div>{flow.length ? flow.map((item) => { const state = folderStatus(item.group); const parent = flow.find((candidate) => candidate.group.id === item.parentGroupId); return <div className={`evaluation-memory-view__flow-step ${item.parentGroupId ? 'is-linked' : ''}`} key={item.group.id}><button type="button" className={item.group.id === selectedGroup?.id ? 'is-selected' : ''} onClick={() => selectGroup(item.group)} title={parent ? `${parent.group.label} 다음 평가` : '독립 평가'}><small>{item.node?.purpose ? purposeLabel[item.node.purpose] : '목적 미정'}</small><span className="evaluation-memory-view__flow-node"><i className={`is-${state}`} /></span><b>{item.group.label}</b><em>{item.group.logs.length}개 · {statusLabel[state]}</em></button></div> }) : <p>평가 폴더를 연결하세요.</p>}</div>
+      <header><strong>프로젝트 평가 흐름</strong><span>{branches.length}개 흐름</span></header>
+      <div className="evaluation-memory-view__flow-branches">{branches.length ? branches.map((branch) => {
+        const parent = flow.find((item) => item.group.id === branch.parentGroupId)
+        return <div className={`evaluation-memory-view__flow-branch ${branch.id === 'unclassified' ? 'is-unclassified' : ''}`} key={branch.id}>
+          <div className="evaluation-memory-view__flow-label"><strong>{branch.label}</strong><small>{parent ? `↳ ${parent.group.label}` : `${branch.items.length}개 평가`}</small></div>
+          <div className="evaluation-memory-view__flow-line">{branch.items.map((item) => {
+            const state = folderStatus(item.group)
+            const itemParent = flow.find((candidate) => candidate.group.id === item.parentGroupId)
+            return <div className={`evaluation-memory-view__flow-step ${item.parentGroupId ? 'is-linked' : ''}`} key={item.group.id}><button type="button" className={item.group.id === selectedGroup?.id ? 'is-selected' : ''} onClick={() => selectGroup(item.group)} title={itemParent ? `${itemParent.group.label} 다음 평가` : '독립 평가'}><small>{item.node?.purpose ? purposeLabel[item.node.purpose] : '목적 미정'}</small><span className="evaluation-memory-view__flow-node"><i className={`is-${state}`} /></span><b>{item.group.label}</b><em>{item.group.logs.length}개 · {statusLabel[state]}</em></button></div>
+          })}</div>
+        </div>
+      }) : <p>평가 폴더를 연결하세요.</p>}</div>
     </section>
     <div className="evaluation-memory-view__workspace">
       <main className="evaluation-memory-view__detail">

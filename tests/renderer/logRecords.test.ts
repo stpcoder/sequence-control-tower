@@ -14,6 +14,7 @@ import {
   selectedLogRecords,
   serializeLogRecordsCsv,
   serializeLogRecordsTsv,
+  serializePivotGridCsv,
   previewLogRecordExport,
   sortLogRecords,
   toggleLogRecordSelection,
@@ -54,6 +55,14 @@ describe('renderer log result projection', () => {
     expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows)).toBe(true)
     expect(isPivotSelectionValid('missing-cell', new Set(['pass']), grid, rows)).toBe(false)
     expect(isPivotSelectionValid(cellKey, new Set(['pass']), grid, rows.filter((row) => row.id !== 'pass'))).toBe(false)
+  })
+
+  it('exports the arranged pivot as an Excel-safe n by m CSV', () => {
+    const grid = buildPivotGrid(projectLogRecords(files), { rows: ['sample'], columns: ['temperature'], aggregation: 'count', filters: { query: '', result: 'all', review: 'all' } })
+    const csv = serializePivotGridCsv(grid, 'Sample')
+    expect(csv).toContain('"Sample"')
+    expect(csv).toContain('"85"')
+    expect(csv.split('\r\n')).toHaveLength(grid.rows.length + 1)
   })
 
   it('keeps one source log per row and marks filename metadata as unconfirmed candidates', () => {

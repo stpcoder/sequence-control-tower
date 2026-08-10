@@ -327,6 +327,40 @@ describe('ArtifactService log workbench', () => {
     expect(result.matches).toHaveLength(10)
     expect(result.matches.every((item) => item.before.length <= 5 && item.after.length <= 5)).toBe(true)
     expect(result.truncated).toBe(true)
+
+    const deepPage = await service.search({
+      artifactIds: [imported.artifacts[0].id],
+      query: 'needle',
+      maxMatches: 10,
+      detailOffset: 500,
+      contextLines: 0,
+    })
+    expect(deepPage.totalMatchCount).toBe(50_000)
+    expect(deepPage.matches).toHaveLength(10)
+    expect(deepPage.matches[0]).toMatchObject({ lineNumber: 51, columnStart: 1 })
+  })
+
+  it('pages detailed matches without changing the complete count', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    await writeFile(join(source, 'paged.log'), Array.from({ length: 12 }, (_, index) => `needle ${index + 1}`).join('\n'), 'utf8')
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+
+    const page = await service.search({
+      artifactIds: [imported.artifacts[0].id],
+      query: 'needle',
+      maxMatches: 4,
+      detailOffset: 4,
+      contextLines: 0,
+    })
+
+    expect(page.totalMatchCount).toBe(12)
+    expect(page.detailOffset).toBe(4)
+    expect(page.matches.map((item) => item.lineNumber)).toEqual([5, 6, 7, 8])
+    expect(page.truncated).toBe(true)
   })
 
   it('rejects invalid regular expressions before reading artifacts', async () => {

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { AnalysisService } from './analysis-service'
 import { AgentService } from './agent-service'
 import { EvaluationAgentService } from './evaluation-agent-service'
+import { EvaluationAgentSessionStore } from './evaluation-agent-session-store'
 import { buildMacMenuTemplate, rendererCommandForDesktopShortcut } from './app-menu'
 import { ArtifactService } from './artifact-service'
 import { EvaluationStore } from './evaluation-store'
@@ -128,7 +129,8 @@ async function bootstrap(): Promise<void> {
     })
   })
   const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
-  const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm })
+  const evaluationAgentSessions = new EvaluationAgentSessionStore(dataRoot)
+  const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm, sessions: evaluationAgentSessions })
   const nativeAgentStore = new NativeAgentStore(dataRoot)
   await Promise.all([
     artifacts.initialize(),
@@ -137,6 +139,7 @@ async function bootstrap(): Promise<void> {
     llmConfig.initialize(),
     wiki.initialize(),
     analysis.initialize(),
+    evaluationAgentSessions.initialize(),
     nativeAgentStore.initialize()
   ])
   const nativeTools = new LpddrAgentToolService({ artifacts, projects, agentStore: nativeAgentStore })

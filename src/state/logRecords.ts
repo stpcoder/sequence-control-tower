@@ -897,6 +897,16 @@ export function normalizedExportCell(value: unknown): string {
   return safeSpreadsheetCell(value).replace(/[\t\r\n]+/g, ' ')
 }
 
+/** Exports the visible n×m pivot exactly as arranged on screen. */
+export function serializePivotGridCsv(grid: PivotGrid, rowHeader = '세로 / 가로'): string {
+  const escape = (value: unknown) => `"${normalizedExportCell(value).replace(/"/g, '""')}"`
+  const rows: unknown[][] = [
+    [rowHeader, ...grid.columns.map((column) => column.label)],
+    ...grid.rows.map((row, rowIndex) => [row.label, ...grid.cells[rowIndex].map((cell) => cell.value)]),
+  ]
+  return `\uFEFF${rows.map((row) => row.map(escape).join(',')).join('\r\n')}`
+}
+
 /** The exact logical cell value emitted by either export serializer. */
 export function exportCellValue(row: LogResultRecord, column: LogRecordExportColumn): string {
   return normalizedExportCell(exportRowValues(row)[column])

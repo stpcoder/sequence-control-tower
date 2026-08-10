@@ -7,6 +7,7 @@ import {
   filterLogRecords,
   isPivotSelectionValid,
   RESULT_LABEL_KO,
+  serializePivotGridCsv,
   type LogResultRecord,
   type LogRecordFilters,
   type PivotAggregation,
@@ -67,6 +68,15 @@ const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
 ]
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
+
+function downloadPivotCsv(contents: string) {
+  const anchor = document.createElement('a')
+  const url = URL.createObjectURL(new Blob([contents], { type: 'text/csv;charset=utf-8' }))
+  anchor.href = url
+  anchor.download = 'analysis-grid.csv'
+  anchor.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
 
 const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
   fail: 'Fail 3종',
@@ -213,7 +223,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }
 
   return <div className="data-view patterns-view">
-    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar"><button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Download size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</div></header>
+    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar"><button onClick={() => downloadPivotCsv(serializePivotGridCsv(grid, rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ') || '전체'))} disabled={!grid.rows.length}><Download size={16} />표 CSV</button><button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Download size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</div></header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}

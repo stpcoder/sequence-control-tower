@@ -293,7 +293,7 @@ function displayLine(line: string, anchor: number): { text: string; truncated: b
 function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'caseSensitive'>): {
   mode: 'literal' | 'regex'
   caseSensitive: boolean
-  find(line: string, detailLimit: number): {
+  find(line: string, detailLimit: number, detailOffset?: number): {
     count: number
     details: Array<{ start: number; end: number }>
     first?: { start: number; end: number }
@@ -311,7 +311,7 @@ function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'case
     return {
       mode,
       caseSensitive,
-      find(line, detailLimit) {
+      find(line, detailLimit, detailOffset = 0) {
         const haystack = caseSensitive ? line : line.toLocaleLowerCase()
         const details: Array<{ start: number; end: number }> = []
         let count = 0
@@ -326,7 +326,7 @@ function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'case
           const occurrence = { start, end: start + needle.length }
           first ??= occurrence
           last = occurrence
-          if (details.length < detailLimit) details.push(occurrence)
+          if (count > detailOffset && details.length < detailLimit) details.push(occurrence)
           offset = start + Math.max(needle.length, 1)
         }
         return { count, details, first, last }
@@ -352,7 +352,7 @@ function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'case
   return {
     mode,
     caseSensitive,
-    find(line, detailLimit) {
+    find(line, detailLimit, detailOffset = 0) {
       expression.lastIndex = 0
       const details: Array<{ start: number; end: number }> = []
       let count = 0
@@ -366,7 +366,7 @@ function compileSearch(input: Pick<ArtifactSearchInput, 'query' | 'mode' | 'case
         const occurrence = { start: match.index, end: match.index + match[0].length }
         first ??= occurrence
         last = occurrence
-        if (details.length < detailLimit) details.push(occurrence)
+        if (count > detailOffset && details.length < detailLimit) details.push(occurrence)
       }
       return { count, details, first, last }
     }
@@ -718,6 +718,10 @@ export class ArtifactService {
     const contextLines = Number.isFinite(requestedContext)
       ? Math.min(Math.max(Math.floor(requestedContext), 0), 5)
       : 2
+    const requestedOffset = Number(input.detailOffset)
+    const detailOffset = Number.isFinite(requestedOffset)
+      ? Math.min(Math.max(Math.floor(requestedOffset), 0), Number.MAX_SAFE_INTEGER)
+      : 0
     const matches: ArtifactSearchMatch[] = []
     const files: ArtifactSearchFileResult[] = []
     let totalMatchCount = 0
@@ -760,7 +764,11 @@ export class ArtifactService {
             if (item.remaining <= 0) pending.splice(index, 1)
           }
 
-          const lineMatches = compiled.find(line, Math.max(0, maxMatches - matches.length))
+          const lineMatches = compiled.find(
+            line,
+            Math.max(0, maxMatches - matches.length),
+            Math.max(0, detailOffset - totalMatchCount),
+          )
           fileResult.matchCount += lineMatches.count
           totalMatchCount = Math.min(Number.MAX_SAFE_INTEGER, totalMatchCount + lineMatches.count)
           for (const found of lineMatches.details) {
@@ -798,7 +806,8 @@ export class ArtifactService {
       caseSensitive: compiled.caseSensitive,
       matches,
       totalMatchCount,
-      truncated: totalMatchCount > matches.length,
+      detailOffset,
+      truncated: detailOffset > 0 || totalMatchCount > detailOffset + matches.length,
       files
     }
   }

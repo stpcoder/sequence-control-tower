@@ -583,6 +583,7 @@ const DEFAULT_OPTIONS: SearchOptions = {
   wholeWord: false,
   regex: false,
 }
+const SEARCH_DETAIL_PAGE_SIZE = 500
 
 const artifactName = (artifact: ArtifactRecord) => artifact.originalNames[0] ?? `${artifact.id}.log`
 
@@ -1046,6 +1047,7 @@ export function WorkbenchView({
   const [backendHits, setBackendHits] = useState<SearchHit[]>([])
   const [backendCounts, setBackendCounts] = useState<Record<string, number>>({})
   const [backendTotal, setBackendTotal] = useState(0)
+  const [backendDetailOffset, setBackendDetailOffset] = useState(0)
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [lineWindows, setLineWindows] = useState<Record<string, LoadedLineWindow>>({})
@@ -1085,6 +1087,7 @@ export function WorkbenchView({
   const searchHasNavigatedRef = useRef(false)
   const pendingSearchDirectionRef = useRef<1 | -1 | null>(null)
   const observationTimer = useRef<number | undefined>(undefined)
+  const observationPersistTimer = useRef<number | undefined>(undefined)
   const searchRequest = useRef(0)
   const mountedRef = useRef(false)
   const lineWindowGenerations = useRef(new Map<string, number>())
@@ -1246,7 +1249,7 @@ export function WorkbenchView({
   const searchFiles = useMemo(() => resolveSearchScopeFiles(searchScope, files, activeFileId, openFileIds), [activeFileId, files, openFileIds, searchScope])
   const searchFileIdsKey = useMemo(() => searchFiles.map((file) => file.id).join('\u0000'), [searchFiles])
   const memoryHits = useMemo(() => collectHits(searchFiles, query, options), [options, query, searchFiles])
-  const hits = useMemo(() => [...memoryHits, ...backendHits], [backendHits, memoryHits])
+  const hits = useMemo(() => backendDetailOffset > 0 ? backendHits : [...memoryHits, ...backendHits], [backendDetailOffset, backendHits, memoryHits])
   const activeHit = hits[currentHit]
   const activeHitKey = activeHit ? searchHitKey(activeHit) : ''
   activeHitKeyRef.current = searchOpen ? activeHitKey : ''
@@ -1273,6 +1276,9 @@ export function WorkbenchView({
     setWorkflowPurposes({})
   }, [projectId])
   const searchTotal = memoryHits.length + backendTotal
+  const searchPosition = hits.length
+    ? currentHit + 1 + (backendDetailOffset > 0 ? memoryHits.length + backendDetailOffset : 0)
+    : 0
   const activeBatchEvaluation = batchPreview.evaluations?.[activeFile?.id ?? '']
   const activeBatchConflict = batchPreview.conflictIds?.includes(activeFile?.id ?? '') ?? false
   const patternReviewBusy = patternReview.status === 'starting'
@@ -1835,10 +1841,20 @@ export function WorkbenchView({
       if (query.trim() && !invalidPattern) pendingSearchDirectionRef.current = direction
       return
     }
+    if (direction === 1 && searchHasNavigatedRef.current && currentHit === hits.length - 1 && backendDetailOffset + backendHits.length < backendTotal) {
+      pendingSearchDirectionRef.current = 1
+      setBackendDetailOffset((offset) => offset + backendHits.length)
+      return
+    }
+    if (direction === -1 && searchHasNavigatedRef.current && currentHit === 0 && backendDetailOffset > 0) {
+      pendingSearchDirectionRef.current = -1
+      setBackendDetailOffset((offset) => Math.max(0, offset - SEARCH_DETAIL_PAGE_SIZE))
+      return
+    }
     pendingSearchDirectionRef.current = null
     const next = nextSearchHitIndex(currentHit, hits.length, direction, searchHasNavigatedRef.current)
     navigateToSearchHit(next)
-  }, [currentHit, hits.length, invalidPattern, navigateToSearchHit, query])
+  }, [backendDetailOffset, backendHits.length, backendTotal, currentHit, hits.length, invalidPattern, navigateToSearchHit, query])
 
   useEffect(() => {
     const direction = pendingSearchDirectionRef.current
@@ -2076,16 +2092,34 @@ export function WorkbenchView({
   }, [onNotify, projectId])
 
   useEffect(() => {
+    window.clearTimeout(observationPersistTimer.current)
+    observationPersistTimer.current = window.setTimeout(() => {
+      try {
+        const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+        saveLogWorkbenchState(window.localStorage, projectId, {
+          ...stored,
+          observations: Object.values(searchHistory).flat(),
+        })
+      } catch {
+        // Search remains usable when local persistence is unavailable.
+      }
+    }, 900)
+    return () => window.clearTimeout(observationPersistTimer.current)
+  }, [projectId, searchHistory])
+
+  useEffect(() => {
     if (!activeFile?.artifactId || activeWindow) return
     void loadLineWindow(activeFile, 1)
   }, [activeFile, activeWindow, loadLineWindow])
 
   useEffect(() => {
     setInvalidPattern(Boolean(query && !createSearchPattern(query, options)))
+    setBackendDetailOffset(0)
     resetSearchNavigation()
   }, [options, query, resetSearchNavigation])
 
   useEffect(() => {
+    setBackendDetailOffset(0)
     resetSearchNavigation()
   }, [resetSearchNavigation, searchFileIdsKey])
 
@@ -2100,7 +2134,9 @@ export function WorkbenchView({
     searchRequest.current = requestId
     // Reset synchronously with result invalidation so an Enter pressed before
     // the next effect flush still focuses the displayed first hit.
-    resetSearchNavigation()
+    setCurrentHit(0)
+    searchHasNavigatedRef.current = false
+    authorizedHitKeyRef.current = ''
     setBackendHits([])
     setBackendCounts({})
     setBackendTotal(0)
@@ -2121,7 +2157,8 @@ export function WorkbenchView({
         query: compiled.query,
         mode: compiled.mode,
         caseSensitive: options.caseSensitive,
-        maxMatches: 500,
+        maxMatches: SEARCH_DETAIL_PAGE_SIZE,
+        detailOffset: backendDetailOffset,
         contextLines: 2,
       }).then((result) => {
         if (!canApplySearchResult(mountedRef.current, searchRequest.current, requestId)) return
@@ -2153,7 +2190,7 @@ export function WorkbenchView({
           return [source.sourceId]
         })
         const scopedMatchCount = scopedSearchRows.reduce((sum, { file }) => sum + (successfulCounts[file.id] ?? 0), 0)
-        if (api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
+        if (backendDetailOffset === 0 && api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
           const evaluationScopeId = activeSource?.rootId
           void api.nativeAgent.recordSearch({
             projectId, sourceIds: [...new Set(sourceIds)], query: compiled.query, mode: compiled.mode,
@@ -2181,7 +2218,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [activeFile, invalidPattern, options, projectId, projectSources, query, resetSearchNavigation, searchFiles, searchScope])
+  }, [activeFile, backendDetailOffset, invalidPattern, options, projectId, projectSources, query, searchFiles, searchScope])
 
   useEffect(() => {
     if (!query.trim() || invalidPattern || !activeFile || searching) return undefined
@@ -2791,7 +2828,7 @@ export function WorkbenchView({
                   <code className="search-result-line"><b>Ln {hit.line}</b>{hit.excerpt}</code>
                 </button>
               )
-            })}{searchTotal > Math.min(hits.length, 80) ? <div className="search-result-limit">상위 {Math.min(hits.length, 80)}개 표시 · 전체 {searchTotal.toLocaleString()}개</div> : null}</> : searching ? (
+            })}{searchTotal > Math.min(hits.length, 80) ? <div className="search-result-limit">현재 {searchPosition.toLocaleString()}번째 부근 · 전체 {searchTotal.toLocaleString()}개</div> : null}</> : searching ? (
               <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>검색 중…</span></div>
             ) : (
               <div className="empty-search"><Search size={22} /><span>검색어를 입력하세요.</span></div>
@@ -2853,7 +2890,7 @@ export function WorkbenchView({
             </select>
             <input ref={searchInputRef} value={query} onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
             <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
-            <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${hits.length ? currentHit + 1 : 0}/${hits.length}${searchTotal > hits.length ? ` · 총 ${searchTotal}` : ''}` : '0 / 0'}</span>
+            <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${searchPosition}/${searchTotal}` : '0 / 0'}</span>
             <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
             <button onClick={() => moveToHit(1)} disabled={!hits.length} aria-label="다음 검색 결과" title="다음 결과 (Enter)"><ChevronsDown size={18} /></button>
             <button onClick={() => { setSearchOpen(false); setReplaceMode(false); setSideMode('files') }} aria-label="검색 닫기" title="닫기 (Escape)"><X size={18} /></button>
