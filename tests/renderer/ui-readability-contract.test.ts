@@ -117,6 +117,7 @@ describe('UI readability contract', () => {
     expect(results).toContain('FAIL만')
     expect(results).toContain('검토 필요만')
     expect(patterns).not.toContain('className="stage-summary"')
+    expect(patterns).not.toContain('미승인 후보로 계산한 미리보기입니다')
     expect(memory).toContain('반복된 불량 경향')
     expect(memory).toContain('role="separator"')
     expect(memoryStyles).toContain('var(--evaluation-editor-width')

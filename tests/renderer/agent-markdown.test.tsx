@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentMarkdown } from '../../src/components/AgentMarkdown'
+import { AgentMarkdown, normalizeAgentMarkdown } from '../../src/components/AgentMarkdown'
 
 describe('AgentMarkdown', () => {
   it('renders headings, emphasis, code and single-column list semantics safely', () => {
@@ -20,5 +20,15 @@ describe('AgentMarkdown', () => {
     expect(markup).toContain('<del>추정</del>')
     expect(markup).toContain('<pre>')
     expect(markup).toContain('target="_blank"')
+  })
+
+  it('renders italic examples and separators from escaped gateway responses', () => {
+    const transported = '```markdown\\n*예: VDD 1.315V 개선 확인 노드(sample-n-vdd-up)에 대해 4개의 PASS 로그 근거 확인.*\\n\\n---\\n\\n다음 평가\\n```'
+    const normalized = normalizeAgentMarkdown(transported)
+    const markup = renderToStaticMarkup(<AgentMarkdown>{transported}</AgentMarkdown>)
+    expect(normalized).not.toContain('```markdown')
+    expect(markup).toContain('<em>예: VDD 1.315V 개선 확인 노드(sample-n-vdd-up)에 대해 4개의 PASS 로그 근거 확인.</em>')
+    expect(markup).toContain('<hr')
+    expect(markup).not.toContain('\\n')
   })
 })
