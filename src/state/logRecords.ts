@@ -3,6 +3,8 @@ import type { MetadataFieldDefinition } from '../domain/workbench/records'
 import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 import { detectSocFilenameContext } from '../domain/soc-profile'
+import { extractLpddrFilenameDimensions } from '../domain/lpddr-filename-dimensions'
+import type { ProjectEvaluationDimensions } from '../../electron/shared/contracts'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
@@ -51,6 +53,8 @@ export interface LogResultRecord {
   temperature: CandidateValue
   mode: CandidateValue
   grid: CandidateValue
+  /** Deterministic filename dimensions shared with the native LPDDR Agent. */
+  dimensions?: ProjectEvaluationDimensions
   result: ResultLabel
   resultSource: ResultSource
   /** Independent checkpoints found in one log; a log may contain several passes before its final result. */
@@ -67,7 +71,9 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run'
+export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'frequencyMHz' | 'vdd' | 'pattern'
+  | 'dq' | 'bl' | 'channel' | 'subChannel' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'timingSkewPs'
+export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
 export type PivotAggregation = 'count' | 'fail_count' | 'evidence_count'
 
 /** Configuration for the results pivot. Axis lists are intentionally bounded to two dimensions. */
@@ -129,7 +135,7 @@ export interface PatternMatrixRow {
 export type TrendOutcome = 'fail' | 'reboot' | 'halt' | 'majority'
 
 export interface AggregateTrend {
-  dimension: PatternAxis | 'folder' | 'run'
+  dimension: PivotDimension
   value: string
   outcome: TrendOutcome
   count: number
@@ -147,20 +153,28 @@ const TREND_MIN_TOTAL = 5
 const TREND_MIN_COUNT = 3
 const TREND_MIN_SHARE = 0.6
 const TREND_MIN_LIFT = 0.2
-const TREND_DIMENSIONS: readonly (PatternAxis | 'folder' | 'run')[] = [
+const TREND_DIMENSIONS: readonly PivotDimension[] = [
   'sample',
   'temperature',
   'mode',
-  'grid',
-  'folder',
-  'run',
+  'skew',
+  'frequencyMHz',
+  'vdd',
+  'pattern',
+  'dq',
+  'bl',
+  'channel',
+  'subChannel',
+  'bankGroup',
+  'bank',
+  'row',
+  'column',
 ]
 const TREND_OUTCOMES: readonly TrendOutcome[] = ['fail', 'reboot', 'halt', 'majority']
 
-function trendValue(row: LogResultRecord, dimension: PatternAxis | 'folder' | 'run'): string | null {
-  if (dimension === 'folder') return row.folder || null
-  if (dimension === 'run') return row.run || null
-  return row[dimension].value
+function trendValue(row: LogResultRecord, dimension: PivotDimension): string | null {
+  const value = pivotDimensionValue(row, dimension)
+  return value === PIVOT_UNKNOWN ? null : value
 }
 
 function hasTrendOutcome(row: LogResultRecord, outcome: TrendOutcome): boolean {
@@ -502,9 +516,15 @@ export function projectLogRecords(
   const folderLabels = rootAwareFolderLabels(files)
   return files.map((file) => {
     const approvals = metadataApprovals[file.id] ?? {}
-    const sample = applyMetadataApproval(metadataCandidate(file, 'sample'), approvals.sample)
-    const temperature = applyMetadataApproval(metadataCandidate(file, 'temperature'), approvals.temperature)
-    const mode = applyMetadataApproval(metadataCandidate(file, 'mode'), approvals.mode)
+    const filenameDimensions = extractLpddrFilenameDimensions(file.relativePath ?? file.name)
+    const sampleCandidate = metadataCandidate(file, 'sample')
+    const temperatureCandidate = metadataCandidate(file, 'temperature')
+    const modeCandidate = filenameDimensions.testMode !== undefined && /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)/i.test(file.name)
+      ? { value: String(filenameDimensions.testMode), state: 'candidate' as const }
+      : metadataCandidate(file, 'mode')
+    const sample = applyMetadataApproval(sampleCandidate, approvals.sample)
+    const temperature = applyMetadataApproval(temperatureCandidate, approvals.temperature)
+    const mode = applyMetadataApproval(modeCandidate, approvals.mode)
     const grid = applyMetadataApproval(metadataCandidate(file, 'grid'), approvals.grid)
     const inferred = inferResultCandidate(file)
     const stageResults = stageResultsBySource[file.id] ?? inferStageResults(file)
@@ -529,6 +549,12 @@ export function projectLogRecords(
       temperature,
       mode,
       grid,
+      dimensions: {
+        ...filenameDimensions,
+        ...(sample.value !== null ? { sample: sample.value } : {}),
+        ...(temperature.value !== null && Number.isFinite(Number(temperature.value)) ? { temperatureC: Number(temperature.value) } : {}),
+        ...(mode.value !== null ? { testMode: mode.value } : {}),
+      },
       result,
       resultSource,
       stageResults,
@@ -550,7 +576,7 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
     if (filters.result !== 'all' && row.result !== filters.result) return false
     if (filters.review !== 'all' && row.review !== filters.review) return false
     if (!query) return true
-    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, row.result, row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]} ${item.status}`).join(' ')]
+    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, ...Object.values(row.dimensions ?? {}), row.result, row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]} ${item.status}`).join(' ')]
       .some((value) => normalized(value).includes(query))
   })
 }
@@ -562,7 +588,14 @@ function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension): s
     return row[dimension].value ?? PIVOT_UNKNOWN
   }
   if (dimension === 'run') return row.run ?? PIVOT_UNKNOWN
-  return String(row[dimension] || PIVOT_UNKNOWN)
+  if (row.dimensions && dimension in row.dimensions) {
+    const value = row.dimensions[dimension as keyof ProjectEvaluationDimensions]
+    return value === undefined || value === null || value === '' ? PIVOT_UNKNOWN : String(value)
+  }
+  if (dimension === 'result') return row.result
+  if (dimension === 'review') return row.review
+  if (dimension === 'folder') return row.folder || PIVOT_UNKNOWN
+  return PIVOT_UNKNOWN
 }
 
 function pivotKey(values: readonly string[]): string {
@@ -736,8 +769,12 @@ const BASE_EXPORT_HEADER = [
   'stage_results',
 ] as const
 
+export const ENGINEERING_EXPORT_COLUMNS = [
+  'skew', 'lot', 'material', 'die', 'soc_model', 'frequency_mhz', 'vdd', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
+  'rank', 'bank_group', 'bank', 'row', 'column', 'timing_skew_ps',
+] as const
 export const EVIDENCE_EXPORT_COLUMNS = ['evidence_count', 'selected_evidence_count'] as const
-export type LogRecordExportColumn = typeof BASE_EXPORT_HEADER[number] | typeof EVIDENCE_EXPORT_COLUMNS[number]
+export type LogRecordExportColumn = typeof BASE_EXPORT_HEADER[number] | typeof ENGINEERING_EXPORT_COLUMNS[number] | typeof EVIDENCE_EXPORT_COLUMNS[number]
 
 /** Shared default: metadata and result columns only; evidence is opt-in as a group. */
 export const DEFAULT_EXPORT_COLUMNS: readonly LogRecordExportColumn[] = [...BASE_EXPORT_HEADER]
@@ -746,28 +783,47 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   key: LogRecordExportColumn
   label: string
   group?: 'evidence'
+  section: 'identity' | 'condition' | 'result' | 'evidence'
 }> = [
-  { key: 'source_id', label: 'Source ID' },
-  { key: 'artifact_id', label: 'Artifact ID' },
-  { key: 'source_key', label: 'Source key' },
-  { key: 'relative_path', label: 'Relative path' },
-  { key: 'run', label: 'Run' },
-  { key: 'filename', label: '파일명' },
-  { key: 'folder', label: '폴더' },
-  { key: 'sample_value', label: 'Sample 값' },
-  { key: 'sample_state', label: 'Sample 상태' },
-  { key: 'temperature_value', label: '온도 값' },
-  { key: 'temperature_state', label: '온도 상태' },
-  { key: 'mode_value', label: 'Mode 값' },
-  { key: 'mode_state', label: 'Mode 상태' },
-  { key: 'grid_value', label: 'Grid 값' },
-  { key: 'grid_state', label: 'Grid 상태' },
-  { key: 'result', label: '결과' },
-  { key: 'result_source', label: '결과 출처' },
-  { key: 'review', label: '검토' },
-  { key: 'stage_results', label: '단계별 결과' },
-  { key: 'evidence_count', label: '근거 수', group: 'evidence' },
-  { key: 'selected_evidence_count', label: '선택 근거 수', group: 'evidence' },
+  { key: 'source_id', label: 'Source ID', section: 'identity' },
+  { key: 'artifact_id', label: 'Artifact ID', section: 'identity' },
+  { key: 'source_key', label: 'Source key', section: 'identity' },
+  { key: 'relative_path', label: '상대 경로', section: 'identity' },
+  { key: 'run', label: 'Run', section: 'identity' },
+  { key: 'filename', label: '파일명', section: 'identity' },
+  { key: 'folder', label: '폴더', section: 'identity' },
+  { key: 'skew', label: 'SKEW', section: 'condition' },
+  { key: 'lot', label: 'Lot', section: 'condition' },
+  { key: 'material', label: '자재', section: 'condition' },
+  { key: 'die', label: 'Die', section: 'condition' },
+  { key: 'soc_model', label: 'SoC', section: 'condition' },
+  { key: 'sample_value', label: 'Sample', section: 'condition' },
+  { key: 'temperature_value', label: '온도 (°C)', section: 'condition' },
+  { key: 'mode_value', label: 'Test Mode', section: 'condition' },
+  { key: 'frequency_mhz', label: '주파수 (MHz)', section: 'condition' },
+  { key: 'vdd', label: 'VDD (V)', section: 'condition' },
+  { key: 'pattern', label: 'Pattern', section: 'condition' },
+  { key: 'dq', label: 'DQ', section: 'condition' },
+  { key: 'bl', label: 'BL', section: 'condition' },
+  { key: 'channel', label: 'Channel', section: 'condition' },
+  { key: 'sub_channel', label: 'Sub Channel', section: 'condition' },
+  { key: 'rank', label: 'Rank', section: 'condition' },
+  { key: 'bank_group', label: 'Bank Group', section: 'condition' },
+  { key: 'bank', label: 'Bank', section: 'condition' },
+  { key: 'row', label: 'Row', section: 'condition' },
+  { key: 'column', label: 'Column', section: 'condition' },
+  { key: 'timing_skew_ps', label: 'Timing SKEW (ps)', section: 'condition' },
+  { key: 'grid_value', label: 'Grid', section: 'condition' },
+  { key: 'sample_state', label: 'Sample 상태', section: 'result' },
+  { key: 'temperature_state', label: '온도 상태', section: 'result' },
+  { key: 'mode_state', label: 'Mode 상태', section: 'result' },
+  { key: 'grid_state', label: 'Grid 상태', section: 'result' },
+  { key: 'result', label: '결과', section: 'result' },
+  { key: 'result_source', label: '결과 출처', section: 'result' },
+  { key: 'review', label: '검토', section: 'result' },
+  { key: 'stage_results', label: '단계별 결과', section: 'result' },
+  { key: 'evidence_count', label: '근거 수', group: 'evidence', section: 'evidence' },
+  { key: 'selected_evidence_count', label: '선택 근거 수', group: 'evidence', section: 'evidence' },
 ]
 
 export function normalizeExportColumns(columns: readonly LogRecordExportColumn[]): LogRecordExportColumn[] {
@@ -784,6 +840,24 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     run: row.run ?? runFromPath(row.relativePath) ?? runFromPath(row.fileName) ?? '',
     filename: pathBaseName(row.fileName),
     folder: safeExportPath(row.folder),
+    skew: row.dimensions?.skew ?? '',
+    lot: row.dimensions?.lot ?? '',
+    material: row.dimensions?.material ?? '',
+    die: row.dimensions?.die ?? '',
+    soc_model: row.dimensions?.socModel ?? '',
+    frequency_mhz: row.dimensions?.frequencyMHz ?? '',
+    vdd: row.dimensions?.vdd ?? '',
+    pattern: row.dimensions?.pattern ?? '',
+    dq: row.dimensions?.dq ?? '',
+    bl: row.dimensions?.bl ?? '',
+    channel: row.dimensions?.channel ?? '',
+    sub_channel: row.dimensions?.subChannel ?? '',
+    rank: row.dimensions?.rank ?? '',
+    bank_group: row.dimensions?.bankGroup ?? '',
+    bank: row.dimensions?.bank ?? '',
+    row: row.dimensions?.row ?? '',
+    column: row.dimensions?.column ?? '',
+    timing_skew_ps: row.dimensions?.timingSkewPs ?? '',
     sample_value: row.sample.value ?? '',
     sample_state: row.sample.state,
     temperature_value: row.temperature.value ?? '',
@@ -870,6 +944,7 @@ export function initLogRecordExportPreview(
     temperature: Object.freeze({ ...row.temperature }),
     mode: Object.freeze({ ...row.mode }),
     grid: Object.freeze({ ...row.grid }),
+    ...(row.dimensions ? { dimensions: Object.freeze({ ...row.dimensions }) } : {}),
   }))
   return Object.freeze({
     phase: 'init' as const,

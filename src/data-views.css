@@ -191,8 +191,8 @@
   top: calc(100% + 7px);
   right: 0;
   display: grid;
-  width: 246px;
-  max-height: 430px;
+  width: 286px;
+  max-height: min(520px, calc(100vh - 120px));
   gap: 2px;
   padding: 10px;
   overflow: auto;
@@ -219,6 +219,28 @@
 .export-column-option small {
   color: var(--data-dim);
   font-size: 11px;
+}
+
+.export-column-section {
+  display: grid;
+  gap: 1px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--data-line-soft);
+}
+
+.export-column-section h3 {
+  margin: 0;
+  padding: 4px;
+  color: var(--data-dim);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.export-identity-section > summary {
+  padding: 8px 4px;
+  color: var(--data-muted);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .export-column-option {
@@ -267,6 +289,13 @@
   font-size: 12px;
   font-weight: 650;
   text-align: left;
+}
+
+.export-columns-footer {
+  position: sticky;
+  bottom: -10px;
+  padding: 5px 0 0;
+  background: var(--sct-sidebar);
 }
 
 .data-filter-bar {

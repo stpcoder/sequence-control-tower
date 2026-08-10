@@ -936,6 +936,7 @@ export interface EngineerWorkflowReviewView {
 }
 export interface NativeAgentCompleteEvaluationInput {
   projectId: string; sourceId: string; result: EngineerWorkflowResult; evidenceLines?: number[]
+  workflowSelection?: Array<Pick<EngineerWorkflowCheckView, 'query' | 'mode' | 'caseSensitive'>>
 }
 export type NativeAgentCompleteEvaluationResult =
   | { kind: 'review'; review: EngineerWorkflowReviewView; attempt: EngineerEvaluationAttemptView }

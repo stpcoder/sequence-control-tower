@@ -20,7 +20,12 @@ export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
   resultFilter: 'all', folderFilter: 'all', failOnly: false, unknownMetadataOnly: false,
 }
 
-const DIMENSIONS = new Set<PivotDimension>(['sample', 'temperature', 'mode', 'grid', 'result', 'review', 'folder', 'run'])
+const DIMENSIONS = new Set<PivotDimension>([
+  'sample', 'temperature', 'mode', 'skew', 'frequencyMHz', 'vdd', 'pattern',
+  'lot', 'material', 'die', 'socModel',
+  'dq', 'bl', 'channel', 'subChannel', 'rank', 'bankGroup', 'bank', 'row', 'column', 'timingSkewPs',
+  'grid', 'result', 'review', 'folder', 'run',
+])
 const AGGREGATIONS = new Set<PivotAggregation>(['count', 'fail_count', 'evidence_count'])
 const RESULTS = new Set<ResultLabel>(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
 

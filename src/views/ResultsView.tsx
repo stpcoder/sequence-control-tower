@@ -75,6 +75,10 @@ export function createResultsCsvBlob(
 }
 
 const PREVIEW_LABELS = new Map(EXPORT_COLUMN_DEFINITIONS.map((column) => [column.key, column.label]))
+const EXPORT_SECTIONS = [
+  { key: 'condition' as const, label: '평가 조건' },
+  { key: 'result' as const, label: '판정' },
+] as const
 
 const METADATA_LABEL: Record<PatternAxis, string> = { sample: 'Sample', temperature: '온도', mode: 'Mode', grid: 'Grid' }
 
@@ -133,6 +137,12 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   )
   const hasFilters = Boolean(query || result !== 'all' || review !== 'all' || stage !== 'all' || stageStatus !== 'all' || preset)
   const evidenceColumnsSelected = EVIDENCE_EXPORT_COLUMNS.every((column) => selectedExportColumnKeys.has(column))
+  const toggleExportColumn = (key: LogRecordExportColumn, checked: boolean) => setSelectedExportColumnKeys((current) => {
+    const next = new Set(current)
+    if (checked) next.add(key)
+    else next.delete(key)
+    return new Set(normalizeExportColumns([...next]))
+  })
   const editingRow = editingCell ? records.find((item) => item.id === editingCell.rowId) : undefined
 
   const updateSort = (key: LogRecordSortKey) => {
@@ -273,27 +283,18 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
           <details className="export-columns">
             <summary><SlidersHorizontal size={15} />열 선택<ChevronDown size={14} /></summary>
             <div className="export-columns-menu">
-              <div className="export-columns-heading"><strong>내보낼 열</strong><span>CSV · TSV 공통</span></div>
+              <div className="export-columns-heading"><strong>내보낼 열</strong></div>
               <label className="export-column-option export-column-group">
                 <input type="checkbox" checked={evidenceColumnsSelected} onChange={(event) => toggleEvidenceColumns(event.target.checked)} />
-                <span><strong>근거</strong><small>evidence_count · selected_evidence_count</small></span>
+                <span><strong>근거 수 포함</strong></span>
               </label>
-              {EXPORT_COLUMN_DEFINITIONS.filter((column) => !column.group).map((column) => (
-                <label className="export-column-option" key={column.key}>
-                  <input
-                    type="checkbox"
-                    checked={selectedExportColumnKeys.has(column.key)}
-                    onChange={(event) => setSelectedExportColumnKeys((current) => {
-                      const next = new Set(current)
-                      if (event.target.checked) next.add(column.key)
-                      else next.delete(column.key)
-                      return new Set(normalizeExportColumns([...next]))
-                    })}
-                  />
-                  <span>{column.label}</span>
-                </label>
-              ))}
-              <button className="export-columns-save" type="button" onClick={() => void saveExportLayout()} disabled={!project || savingExportLayout || !exportColumns.length}>{savingExportLayout ? '저장 중…' : '프로젝트 기본값 저장'}</button>
+              {EXPORT_SECTIONS.map((section) => <section className="export-column-section" key={section.key}><h3>{section.label}</h3>{EXPORT_COLUMN_DEFINITIONS.filter((column) => column.section === section.key).map((column) => (
+                <label className="export-column-option" key={column.key}><input type="checkbox" checked={selectedExportColumnKeys.has(column.key)} onChange={(event) => toggleExportColumn(column.key, event.target.checked)} /><span>{column.label}</span></label>
+              ))}</section>)}
+              <details className="export-identity-section"><summary>파일 정보</summary>{EXPORT_COLUMN_DEFINITIONS.filter((column) => column.section === 'identity').map((column) => (
+                <label className="export-column-option" key={column.key}><input type="checkbox" checked={selectedExportColumnKeys.has(column.key)} onChange={(event) => toggleExportColumn(column.key, event.target.checked)} /><span>{column.label}</span></label>
+              ))}</details>
+              <div className="export-columns-footer"><button className="export-columns-save" type="button" onClick={() => void saveExportLayout()} disabled={!project || savingExportLayout || !exportColumns.length}>{savingExportLayout ? '저장 중…' : '기본값 저장'}</button></div>
             </div>
           </details>
           <button onClick={() => beginExport('tsv')} disabled={!exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>

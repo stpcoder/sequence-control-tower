@@ -124,6 +124,27 @@ describe('NativeAgentStore', () => {
     expect(memory.checks.some((item) => item.query === 'obsolete marker')).toBe(false)
   })
 
+  it('starts the review with only checks selected in the result rule', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-workflow-rule-selection-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    const base = Date.now() - 10_000
+    const entries = [['POST_PBL', 2], ['LK_ENTER', 0], ['LK', 2], ['@PASS', 2]] as const
+    for (const [index, [query, count]] of entries.entries()) {
+      await store.recordSearch({
+        projectId: 'p', sourceIds: ['s1'], activeSourceId: 's1', query, mode: 'literal', caseSensitive: false,
+        scope: 'current', matchCount: count, activeMatchCount: count, observedAt: new Date(base + index * 1_000).toISOString(),
+      })
+    }
+    const completed = await store.completeEvaluation({
+      projectId: 'p', sourceId: 's1', result: 'PASS',
+      workflowSelection: ['POST_PBL', 'LK', '@PASS'].map((query) => ({ query, mode: 'literal' as const, caseSensitive: false })),
+    })
+    expect(completed.kind).toBe('review')
+    if (completed.kind !== 'review') throw new Error('review expected')
+    expect(completed.review.checks.map((check) => check.query)).toEqual(['POST_PBL', 'LK', '@PASS'])
+  })
+
   it('reuses only confirmed procedures and knowledge across projects', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-workflow-reuse-'))
     const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())

@@ -2349,6 +2349,11 @@ export function WorkbenchView({
       if (api?.nativeAgent && source && projectId !== 'log-workbench') {
         void api.nativeAgent.completeEvaluation({
           projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
+          ...(selectedRecipeObservations.length >= 2 ? { workflowSelection: selectedRecipeObservations.map((observation) => ({
+            query: observation.query,
+            mode: observation.matcherKind,
+            caseSensitive: observation.caseSensitive,
+          })) } : {}),
         }).then((completed) => {
           if (completed.attempt?.relation === 'retest') onNotify?.(`RT 연결됨 · 동일 Sample/Sequence의 이전 FAIL 평가 #${completed.attempt.attemptNo - 1}`, 'success')
           else if (completed.attempt?.relation === 'unresolved-retest') onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
@@ -3076,7 +3081,7 @@ export function WorkbenchView({
         {recipeManagerOpen ? (
           <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecipeManagerOpen(false) }}>
             <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
-              <div className="recipe-manager-heading"><div><strong id="recipe-manager-title">저장 규칙</strong><span>활성 {activeRecipeRevisions.length}개 · 최신 revision만 표시</span></div><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
+              <div className="recipe-manager-heading"><div><strong id="recipe-manager-title">저장 규칙</strong></div><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
               <div className="recipe-manager-list">
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
                   <section className="recipe-manager-item" key={recipe.recipeId}>

@@ -44,7 +44,7 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   if (/(콘솔|console|명령|command|입력|prompt|sleep|uefi\s*>|lk2?\s*>)/i.test(text)) calls.push({ name: 'console_transcript_scan' })
   if (/(pass|fail|불량|판정|reboot|halt|training|fast)/i.test(text)) calls.push({ name: 'pass_fail_scan' })
   if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
-  if (/(경향|집중|불량률|dq|bl|channel|채널|sub.?channel|rank|bank|row|column|pattern|패턴|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
+  if (/(경향|집중|불량률|dq|bl|channel|채널|sub.?channel|rank|bank|row|column|pattern|패턴|frequency|주파수|temperature|온도|vdd|전압|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
   if (/(과거|이전|유사|lpddr5|다음|추천|어떻게|시도)/i.test(text)) calls.push({ name: 'similar_case_search', args: { query: content.slice(0, 240) } })
   if (/(무슨 평가|어떤 평가|평가 목적|검색 기록|ctrl.?f|정규식|regex|찾아봤|분석 절차|boot|uefi|training|retest|\brt\b)/i.test(text)) {
     calls.push({ name: 'engineer_workflow_memory_get' })
@@ -64,6 +64,27 @@ export function userFacingAgentContent(value: string): string {
   const content = safe(value)
   const visible = content.split('\n').filter((line) => !/(?:Maximum Steps|최대 분석 단계|tool budget|도구 예산)/i.test(line)).join('\n').trim()
   return visible || '확보한 근거 안에서 분석을 마쳤습니다. 미확인 항목은 확정하지 않았습니다.'
+}
+
+export function hasConfirmedWorkflowEvidence(results: readonly LpddrAgentToolResult[]): boolean {
+  return results.some((result) => {
+    if (result.name === 'engineer_workflow_memory_get') {
+      return ((result.data as { confirmed?: unknown[] } | undefined)?.confirmed?.length ?? 0) > 0
+    }
+    if (result.name === 'engineer_workflow_apply') {
+      return ((result.data as { rows?: unknown[] } | undefined)?.rows?.length ?? 0) > 0
+    }
+    return false
+  })
+}
+
+/** A model may summarize raw Ctrl-F history, but it cannot promote that history to an engineer-confirmed workflow. */
+export function enforceWorkflowProvenance(content: string, confirmedWorkflow: boolean): string {
+  const visible = userFacingAgentContent(content)
+  if (confirmedWorkflow) return visible
+  return visible
+    .replace(/엔지니어가\s*확정한\s*(검색\s*)?순서/gi, '최근 검색에서 관찰된 미확정 $1순서')
+    .replace(/엔지니어\s*확정\s*(검색\s*)?절차/gi, '미확정 $1절차')
 }
 
 export class NativeAgentService {
@@ -203,10 +224,11 @@ export class NativeAgentService {
       this.emit(next); return this.public(next)
     }
     const sourceIds = await this.authorize(session.projectId, requestedSourceIds)
+    const project = await this.deps.projects.get(session.projectId)
     let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
     next = await this.deps.store.update(session.id, (draft) => {
       draft.status = 'queued'; draft.failure = undefined; draft.lastRequest = { content: message, sourceIds }
-      if (draft.messages.filter((item) => item.role === 'user').length === 1) draft.title = message.slice(0, 48)
+      if (draft.messages.filter((item) => item.role === 'user').length === 1 || (project && draft.title === `${project.name} 분석`)) draft.title = message.slice(0, 48)
     })
     this.emit(next)
     queueMicrotask(() => { void this.run(next.id) })
@@ -262,6 +284,9 @@ export class NativeAgentService {
       sequenceSignature: context.sequenceSignature,
       explicitRetest: context.explicitRetest,
       filenameAttemptNo: context.filenameAttemptNo,
+      workflowSelection: input.workflowSelection?.slice(0, 20).map((check) => ({
+        query: safe(check.query, 500), mode: check.mode === 'regex' ? 'regex' as const : 'literal' as const, caseSensitive: check.caseSensitive === true,
+      })).filter((check) => check.query.length >= 2),
     })
   }
 
@@ -356,11 +381,15 @@ export class NativeAgentService {
     }
     const conversation = session.messages.filter((item) => item.role === 'user' || item.role === 'assistant').slice(-12).map((item) => `${item.role}: ${item.content}`).join('\n')
     const evidence = results.map((item) => ({ tool: item.name, summary: item.summary, data: item.data, sourceIds: item.evidenceSourceIds })).slice(0, 6)
-    const prompt = `${NATIVE_AGENT_SYSTEM_PROMPT}\n\n대화 기록:\n${conversation.slice(-12_000)}\n\n도구 실행 결과(JSON):\n${JSON.stringify(evidence).slice(0, 24_000)}\n\n현재 사용자 요청에 답하십시오. tool output에 없는 수치나 인과관계를 만들지 마십시오.`
+    const confirmedWorkflow = hasConfirmedWorkflowEvidence(results)
+    const workflowInstruction = confirmedWorkflow
+      ? '확정 분석 절차 상태: 있음. 도구가 반환한 절차만 엔지니어 확정으로 표현하십시오.'
+      : '확정 분석 절차 상태: 없음. Ctrl-F 기록이나 대화에 순서가 보여도 엔지니어 확정이라고 쓰지 말고 “최근 검색에서 관찰된 미확정 순서”로 표시하십시오.'
+    const prompt = `${NATIVE_AGENT_SYSTEM_PROMPT}\n\n대화 기록:\n${conversation.slice(-12_000)}\n\n도구 실행 결과(JSON):\n${JSON.stringify(evidence).slice(0, 24_000)}\n\n${workflowInstruction}\n현재 사용자 요청에 답하십시오. tool output에 없는 수치나 인과관계를 만들지 마십시오.`
     try {
       const completed = await this.deps.llm.complete(prompt, signal, () => undefined)
       session = await this.deps.store.appendMessage(session.id, {
-        role: 'assistant', content: userFacingAgentContent(completed.content),
+        role: 'assistant', content: enforceWorkflowProvenance(completed.content, confirmedWorkflow),
         evidenceSourceIds: [...new Set(results.flatMap((item) => item.evidenceSourceIds))]
       })
       session = await this.deps.store.setStatus(session.id, 'idle'); this.emit(session)

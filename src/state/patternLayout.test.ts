@@ -23,6 +23,12 @@ describe('pattern layout persistence', () => {
     expect(preset.options).toMatchObject({ rowAxes: ['mode', 'run'], failOnly: true })
   })
 
+  it('retains DRAM and operating-condition axes', () => {
+    expect(normalizePatternLayout({
+      rowAxes: ['frequencyMHz', 'vdd'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_count',
+    })).toMatchObject({ rowAxes: ['frequencyMHz', 'vdd'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_count' })
+  })
+
   it('keeps the layout preset in a reused project clone plan', () => {
     const source: ProjectSnapshot = {
       schemaVersion: 2, id: 'source', name: 'source', revision: 3, archived: false,

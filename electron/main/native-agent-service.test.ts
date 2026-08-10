@@ -2,10 +2,23 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { NativeAgentService, planLpddrTools } from './native-agent-service'
+import { enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, NativeAgentService, planLpddrTools } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
 
 describe('planLpddrTools', () => {
+  it('routes a standalone frequency or VDD comparison to the deterministic trend tool', () => {
+    expect(planLpddrTools('9600MHz와 8533MHz, VDD별 결과를 비교해줘').map((item) => item.name)).toContain('failure_trends_get')
+  })
+
+  it('never promotes raw Ctrl-F history to an engineer-confirmed workflow', () => {
+    const raw = [{ name: 'engineer_workflow_apply', label: '', summary: '확정된 분석 절차 없음', data: { rows: [] }, evidenceSourceIds: [] }] as never
+    expect(hasConfirmedWorkflowEvidence(raw)).toBe(false)
+    expect(enforceWorkflowProvenance('엔지니어가 확정한 순서 POST_PBL → LK → @PASS', false)).toBe('최근 검색에서 관찰된 미확정 순서 POST_PBL → LK → @PASS')
+    const confirmed = [{ name: 'engineer_workflow_memory_get', label: '', summary: '', data: { confirmed: [{ id: 'w1' }] }, evidenceSourceIds: [] }] as never
+    expect(hasConfirmedWorkflowEvidence(confirmed)).toBe(true)
+    expect(enforceWorkflowProvenance('엔지니어가 확정한 순서 POST_PBL → LK → @PASS', true)).toContain('엔지니어가 확정한 순서')
+  })
+
   it('routes an evaluation-context question to bounded evidence tools', () => {
     const names = planLpddrTools('새 로그의 온도와 VDD, DQ별 불량률을 보고 과거 LPDDR5 유사 사례와 다음 평가를 추천해줘').map((item) => item.name)
     expect(names).toEqual(expect.arrayContaining(['project_context_get', 'project_history_get', 'filename_dimensions_scan', 'pass_fail_scan', 'engineer_workflow_apply', 'failure_trends_get', 'similar_case_search']))

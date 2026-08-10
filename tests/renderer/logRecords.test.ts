@@ -237,6 +237,22 @@ describe('renderer log result projection', () => {
     expect(unknown.cells[0][0]).toEqual({ value: 1, sourceIds: ['unknown'] })
   })
 
+  it('uses the same LPDDR dimensions for Agent analysis, pivots, and export', () => {
+    const engineeringFiles: WorkbenchFile[] = [
+      { id: 'f1', name: 'LPDDR6_SKEW-SS_SMP-01_T85_VDD1p275_F9600_TM-HDIAG_PAT-WR_DQ9_BL16_CH0_SCH1_BG2_BANK5_ROW0x2A_COL0x14_FAIL.log', text: '@FAIL' },
+      { id: 'f2', name: 'LPDDR6_SKEW-SS_SMP-02_T85_VDD1p315_F8533_TM-HDIAG_PAT-PRBS_DQ4_BL8_CH1_SCH0_BG1_BANK2_ROW0x10_COL0x08_PASS.log', text: '@PASS' },
+    ]
+    const rows = projectLogRecords(engineeringFiles)
+    expect(rows[0]).toMatchObject({
+      mode: { value: 'HDIAG' },
+      dimensions: { skew: 'SS', frequencyMHz: 9600, vdd: 1.275, pattern: 'WR', dq: '9', bl: '16', channel: '0', subChannel: '1', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14' },
+    })
+    const grid = buildPivotGrid(rows, { rows: ['frequencyMHz'], columns: ['dq'], aggregation: 'fail_count', filters: { query: '', result: 'all', review: 'all' } })
+    expect(grid.rows.map((row) => row.label)).toEqual(['8533', '9600'])
+    expect(grid.columns.map((column) => column.label)).toEqual(['4', '9'])
+    expect(serializeLogRecordsCsv(rows, ['filename', 'frequency_mhz', 'vdd', 'dq', 'bl', 'channel', 'sub_channel', 'row', 'column'])).toContain('"9600","1.275","9","16","0","1","0x2A","0x14"')
+  })
+
   it('keeps zero-valued fail and evidence pivot rows out of cell source tracing while preserving counts', () => {
     const rows = projectLogRecords([
       { id: 'pass', name: 'pass.log', text: '' },

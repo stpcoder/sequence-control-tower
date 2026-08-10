@@ -12,7 +12,6 @@ import {
   type PivotAggregation,
   type PivotDimension,
   type AggregateTrend,
-  type PatternAxis,
 } from '../state/logRecords'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
@@ -31,15 +30,33 @@ interface PatternsViewProps {
   onNotify: (message: string, tone?: 'success' | 'error' | 'info') => void
 }
 
-const DIMENSIONS: Array<{ value: PivotDimension; label: string }> = [
-  { value: 'sample', label: 'Sample' },
-  { value: 'temperature', label: '온도' },
-  { value: 'mode', label: 'Mode' },
-  { value: 'grid', label: 'Grid' },
-  { value: 'result', label: '결과' },
-  { value: 'review', label: '검토' },
-  { value: 'folder', label: '폴더' },
-  { value: 'run', label: 'Run' },
+const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
+  { value: 'sample', label: 'Sample', group: '평가 조건' },
+  { value: 'temperature', label: '온도 (°C)', group: '평가 조건' },
+  { value: 'mode', label: 'Test Mode', group: '평가 조건' },
+  { value: 'skew', label: 'SKEW', group: '평가 조건' },
+  { value: 'frequencyMHz', label: '주파수 (MHz)', group: '평가 조건' },
+  { value: 'vdd', label: 'VDD (V)', group: '평가 조건' },
+  { value: 'pattern', label: 'Pattern', group: '평가 조건' },
+  { value: 'material', label: '자재', group: '제품' },
+  { value: 'lot', label: 'Lot', group: '제품' },
+  { value: 'die', label: 'Die', group: '제품' },
+  { value: 'socModel', label: 'SoC', group: '제품' },
+  { value: 'dq', label: 'DQ', group: 'DRAM 위치' },
+  { value: 'bl', label: 'BL', group: 'DRAM 위치' },
+  { value: 'channel', label: 'Channel', group: 'DRAM 위치' },
+  { value: 'subChannel', label: 'Sub Channel', group: 'DRAM 위치' },
+  { value: 'rank', label: 'Rank', group: 'DRAM 위치' },
+  { value: 'bankGroup', label: 'Bank Group', group: 'DRAM 위치' },
+  { value: 'bank', label: 'Bank', group: 'DRAM 위치' },
+  { value: 'row', label: 'Row', group: 'DRAM 위치' },
+  { value: 'column', label: 'Column', group: 'DRAM 위치' },
+  { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: 'DRAM 위치' },
+  { value: 'grid', label: 'Grid', group: '관리' },
+  { value: 'result', label: '결과', group: '관리' },
+  { value: 'review', label: '검토', group: '관리' },
+  { value: 'folder', label: '폴더', group: '관리' },
+  { value: 'run', label: 'Run', group: '관리' },
 ]
 
 const DIMENSION_LABEL = Object.fromEntries(DIMENSIONS.map((item) => [item.value, item.label])) as Record<PivotDimension, string>
@@ -68,6 +85,13 @@ function SelectControl({ label, value, onChange, children, testId }: { label: st
 
 function dimensionOptions(selected: readonly PivotDimension[], current: PivotDimension) {
   return DIMENSIONS.filter((item) => item.value === current || !selected.includes(item.value))
+}
+
+function groupedDimensionOptions(selected: readonly PivotDimension[], current: PivotDimension) {
+  const options = dimensionOptions(selected, current)
+  return [...new Set(options.map((item) => item.group))].map((group) => (
+    <optgroup label={group} key={group}>{options.filter((item) => item.group === group).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</optgroup>
+  ))
 }
 
 export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify }: PatternsViewProps) {
@@ -148,8 +172,13 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
   const selectedDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
-  const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => ['sample', 'temperature', 'mode', 'grid', 'run'].includes(dimension)
-    && scopedRecords.every((row) => dimension === 'run' ? !row.run : !row[dimension as PatternAxis].value))
+  const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => scopedRecords.every((row) => {
+    if (dimension === 'run') return !row.run
+    if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') return !row[dimension].value
+    if (dimension === 'result' || dimension === 'review' || dimension === 'folder') return false
+    const value = row.dimensions?.[dimension]
+    return value === undefined || value === null || value === ''
+  }))
   const clearSelection = () => {
     setSelectedSourceIds(null)
     setSelectedCellKey(null)
@@ -197,8 +226,8 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
         <div className="pattern-axis-controls">
-          <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{dimensionOptions(activeDimensions, rowAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, rowAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
-          <div><span>가로</span><SelectControl label="1" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{dimensionOptions(activeDimensions, columnAxes[0]).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl><SelectControl label="2" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{dimensionOptions(activeDimensions, columnAxes[1] as PivotDimension).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
+          <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{groupedDimensionOptions(activeDimensions, rowAxes[0])}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{groupedDimensionOptions(activeDimensions, rowAxes[1] as PivotDimension)}</SelectControl></div>
+          <div><span>가로</span><SelectControl label="1" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{groupedDimensionOptions(activeDimensions, columnAxes[0])}</SelectControl><SelectControl label="2" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{groupedDimensionOptions(activeDimensions, columnAxes[1] as PivotDimension)}</SelectControl></div>
         </div>
         {allSelectedMetadataUnknown ? <p className="pivot-guidance">선택한 축 값이 모두 미확인입니다. 다른 축을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
         <div className="pivot-scroll"><table className="pivot-table"><thead><tr><th>{rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ')}</th>{grid.columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}><th scope="row">{row.label}</th>{grid.columns.map((column, columnIndex) => { const cell = grid.cells[rowIndex][columnIndex]; const cellKey = `${row.key}-${column.key}`; const active = selectedCellKey === cellKey; const selectable = cell.sourceIds.length > 0; const noSourcesLabel = '관련 로그가 없어 선택할 수 없는 셀'; return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} disabled={!selectable} title={selectable ? undefined : noSourcesLabel} aria-label={selectable ? `${cell.value}개 로그 선택` : `${cell.value} ${noSourcesLabel}`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{cell.value}</button></td> })}</tr>)}</tbody></table></div>

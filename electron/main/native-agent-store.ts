@@ -233,6 +233,7 @@ export class NativeAgentStore {
     sequenceSignature?: string
     explicitRetest?: boolean
     filenameAttemptNo?: number
+    workflowSelection?: Array<Pick<EngineerWorkflowCheckView, 'query' | 'mode' | 'caseSensitive'>>
   }): Promise<NativeAgentCompleteEvaluationResult> {
     const projectId = clean(input.projectId, 160)
     const sourceId = clean(input.sourceId, 160)
@@ -259,7 +260,24 @@ export class NativeAgentStore {
         result = { kind: 'review', review: this.review(latestReview), attempt }
         return
       }
-      const candidate = buildEngineerWorkflowCandidate(searches, input.result, input.dimensions)
+      let candidate = buildEngineerWorkflowCandidate(searches, input.result, input.dimensions)
+      if (candidate && input.workflowSelection?.length) {
+        const available = new Map(candidate.checks.map((check) => [
+          `${check.mode}:${check.caseSensitive ? '1' : '0'}:${clean(check.query, 500).toLowerCase()}`,
+          check,
+        ]))
+        const checks = input.workflowSelection.flatMap((selected) => {
+          const key = `${selected.mode}:${selected.caseSensitive ? '1' : '0'}:${clean(selected.query, 500).toLowerCase()}`
+          const match = available.get(key)
+          return match ? [match] : []
+        }).map((check, index) => ({ ...check, order: index + 1 }))
+        candidate = checks.length >= 2 ? {
+          ...candidate,
+          checks,
+          stages: [...new Set(checks.map((check) => check.stage))],
+          signature: engineerWorkflowSignature(checks, input.result),
+        } : null
+      }
       if (!candidate) return
       const fingerprint = createHash('sha256').update(candidate.signature).digest('hex')
       const workflows = database.workflows[projectId] ?? []
