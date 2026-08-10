@@ -48,6 +48,32 @@ describe('planLpddrTools', () => {
     await expect(service.completeEvaluation({ projectId: 'p', sourceId: 'other', result: 'PASS' })).rejects.toThrow('프로젝트 범위')
   })
 
+  it('onboards and retains an Agent session inside one evaluation folder', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-folder-session-')))
+    const execute = vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => ({
+      name: call.name, label: call.name, summary: call.name,
+      data: call.name === 'filename_dimensions_scan' ? { rows: [{ sourceId: 's1', dimensions: { socVendor: 'qualcomm' } }] }
+        : call.name === 'console_transcript_scan' ? { ambiguous: [] }
+          : call.name === 'engineer_workflow_memory_get' ? { confirmed: [] } : {},
+      evidenceSourceIds: sourceIds,
+    }))
+    const scopedProject = {
+      id: 'p', name: 'P', artifacts: [
+        { sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'a.log' },
+        { sourceId: 's2', rootId: 'folder-b', artifactId: 'a2', relativePath: 'b.log' },
+      ],
+    }
+    const service = new NativeAgentService({
+      store, tools: { execute }, projects: { get: vi.fn(async () => scopedProject) }, artifacts: { list: vi.fn(async () => []) },
+      llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    await service.initialize()
+    const session = await service.create('p', undefined, 'folder-a', ['s1'])
+    expect(session.evaluationScopeId).toBe('folder-a')
+    expect(execute.mock.calls.every((call) => JSON.stringify(call[2]) === JSON.stringify(['s1']))).toBe(true)
+    await expect(service.create('p', undefined, 'folder-a', ['s2'])).rejects.toThrow('평가 폴더 로그 범위')
+  })
+
   it('reuses confirmed knowledge only when both project scopes exist', async () => {
     const reuseConfirmedKnowledge = vi.fn(async () => ({ workflows: 2, commandKnowledge: 1, consolePromptRules: 1 }))
     const service = new NativeAgentService({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentEvaluationPurposeLabel, evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage } from './AgentPanel'
+import { agentEvaluationPurposeLabel, agentEvaluationSources, evaluationDimensionSummary, evaluationProposalTitle, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage } from './AgentPanel'
 import type { EvaluationAgentMemoryPayloadView, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
@@ -41,6 +41,21 @@ describe('mergeEvaluationAgentMemory', () => {
       artifacts: [{ sourceId: 's1', rootId: 'r1', artifactId: 'a1', relativePath: 'one.log' }],
     })).toBe(false)
     expect(shouldRetainAgentSession(project, { ...project, id: 'other' })).toBe(false)
+  })
+
+  it('gives the Agent only logs from the selected evaluation folder', () => {
+    const scopedProject = {
+      ...project,
+      artifacts: [
+        { sourceId: 'a-1', rootId: 'folder-a', artifactId: 'artifact-a1', relativePath: 'one.log' },
+        { sourceId: 'a-2', rootId: 'folder-a', artifactId: 'artifact-a2', relativePath: 'two.log' },
+        { sourceId: 'b-1', rootId: 'folder-b', artifactId: 'artifact-b1', relativePath: 'other.log' },
+      ],
+    }
+    const selected = { id: 'row-a', name: 'one.log', artifactId: 'artifact-a1', rootId: 'folder-a', relativePath: 'one.log' }
+    expect(agentEvaluationSources(scopedProject, selected).map((item) => item.sourceId)).toEqual(['a-1', 'a-2'])
+    expect(agentEvaluationSources(scopedProject)).toEqual([])
+    expect(agentEvaluationSources({ ...scopedProject, artifacts: scopedProject.artifacts.slice(0, 2) }).map((item) => item.sourceId)).toEqual(['a-1', 'a-2'])
   })
 
   it('keeps primary actions reachable after bounded onboarding answers', () => {

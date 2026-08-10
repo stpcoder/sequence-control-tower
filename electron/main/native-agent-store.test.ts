@@ -108,6 +108,30 @@ describe('NativeAgentStore', () => {
     expect(await store.workflowMemories('p')).toHaveLength(1)
   })
 
+  it('expands a confirmed Ctrl-F procedure within one evaluation folder but not into another folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-evaluation-folder-memory-'))
+    const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
+    await store.initialize()
+    const search = async (sourceId: string, evaluationScopeId: string, query: string, count: number) => store.recordSearch({
+      projectId: 'p', evaluationScopeId, sourceIds: [sourceId], activeSourceId: sourceId,
+      matchedSourceIds: count ? [sourceId] : [], query, mode: 'literal', caseSensitive: false,
+      scope: 'current', matchCount: count, activeMatchCount: count, observedAt: new Date().toISOString(),
+    })
+    for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('a-1', 'folder-a', query, count)
+    const learned = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-1', result: 'PASS' })
+    if (learned.kind !== 'review') throw new Error('review expected')
+    await store.confirmWorkflow('p', learned.review.id, 'UEFI 이후 테스트 완료 확인')
+
+    for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('a-2', 'folder-a', query, count)
+    await expect(store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-2', result: 'PASS' }))
+      .resolves.toMatchObject({ kind: 'applied', memory: { evaluationScopeId: 'folder-a', appliedCount: 1 } })
+
+    for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('b-1', 'folder-b', query, count)
+    const isolated = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-b', sourceId: 'b-1', result: 'PASS' })
+    expect(isolated.kind).toBe('review')
+    if (isolated.kind === 'review') expect(isolated.review.similarMemoryId).toBeUndefined()
+  })
+
   it('stores only the engineer-selected checks in the exact confirmed order', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-workflow-selection-'))
     const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
@@ -181,6 +205,15 @@ describe('NativeAgentStore', () => {
     expect(second.attempt).toMatchObject({ relation: 'retest', attemptNo: 2, retestOf: first.attempt?.id })
     const unrelated = await store.completeEvaluation({ projectId: 'p', sourceId: 's3', result: 'PASS', dimensions: { sample: 'B' }, sequenceSignature: 'seq:same', explicitRetest: true, filenameAttemptNo: 2 })
     expect(unrelated.attempt).toMatchObject({ relation: 'unresolved-retest', attemptNo: 2 })
+  })
+
+  it('does not link RT attempts across evaluation folders', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-attempt-folder-scope-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-1', result: 'TEST_FAIL', dimensions: { sample: 'A', skew: 'SS' }, sequenceSignature: 'seq:same' })
+    const otherFolder = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-b', sourceId: 'b-1', result: 'PASS', dimensions: { sample: 'A', skew: 'SS' }, sequenceSignature: 'seq:same', explicitRetest: true })
+    expect(otherFolder.attempt).toMatchObject({ evaluationScopeId: 'folder-b', relation: 'unresolved-retest' })
   })
 
   it('persists engineer-confirmed command purpose in SoC scope', async () => {

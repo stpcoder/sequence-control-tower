@@ -864,6 +864,8 @@ export interface NativeAgentMessageView {
 }
 export interface NativeAgentSessionSummary {
   id: string; projectId: string; title: string; backend: NativeAgentBackend
+  /** Attached root folder used as one evaluation context. */
+  evaluationScopeId?: string
   status: NativeAgentSessionStatus; createdAt: string; updatedAt: string
   lastMessage?: string; failure?: string
 }
@@ -874,15 +876,17 @@ export interface NativeAgentBackendStatusView {
   preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
   detail: string
 }
-export interface NativeAgentCreateRequest { projectId: string; title?: string }
-export interface NativeAgentListRequest { projectId: string }
+export interface NativeAgentCreateRequest { projectId: string; title?: string; evaluationScopeId?: string; sourceIds?: string[] }
+export interface NativeAgentListRequest { projectId: string; evaluationScopeId?: string }
 export interface NativeAgentGetRequest { sessionId: string }
 export interface NativeAgentSendRequest { sessionId: string; content: string; sourceIds?: string[] }
 export interface NativeAgentRetryRequest { sessionId: string }
 export interface NativeAgentCancelRequest { sessionId: string }
 export interface NativeAgentSearchEventInput {
   projectId: string; sourceIds: string[]; query: string; mode: ArtifactSearchMode
-  caseSensitive: boolean; scope: 'current' | 'open' | 'project'; matchCount: number
+  caseSensitive: boolean; scope: 'current' | 'open' | 'folder' | 'project'; matchCount: number
+  /** A connected root folder is one evaluation. Search memory never crosses it automatically. */
+  evaluationScopeId?: string
   /** Renderer timestamp captured when this search request began. It keeps
    * completed IPC calls in the same order as the engineer's actions. */
   observedAt?: string
@@ -902,6 +906,7 @@ export interface EngineerWorkflowCheckView {
 }
 export interface EngineerWorkflowMemoryView {
   id: string; projectId: string; name: string; purpose: string
+  evaluationScopeId?: string
   stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]
   result: EngineerWorkflowResult; sourceIds: string[]; evidenceLines: number[]
   dimensions?: Partial<ProjectEvaluationDimensions>
@@ -910,6 +915,7 @@ export interface EngineerWorkflowMemoryView {
 export type EngineerAttemptRelation = 'initial' | 'repeat' | 'retest' | 'unresolved-retest'
 export interface EngineerEvaluationAttemptView {
   id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult; occurredAt: string
+  evaluationScopeId?: string
   dimensions: Partial<ProjectEvaluationDimensions>; sequenceSignature?: string; attemptNo: number
   relation: EngineerAttemptRelation; retestOf?: string
 }
@@ -931,11 +937,13 @@ export type NativeAgentQuestionView =
   | { id: string; kind: 'console-role'; prompt: string; choices: string[]; sourceId: string; lineNumber: number; promptSignature: string; promptKind: string; command: string }
 export interface EngineerWorkflowReviewView {
   id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult
+  evaluationScopeId?: string
   stages: EngineerEvaluationStage[]; checks: EngineerWorkflowCheckView[]; evidenceLines: number[]
   suggestions: string[]; similarMemoryId?: string; state: 'pending' | 'confirmed' | 'dismissed'; createdAt: string
 }
 export interface NativeAgentCompleteEvaluationInput {
   projectId: string; sourceId: string; result: EngineerWorkflowResult; evidenceLines?: number[]
+  evaluationScopeId?: string
   workflowSelection?: Array<Pick<EngineerWorkflowCheckView, 'query' | 'mode' | 'caseSensitive'>>
 }
 export type NativeAgentCompleteEvaluationResult =

@@ -383,17 +383,19 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
   })
 
-  it('resolves current, open-tab, and all-log scopes while excluding closed files', () => {
+  it('resolves current, evaluation-folder, open-tab, and all-log scopes without crossing folders', () => {
     const files: WorkbenchFile[] = [
-      { id: 'current', name: 'current.log' },
-      { id: 'open', name: 'open.log' },
-      { id: 'closed', name: 'closed.log' },
+      { id: 'current', name: 'current.log', rootId: 'evaluation-a' },
+      { id: 'same-folder', name: 'same.log', rootId: 'evaluation-a' },
+      { id: 'other-folder', name: 'other.log', rootId: 'evaluation-b' },
     ]
 
-    expect(resolveSearchScopeFiles('file', files, 'current', ['current', 'open'])).toEqual([files[0]])
-    expect(resolveSearchScopeFiles('open', files, 'current', ['open', 'current'])).toEqual([files[1], files[0]])
-    expect(resolveSearchScopeFiles('open', files, 'current', ['current', 'open'])).not.toContain(files[2])
-    expect(resolveSearchScopeFiles('workspace', files, 'current', ['current', 'open'])).toEqual(files)
+    expect(resolveSearchScopeFiles('file', files, 'current', ['current', 'same-folder'])).toEqual([files[0]])
+    expect(resolveSearchScopeFiles('folder', files, 'current', ['current'])).toEqual([files[0], files[1]])
+    expect(resolveSearchScopeFiles('folder', files, 'current', ['current'])).not.toContain(files[2])
+    expect(resolveSearchScopeFiles('open', files, 'current', ['same-folder', 'current'])).toEqual([files[1], files[0]])
+    expect(resolveSearchScopeFiles('open', files, 'current', ['current', 'same-folder'])).not.toContain(files[2])
+    expect(resolveSearchScopeFiles('workspace', files, 'current', ['current', 'same-folder'])).toEqual(files)
   })
 
   it('rejects obsolete batch generations after overlap, navigation, or unmount', () => {

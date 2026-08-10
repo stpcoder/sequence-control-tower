@@ -116,13 +116,21 @@ export class NativeAgentService {
     }
   }
 
-  async create(projectId: string, title?: string): Promise<NativeAgentSessionView> {
+  async create(projectId: string, title?: string, evaluationScopeId?: string, requestedSourceIds?: string[]): Promise<NativeAgentSessionView> {
     const project = await this.deps.projects.get(safe(projectId, 160))
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
+    const scopeId = safe(evaluationScopeId, 160)
+    const scopeSources = scopeId ? project.artifacts.filter((item) => item.rootId === scopeId) : project.artifacts
+    if (scopeId && !scopeSources.length) throw new Error('평가 폴더를 프로젝트에서 찾을 수 없습니다.')
+    const allowed = new Set(scopeSources.map((item) => item.sourceId))
+    const requested = requestedSourceIds !== undefined
+      ? [...new Set(requestedSourceIds.map((item) => safe(item, 160)).filter(Boolean))]
+      : scopeSources.map((item) => item.sourceId)
+    if (requested.length > 100 || requested.some((item) => !allowed.has(item))) throw new Error('평가 폴더 로그 범위가 올바르지 않습니다.')
     const backend = (await this.deps.opencode.available()) ? 'opencode' : 'internal'
-    let session = await this.deps.store.create(project.id, safe(title, 160) || `${project.name} 분석`, backend)
-    if (project.artifacts.length) {
-      const sourceIds = project.artifacts.slice(0, 100).map((item) => item.sourceId)
+    let session = await this.deps.store.create(project.id, safe(title, 160) || `${project.name} 분석`, backend, scopeId)
+    if (requested.length) {
+      const sourceIds = requested.slice(0, 100)
       try {
         const [filenames, statuses, workflows, boot, consoleScan] = await Promise.all([
           this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
@@ -141,7 +149,7 @@ export class NativeAgentService {
         const question = this.profileQuestion(filenames) ?? this.consoleQuestion(consoleScan) ?? await this.commandQuestion(project.id, filenames)
         if (question) session = await this.deps.store.update(session.id, (draft) => { draft.question = question })
       } catch {
-        session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `프로젝트 로그 ${project.artifacts.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
+        session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `평가 로그 ${sourceIds.length}개가 연결되어 있습니다. 평가 목적을 적으면 조건과 Pass/Fail marker부터 확인하겠습니다.` })
       }
     } else {
       session = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: '프로젝트에 로그를 연결하면 파일명 조건, Pass/Fail marker, 과거 평가 이력을 함께 확인할 수 있습니다.' })
@@ -149,7 +157,7 @@ export class NativeAgentService {
     return this.public(session)
   }
 
-  list(projectId: string): Promise<NativeAgentSessionSummary[]> { return this.deps.store.list(projectId) }
+  list(projectId: string, evaluationScopeId?: string): Promise<NativeAgentSessionSummary[]> { return this.deps.store.list(projectId, evaluationScopeId) }
 
   async get(sessionId: string): Promise<NativeAgentSessionView | null> {
     const session = await this.deps.store.get(sessionId)
@@ -193,7 +201,10 @@ export class NativeAgentService {
       if (rememberedRole) {
         const project = await this.deps.projects.get(session.projectId)
         if (project?.artifacts.length) {
-          const scan = await this.deps.tools.execute(session.projectId, { name: 'console_transcript_scan' }, project.artifacts.slice(0, 100).map((item) => item.sourceId))
+          const sources = session.evaluationScopeId
+            ? project.artifacts.filter((item) => item.rootId === session.evaluationScopeId)
+            : project.artifacts
+          const scan = await this.deps.tools.execute(session.projectId, { name: 'console_transcript_scan' }, sources.slice(0, 100).map((item) => item.sourceId))
           following = this.consoleQuestion(scan)
         }
       }
@@ -223,7 +234,7 @@ export class NativeAgentService {
       next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `${knowledge.command} 목적을 “${knowledge.purpose}”로 저장했습니다. 같은 프로젝트와 SoC 조건에서 다음 분석에 재사용합니다.` })
       this.emit(next); return this.public(next)
     }
-    const sourceIds = await this.authorize(session.projectId, requestedSourceIds)
+    const sourceIds = await this.authorize(session.projectId, requestedSourceIds, session.evaluationScopeId)
     const project = await this.deps.projects.get(session.projectId)
     let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
     next = await this.deps.store.update(session.id, (draft) => {
@@ -262,6 +273,10 @@ export class NativeAgentService {
     if (input.matchedSourceIds?.some((item) => !allowed.has(item))) throw new Error('검색 결과 범위가 올바르지 않습니다.')
     if (input.activeSourceId && !input.sourceIds.includes(input.activeSourceId)) throw new Error('현재 로그가 검색 범위에 없습니다.')
     if (input.matchedSourceIds?.some((item) => !input.sourceIds.includes(item))) throw new Error('검색 결과가 검색 범위에 없습니다.')
+    const evaluationScopeId = safe(input.evaluationScopeId, 160)
+    if (evaluationScopeId && input.sourceIds.some((sourceId) => project.artifacts.find((item) => item.sourceId === sourceId)?.rootId !== evaluationScopeId)) {
+      throw new Error('검색 로그가 현재 평가 폴더를 벗어났습니다.')
+    }
     await this.deps.store.recordSearch(input)
   }
 
@@ -271,6 +286,8 @@ export class NativeAgentService {
     const sourceId = safe(input.sourceId, 160)
     const source = project.artifacts.find((item) => item.sourceId === sourceId)
     if (!source) throw new Error('현재 로그가 프로젝트 범위에 없습니다.')
+    const requestedScope = safe(input.evaluationScopeId, 160)
+    if (requestedScope && requestedScope !== source.rootId) throw new Error('현재 로그가 선택한 평가 폴더에 없습니다.')
     const results = new Set(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
     if (!results.has(input.result)) throw new Error('판정 결과가 올바르지 않습니다.')
     const artifact = (await this.deps.artifacts.list()).find((item) => item.id === source.artifactId)
@@ -284,6 +301,7 @@ export class NativeAgentService {
       sequenceSignature: context.sequenceSignature,
       explicitRetest: context.explicitRetest,
       filenameAttemptNo: context.filenameAttemptNo,
+      evaluationScopeId: source.rootId,
       workflowSelection: input.workflowSelection?.slice(0, 20).map((check) => ({
         query: safe(check.query, 500), mode: check.mode === 'regex' ? 'regex' as const : 'literal' as const, caseSensitive: check.caseSensitive === true,
       })).filter((check) => check.query.length >= 2),
@@ -404,11 +422,13 @@ export class NativeAgentService {
     }
   }
 
-  private async authorize(projectId: string, requested?: string[]): Promise<string[]> {
+  private async authorize(projectId: string, requested?: string[], evaluationScopeId?: string): Promise<string[]> {
     const project = await this.deps.projects.get(projectId)
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
-    const wanted = requested?.length ? [...new Set(requested.map((item) => safe(item, 160)).filter(Boolean))] : project.artifacts.slice(0, 100).map((item) => item.sourceId)
-    const allowed = new Set(project.artifacts.map((item) => item.sourceId))
+    const scopeId = safe(evaluationScopeId, 160)
+    const scoped = scopeId ? project.artifacts.filter((item) => item.rootId === scopeId) : project.artifacts
+    const wanted = requested?.length ? [...new Set(requested.map((item) => safe(item, 160)).filter(Boolean))] : scoped.slice(0, 100).map((item) => item.sourceId)
+    const allowed = new Set(scoped.map((item) => item.sourceId))
     if (wanted.length > 100 || wanted.some((item) => !allowed.has(item))) throw new Error('프로젝트 로그 범위가 올바르지 않습니다.')
     return wanted
   }

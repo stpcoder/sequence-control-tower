@@ -106,6 +106,16 @@ export function agentProjectScopeKey(project: ProjectSnapshot | null): string {
   return `${project.id}\u0000${sources}`
 }
 
+/** One connected root folder is one evaluation. A selected log fixes the
+ * Agent to that folder; a single-folder project is safe without a selection. */
+export function agentEvaluationSources(project: ProjectSnapshot | null, selectedFile?: WorkbenchFile): ProjectSnapshot['artifacts'] {
+  if (!project) return []
+  const selected = selectedFile ? resolveProjectSource(project, selectedFile) : null
+  if (selected) return project.artifacts.filter((source) => source.rootId === selected.rootId)
+  const roots = [...new Set(project.artifacts.map((source) => source.rootId))]
+  return roots.length === 1 ? project.artifacts.filter((source) => source.rootId === roots[0]) : []
+}
+
 /** Keep slow work only while both the project and its analysed log set match. */
 export function shouldRetainAgentSession(previous: ProjectSnapshot | null, next: ProjectSnapshot | null): boolean {
   return agentProjectScopeKey(previous) === agentProjectScopeKey(next)
@@ -223,8 +233,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const activeRunId = useRef<string | null>(null)
   const projectRef = useRef<ProjectSnapshot | null>(project)
   projectRef.current = project
+  const evaluationSources = agentEvaluationSources(project, selectedFile)
+  const evaluationScopeId = evaluationSources[0]?.rootId
   const projectKey = project?.id ?? 'no-project'
-  const projectScopeKey = agentProjectScopeKey(project)
+  const projectScopeKey = `${agentProjectScopeKey(project)}\u0000evaluation:${evaluationScopeId ?? 'none'}`
   const projectKeyRef = useRef(projectKey)
   projectKeyRef.current = projectKey
   const projectScopeKeyRef = useRef(projectScopeKey)
@@ -260,6 +272,9 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     activeRunId.current = null
     setRun(null)
     setEvaluationRun(null)
+    setNativeSession(null)
+    setNativeSessions([])
+    setNativeHistoryOpen(false)
     setEvaluationAnswer('')
     setBusy(false)
     setError('')
@@ -270,18 +285,22 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   useEffect(() => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || !open) return undefined
+    if (project.artifacts.length && !evaluationScopeId) {
+      setNativeSessions([]); setNativeSession(null)
+      return undefined
+    }
     let active = true
-    void Promise.all([api.list({ projectId: project.id }), api.backendStatus()]).then(async ([sessions, backend]) => {
-      if (!active || projectKeyRef.current !== project.id) return
+    void Promise.all([api.list({ projectId: project.id, ...(evaluationScopeId ? { evaluationScopeId } : {}) }), api.backendStatus()]).then(async ([sessions, backend]) => {
+      if (!active || projectScopeKeyRef.current !== projectScopeKey) return
       setNativeSessions(sessions); setNativeBackend(backend)
       const first = sessions[0]
       if (first) {
         const detail = await api.get({ sessionId: first.id })
-        if (active && detail && projectKeyRef.current === project.id) setNativeSession(detail)
+        if (active && detail && projectScopeKeyRef.current === projectScopeKey) setNativeSession(detail)
       }
     }).catch((reason) => { if (active) setError(boundedError(reason)) })
     const unsubscribe = api.onUpdate((next) => {
-      if (!active || next.projectId !== projectKeyRef.current) return
+      if (!active || next.projectId !== projectKeyRef.current || next.evaluationScopeId !== evaluationScopeId) return
       setNativeSessions((current) => {
         const { messages: _messages, tools: _tools, ...summary } = next
         return [summary, ...current.filter((item) => item.id !== next.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -290,7 +309,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
       if (next.status === 'idle' || next.status === 'paused' || next.status === 'failed') setBusy(false)
     })
     return () => { active = false; unsubscribe() }
-  }, [open, project?.id])
+  }, [open, projectScopeKey])
 
   useEffect(() => {
     const toggle = () => {
@@ -351,9 +370,15 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const createNativeSession = async () => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return null
+    const startedScope = projectScopeKey
     setBusy(true); setError(''); setSavedMessage(''); setNativeHistoryOpen(false)
     try {
-      const next = await api.create({ projectId: project.id })
+      const next = await api.create({
+        projectId: project.id,
+        ...(evaluationScopeId ? { evaluationScopeId } : {}),
+        sourceIds: evaluationSources.slice(0, 100).map((source) => source.sourceId),
+      })
+      if (projectScopeKeyRef.current !== startedScope) return null
       setNativeSession(next)
       setNativeSessions((current) => [{ ...next }, ...current.filter((item) => item.id !== next.id)])
       return next
@@ -365,7 +390,11 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || busy) return
     setBusy(true); setError(''); setNativeHistoryOpen(false)
-    try { setNativeSession(await api.get({ sessionId })) }
+    const startedScope = projectScopeKey
+    try {
+      const next = await api.get({ sessionId })
+      if (next && projectScopeKeyRef.current === startedScope) setNativeSession(next)
+    }
     catch (reason) { setError(boundedError(reason)) }
     finally { setBusy(false) }
   }
@@ -373,24 +402,40 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const sendNativeText = async (content: string) => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy || !content.trim()) return
+    const startedScope = projectScopeKey
     let target = nativeSession
     if (!target) target = await createNativeSession()
     if (!target) return
     setBusy(true); setError(''); setInput(''); setNativeHistoryOpen(false)
-    try { setNativeSession(await api.send({ sessionId: target.id, content: content.trim(), sourceIds: mentionedSourceIds.length ? mentionedSourceIds : undefined })); setMentionedSourceIds([]) }
+    try {
+      const sourceIds = mentionedSourceIds.length ? mentionedSourceIds : evaluationSources.slice(0, 100).map((source) => source.sourceId)
+      const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: sourceIds.length ? sourceIds : undefined })
+      if (projectScopeKeyRef.current === startedScope) {
+        setNativeSession(next)
+        setMentionedSourceIds([])
+      }
+    }
     catch (reason) { setError(boundedError(reason)); setBusy(false) }
   }
 
   const retryNative = async () => {
     if (!nativeSession || busy || !window.sequenceIntelligence?.nativeAgent) return
     setBusy(true); setError('')
-    try { setNativeSession(await window.sequenceIntelligence.nativeAgent.retry({ sessionId: nativeSession.id })) }
+    const startedScope = projectScopeKey
+    try {
+      const next = await window.sequenceIntelligence.nativeAgent.retry({ sessionId: nativeSession.id })
+      if (projectScopeKeyRef.current === startedScope) setNativeSession(next)
+    }
     catch (reason) { setError(boundedError(reason)); setBusy(false) }
   }
 
   const cancelNative = async () => {
     if (!nativeSession || !window.sequenceIntelligence?.nativeAgent) return
-    try { setNativeSession(await window.sequenceIntelligence.nativeAgent.cancel({ sessionId: nativeSession.id })) }
+    const startedScope = projectScopeKey
+    try {
+      const next = await window.sequenceIntelligence.nativeAgent.cancel({ sessionId: nativeSession.id })
+      if (projectScopeKeyRef.current === startedScope) setNativeSession(next)
+    }
     catch (reason) { setError(boundedError(reason)) }
     finally { setBusy(false) }
   }
@@ -400,7 +445,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     if (!api?.evaluationAgent || !project || busy) return
     setBusy(true); setError(''); setSavedMessage(''); setEvaluationRun(null)
     try {
-      const next = await api.evaluationAgent.start({ projectId: project.id, sourceIds: project.artifacts.slice(0, 32).map((source) => source.sourceId), intent: 'failure-trend' })
+      if (!evaluationSources.length) throw new Error('분석할 평가 폴더의 로그를 먼저 선택해 주세요.')
+      const next = await api.evaluationAgent.start({ projectId: project.id, sourceIds: evaluationSources.slice(0, 32).map((source) => source.sourceId), intent: 'failure-trend' })
       if (projectScopeKeyRef.current === projectScopeKey) setEvaluationRun(next)
     } catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
   }
@@ -408,7 +454,12 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const resumeProjectTrend = async (input: { answer?: string; confirm?: 'accept' | 'reject' }) => {
     if (!evaluationRun || busy || !window.sequenceIntelligence?.evaluationAgent) return
     setBusy(true); setError('')
-    try { setEvaluationRun(await window.sequenceIntelligence.evaluationAgent.resume({ sessionId: evaluationRun.id, ...input })); setEvaluationAnswer('') }
+    const startedScope = projectScopeKey
+    try {
+      const next = await window.sequenceIntelligence.evaluationAgent.resume({ sessionId: evaluationRun.id, ...input })
+      if (projectScopeKeyRef.current === startedScope) setEvaluationRun(next)
+      setEvaluationAnswer('')
+    }
     catch (reason) { setError(boundedError(reason)) } finally { setBusy(false) }
   }
 
@@ -518,10 +569,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
   const pending = Boolean(run && isAgentRunPending(run))
 
   const projectPending = evaluationRun?.status === 'running' || evaluationRun?.status === 'paused'
-  const projectCanStart = Boolean(project && project.artifacts.length && window.sequenceIntelligence?.evaluationAgent)
+  const projectCanStart = Boolean(project && evaluationSources.length && window.sequenceIntelligence?.evaluationAgent)
   const scope = project ? 'project' as const : 'current' as const
   const slashMatch = /(^|\s)\/([^\s/]*)$/.exec(input)
-  const fileMentions = slashMatch && project ? project.artifacts.filter((artifact) => {
+  const fileMentions = slashMatch && project ? evaluationSources.filter((artifact) => {
     const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath
     return name.toLocaleLowerCase().includes(slashMatch[2].toLocaleLowerCase())
   }).slice(0, 6) : []
@@ -541,7 +592,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, evalu
     </div>
     <div className="agent-thread">
       {scope === 'current' && !run ? <div className="agent-empty"><p>{project ? (selectedFile?.artifactId ? selectedFile.name : '로그를 선택하세요.') : '프로젝트를 선택하세요.'}</p><button className="agent-start" onClick={() => void start()} disabled={!canStart}>분석</button></div> : null}
-      {scope === 'project' && !nativeSession ? <div className="agent-empty">{!project?.artifacts.length ? <p>{project ? '로그를 연결하세요.' : '프로젝트를 선택하세요.'}</p> : null}<button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy}>새 대화</button></div> : null}
+      {scope === 'project' && !nativeSession ? <div className="agent-empty">{!project?.artifacts.length || !evaluationScopeId ? <p>{!project?.artifacts.length ? (project ? '로그를 연결하세요.' : '프로젝트를 선택하세요.') : '분석할 폴더의 로그를 선택하세요.'}</p> : null}<button className="agent-start" onClick={() => void createNativeSession()} disabled={!project || busy || Boolean(project.artifacts.length && !evaluationScopeId)}>새 대화</button></div> : null}
       {scope === 'current' && run?.question ? <><div className="agent-message question"><Sparkles size={13} /><p>{run.question.prompt}</p></div>{run.question.choices?.length ? <div className="quick-answers">{run.question.choices.map((choice) => <button key={choice} onClick={() => answer(choice)} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div> : null}</> : null}
       {scope === 'current' && run?.candidate ? <div className="agent-candidate"><span>후보 결과</span><strong>{candidateText(run)}</strong><small>{confirmable ? '확인 후 저장됩니다.' : '현재는 검토만 가능합니다.'}</small>{confirmable ? <div className="agent-review-actions"><button onClick={() => void confirm()} disabled={busy}><Check size={13} />확인하고 저장</button><button onClick={dismiss} disabled={busy}>거절</button></div> : <button onClick={dismiss}>닫기</button>}</div> : null}
       {scope === 'current' && run?.status === 'failed' ? <div className="agent-error" role="alert">{run.failureReason ? boundedError(new Error(run.failureReason)) : '분석에 실패했습니다.'}</div> : null}

@@ -22,7 +22,7 @@ interface StoredEngineerWorkflowReview extends EngineerWorkflowReviewView {
   searchEventIds: string[]
 }
 interface NativeAgentDatabase {
-  schemaVersion: 5
+  schemaVersion: 6
   sessions: Record<string, StoredNativeAgentSession>
   searches: Record<string, SearchEvent[]>
   workflows: Record<string, StoredEngineerWorkflow[]>
@@ -52,7 +52,7 @@ export class NativeAgentStore {
 
   constructor(dataRoot: string, private readonly id: () => string = randomUUID) {
     this.store = new AtomicJsonStore(join(dataRoot, 'metadata', 'native-agent.json'), {
-      schemaVersion: 5,
+      schemaVersion: 6,
       sessions: {},
       searches: {},
       workflows: {},
@@ -78,10 +78,10 @@ export class NativeAgentStore {
         profileBindings?: NativeAgentDatabase['profileBindings']
         consolePromptRules?: NativeAgentDatabase['consolePromptRules']
       }
-      if (![1, 2, 3, 4, 5].includes(legacy.schemaVersion ?? 0) || !legacy.sessions || !legacy.searches) {
-        return { schemaVersion: 5, sessions: {}, searches: {}, workflows: {}, reviews: {}, attempts: {}, commandKnowledge: {}, profileBindings: {}, consolePromptRules: {} }
+      if (![1, 2, 3, 4, 5, 6].includes(legacy.schemaVersion ?? 0) || !legacy.sessions || !legacy.searches) {
+        return { schemaVersion: 6, sessions: {}, searches: {}, workflows: {}, reviews: {}, attempts: {}, commandKnowledge: {}, profileBindings: {}, consolePromptRules: {} }
       }
-      database.schemaVersion = 5
+      database.schemaVersion = 6
       database.workflows = legacy.workflows && typeof legacy.workflows === 'object' ? legacy.workflows : {}
       database.reviews = legacy.reviews && typeof legacy.reviews === 'object' ? legacy.reviews : {}
       database.attempts = legacy.attempts && typeof legacy.attempts === 'object' ? legacy.attempts : {}
@@ -98,10 +98,11 @@ export class NativeAgentStore {
     })
   }
 
-  async create(projectId: string, title: string, backend: NativeAgentBackend): Promise<StoredNativeAgentSession> {
+  async create(projectId: string, title: string, backend: NativeAgentBackend, evaluationScopeId?: string): Promise<StoredNativeAgentSession> {
     const stamp = now()
     const session: StoredNativeAgentSession = {
       id: this.id(), projectId: clean(projectId, 160), title: clean(title, 160) || '새 분석', backend,
+      ...(clean(evaluationScopeId, 160) ? { evaluationScopeId: clean(evaluationScopeId, 160) } : {}),
       status: 'idle', createdAt: stamp, updatedAt: stamp, messages: [], tools: []
     }
     if (!session.projectId) throw new Error('프로젝트를 선택해 주세요.')
@@ -115,11 +116,12 @@ export class NativeAgentStore {
     return structuredClone(session)
   }
 
-  async list(projectId: string): Promise<NativeAgentSessionSummary[]> {
+  async list(projectId: string, evaluationScopeId?: string): Promise<NativeAgentSessionSummary[]> {
     const wanted = clean(projectId, 160)
+    const wantedScope = clean(evaluationScopeId, 160)
     const database = await this.store.read()
     return Object.values(database.sessions)
-      .filter((session) => session.projectId === wanted)
+      .filter((session) => session.projectId === wanted && (!wantedScope || session.evaluationScopeId === wantedScope))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map(({ messages, tools, question: _question, externalSessionId, lastRequest, ...summary }) => summary)
   }
@@ -185,6 +187,7 @@ export class NativeAgentStore {
   async recordSearch(input: NativeAgentSearchEventInput): Promise<void> {
     const projectId = clean(input.projectId, 160)
     const query = clean(input.query, 500)
+    const evaluationScopeId = clean(input.evaluationScopeId, 160)
     if (!projectId || !query || !Array.isArray(input.sourceIds)) return
     const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100)
     const activeSourceId = clean(input.activeSourceId, 160)
@@ -198,7 +201,8 @@ export class NativeAgentStore {
     const event: SearchEvent = {
       id: this.id(), projectId, sourceIds, query,
       mode: input.mode === 'regex' ? 'regex' : 'literal', caseSensitive: input.caseSensitive === true,
-      scope: input.scope === 'open' || input.scope === 'project' ? input.scope : 'current',
+      scope: input.scope === 'open' || input.scope === 'folder' || input.scope === 'project' ? input.scope : 'current',
+      ...(evaluationScopeId ? { evaluationScopeId } : {}),
       matchCount: Number.isSafeInteger(input.matchCount) && input.matchCount >= 0 ? input.matchCount : 0,
       ...(activeSourceId ? { activeSourceId } : {}),
       ...(matchedSourceIds.length ? { matchedSourceIds } : {}),
@@ -211,6 +215,7 @@ export class NativeAgentStore {
       const last = previous[previous.length - 1]
       if (last && last.query === event.query && last.mode === event.mode && last.caseSensitive === event.caseSensitive
         && last.scope === event.scope && last.matchCount === event.matchCount && last.activeSourceId === event.activeSourceId
+        && last.evaluationScopeId === event.evaluationScopeId
         && last.activeMatchCount === event.activeMatchCount
         && Date.parse(event.occurredAt) - Date.parse(last.occurredAt) < 10_000) return
       database.searches[projectId] = [...previous, event].slice(-MAX_SEARCHES)
@@ -233,22 +238,25 @@ export class NativeAgentStore {
     sequenceSignature?: string
     explicitRetest?: boolean
     filenameAttemptNo?: number
+    evaluationScopeId?: string
     workflowSelection?: Array<Pick<EngineerWorkflowCheckView, 'query' | 'mode' | 'caseSensitive'>>
   }): Promise<NativeAgentCompleteEvaluationResult> {
     const projectId = clean(input.projectId, 160)
     const sourceId = clean(input.sourceId, 160)
+    const evaluationScopeId = clean(input.evaluationScopeId, 160)
     if (!projectId || !sourceId) return { kind: 'ignored' }
     const attempt = await this.recordAttempt({ ...input, projectId, sourceId })
     let result: NativeAgentCompleteEvaluationResult = { kind: 'ignored', attempt }
     await this.store.update((database) => {
       const projectReviews = database.reviews[projectId] ?? []
-      const latestReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId)
+      const latestReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId && (item.evaluationScopeId ?? '') === evaluationScopeId)
       const allSearches = database.searches[projectId] ?? []
       // A search IPC may finish just after the decision even though the
       // engineer started it before. observedAt plus this boundary keeps the
       // late write in the completed cycle instead of the next evaluation.
       const cycleBoundary = latestReview ? Date.parse(latestReview.createdAt) : Date.now() - 8 * 60 * 60 * 1_000
       const searches = allSearches.filter((event) => {
+        if ((event.evaluationScopeId ?? '') !== evaluationScopeId) return false
         const relevant = event.activeSourceId === sourceId
           || (!event.activeSourceId && event.sourceIds.length === 1 && event.sourceIds[0] === sourceId)
         // Legacy events lack observedAt and can arrive just after a decision;
@@ -281,7 +289,7 @@ export class NativeAgentStore {
       if (!candidate) return
       const fingerprint = createHash('sha256').update(candidate.signature).digest('hex')
       const workflows = database.workflows[projectId] ?? []
-      const exact = workflows.find((item) => item.fingerprint === fingerprint)
+      const exact = workflows.find((item) => item.fingerprint === fingerprint && (item.evaluationScopeId ?? '') === evaluationScopeId)
       const stamp = now()
       if (exact) {
         exact.appliedCount += 1
@@ -291,18 +299,20 @@ export class NativeAgentStore {
         result = { kind: 'applied', memory: this.workflow(exact), attempt }
         return
       }
-      const priorReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId && item.fingerprint === fingerprint)
+      const priorReview = [...projectReviews].reverse().find((item) => item.sourceId === sourceId && item.fingerprint === fingerprint && (item.evaluationScopeId ?? '') === evaluationScopeId)
       if (priorReview) {
         if (priorReview.state === 'pending') result = { kind: 'review', review: this.review(priorReview), attempt }
         if (priorReview.state !== 'dismissed' || Date.now() - Date.parse(priorReview.createdAt) < 7 * 24 * 60 * 60 * 1_000) return
       }
       const similar = workflows
+        .filter((memory) => (memory.evaluationScopeId ?? '') === evaluationScopeId)
         .map((memory) => ({ memory, score: engineerWorkflowSimilarity(candidate, memory) }))
         .filter((item) => item.score >= 0.45)
         .sort((a, b) => b.score - a.score)[0]?.memory
       const suggestions = [...new Set([...(similar ? [similar.purpose] : []), ...candidate.suggestions, '직접 입력'])].slice(0, 4)
       const review: StoredEngineerWorkflowReview = {
         id: this.id(), projectId, sourceId, result: input.result, stages: candidate.stages,
+        ...(evaluationScopeId ? { evaluationScopeId } : {}),
         checks: candidate.checks, evidenceLines: this.lines(input.evidenceLines), suggestions,
         ...(similar ? { similarMemoryId: similar.id } : {}),
         state: 'pending', createdAt: stamp, fingerprint,
@@ -346,7 +356,7 @@ export class NativeAgentStore {
       const stages = [...new Set(checks.map((check) => check.stage))]
       const fingerprint = createHash('sha256').update(engineerWorkflowSignature(checks, review.result)).digest('hex')
       const workflows = database.workflows[projectId] ?? []
-      let memory = workflows.find((item) => item.fingerprint === fingerprint)
+      let memory = workflows.find((item) => item.fingerprint === fingerprint && (item.evaluationScopeId ?? '') === (review.evaluationScopeId ?? ''))
       const stamp = now()
       if (memory) {
         memory.confirmedCount += 1
@@ -359,6 +369,7 @@ export class NativeAgentStore {
       } else {
         memory = {
           id: this.id(), projectId, name: purpose, purpose, stages, checks,
+          ...(review.evaluationScopeId ? { evaluationScopeId: review.evaluationScopeId } : {}),
           result: review.result, sourceIds: [review.sourceId], evidenceLines: review.evidenceLines,
           ...(review.dimensions ? { dimensions: review.dimensions } : {}),
           confirmedCount: 1, appliedCount: 0, createdAt: stamp, updatedAt: stamp,
@@ -405,6 +416,7 @@ export class NativeAgentStore {
         targetWorkflows.push({
           ...structuredClone(source), id: this.id(), projectId: targetProjectId,
           sourceIds: [], evidenceLines: [], appliedCount: 0, createdAt: stamp, updatedAt: stamp,
+          evaluationScopeId: undefined,
           lastUsedAt: undefined,
         })
         added.workflows += 1
@@ -432,14 +444,14 @@ export class NativeAgentStore {
   }
 
   async conversationHistory(projectId: string, limit = 20): Promise<Array<{
-    sessionId: string; title: string; role: 'user' | 'assistant'; content: string; createdAt: string; evidenceSourceIds?: string[]
+    sessionId: string; title: string; role: 'user' | 'assistant'; content: string; createdAt: string; evidenceSourceIds?: string[]; evaluationScopeId?: string
   }>> {
     const wanted = clean(projectId, 160)
     const database = await this.store.read()
     return Object.values(database.sessions)
       .filter((session) => session.projectId === wanted)
       .flatMap((session) => session.messages.flatMap((message) => message.role === 'user' || message.role === 'assistant'
-        ? [{ sessionId: session.id, title: session.title, role: message.role, content: message.content, createdAt: message.createdAt, evidenceSourceIds: message.evidenceSourceIds }]
+        ? [{ sessionId: session.id, title: session.title, role: message.role, content: message.content, createdAt: message.createdAt, evidenceSourceIds: message.evidenceSourceIds, evaluationScopeId: session.evaluationScopeId }]
         : []))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(-Math.min(Math.max(limit, 1), 50))
@@ -520,16 +532,17 @@ export class NativeAgentStore {
 
   private async recordAttempt(input: {
     projectId: string; sourceId: string; result: EngineerWorkflowResult; dimensions?: Partial<ProjectEvaluationDimensions>
-    sequenceSignature?: string; explicitRetest?: boolean; filenameAttemptNo?: number
+    sequenceSignature?: string; explicitRetest?: boolean; filenameAttemptNo?: number; evaluationScopeId?: string
   }): Promise<EngineerEvaluationAttemptView> {
     let result: EngineerEvaluationAttemptView | undefined
     await this.store.update((database) => {
       const rows = database.attempts[input.projectId] ?? []
+      const evaluationScopeId = clean(input.evaluationScopeId, 160)
       const existingIndex = rows.findIndex((item) => item.sourceId === input.sourceId)
       const dimensions = structuredClone(input.dimensions ?? {})
       const signature = clean(input.sequenceSignature, 200)
       const identityKeys: Array<keyof ProjectEvaluationDimensions> = ['skew', 'lot', 'material', 'die']
-      const related = rows.filter((item) => item.sourceId !== input.sourceId && signature && item.sequenceSignature === signature
+      const related = rows.filter((item) => item.sourceId !== input.sourceId && (item.evaluationScopeId ?? '') === evaluationScopeId && signature && item.sequenceSignature === signature
         && Boolean(dimensions.sample) && item.dimensions.sample === dimensions.sample
         && identityKeys.every((key) => dimensions[key] === undefined || item.dimensions[key] === undefined || String(dimensions[key]) === String(item.dimensions[key])))
       const previous = related.at(-1)
@@ -540,6 +553,7 @@ export class NativeAgentStore {
         : previous ? FAILURE_RESULTS.has(previous.result) ? 'retest' as const : 'repeat' as const : 'initial' as const
       const attempt: EngineerEvaluationAttemptView = {
         id: existingIndex >= 0 ? rows[existingIndex].id : this.id(), projectId: input.projectId, sourceId: input.sourceId,
+        ...(evaluationScopeId ? { evaluationScopeId } : {}),
         result: input.result, occurredAt: existingIndex >= 0 ? rows[existingIndex].occurredAt : now(), dimensions,
         ...(signature ? { sequenceSignature: signature } : {}), attemptNo, relation,
         ...(relation === 'retest' && previous ? { retestOf: previous.id } : {}),

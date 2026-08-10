@@ -28,6 +28,33 @@ describe('LPDDR agent tools', () => {
     expect(JSON.stringify(result.data)).not.toContain('do-not-send')
   })
 
+  it('returns history only from the selected evaluation folder', async () => {
+    const scopedProject = {
+      ...project,
+      artifacts: [project.artifacts[0], { ...project.artifacts[1], rootId: 'other-folder' }],
+      failureHypotheses: [
+        { id: 'h1', projectId: 'p', title: 'folder A', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['n1'] },
+        { id: 'h2', projectId: 'p', title: 'folder B', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['n2'] },
+      ],
+      evaluationNodes: [
+        { id: 'n1', projectId: 'p', hypothesisId: 'h1', name: 'A 평가', status: 'fail' as const, dimensions: {} },
+        { id: 'n2', projectId: 'p', hypothesisId: 'h2', name: 'B 평가', status: 'pass' as const, dimensions: {} },
+      ],
+      evidenceRecords: [
+        { id: 'e1', projectId: 'p', evaluationNodeId: 'n1', status: 'fail' as const, sourceIds: ['s1'] },
+        { id: 'e2', projectId: 'p', evaluationNodeId: 'n2', status: 'pass' as const, sourceIds: ['s2'] },
+      ],
+    }
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => scopedProject), list: vi.fn(async () => [scopedProject]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'project_history_get' }, ['s1'])
+    expect(result.data).toMatchObject({ hypotheses: [{ id: 'h1' }], nodes: [{ id: 'n1' }], evidence: [{ id: 'e1' }] })
+    expect(JSON.stringify(result.data)).not.toContain('folder B')
+  })
+
   it('extracts LPDDR conditions without swallowing adjacent tokens', () => {
     expect(extractLpddrFilenameDimensions(project.artifacts[0].relativePath)).toMatchObject({
       skew: 'SS', timingSkewPs: 12, lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,

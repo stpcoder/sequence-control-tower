@@ -1,6 +1,6 @@
 {
   "name": "sequence-control-tower",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "private": true,
   "description": "Local-first log parsing workbench for Windows and macOS validation engineers",
   "author": "stpcoder",

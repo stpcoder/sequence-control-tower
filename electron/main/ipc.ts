@@ -498,11 +498,12 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentCreate, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
     const value = input as NativeAgentCreateRequest
-    return services.nativeAgent.create(value.projectId, value.title)
+    return services.nativeAgent.create(value.projectId, value.title, value.evaluationScopeId, value.sourceIds)
   })
   handle(IPC_CHANNELS.nativeAgentList, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
-    return services.nativeAgent.list((input as NativeAgentListRequest).projectId)
+    const value = input as NativeAgentListRequest
+    return services.nativeAgent.list(value.projectId, value.evaluationScopeId)
   })
   handle(IPC_CHANNELS.nativeAgentGet, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')

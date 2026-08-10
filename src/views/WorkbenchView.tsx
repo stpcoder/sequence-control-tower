@@ -136,7 +136,7 @@ export interface WorkbenchViewProps {
   projectSources?: readonly ProjectSnapshot['artifacts'][number][]
 }
 
-export type SearchScope = 'file' | 'open' | 'workspace'
+export type SearchScope = 'file' | 'folder' | 'open' | 'workspace'
 type SideMode = 'files' | 'search'
 
 export function resolveSearchScopeFiles(
@@ -146,6 +146,12 @@ export function resolveSearchScopeFiles(
   openFileIds: readonly string[],
 ): WorkbenchFile[] {
   if (scope === 'file') return files.filter((file) => file.id === activeFileId)
+  if (scope === 'folder') {
+    const active = files.find((file) => file.id === activeFileId)
+    if (!active) return []
+    const rootKey = workbenchRootGroupKey(active)
+    return files.filter((file) => workbenchRootGroupKey(file) === rootKey)
+  }
   if (scope === 'workspace') return [...files]
 
   const filesById = new Map(files.map((file) => [file.id, file]))
@@ -2132,23 +2138,27 @@ export function WorkbenchView({
         setBackendCounts(successfulCounts)
         const total = Object.values(successfulCounts).reduce((sum, count) => sum + count, 0)
         setBackendTotal(total)
-        const sourceIds = searchFiles.flatMap((file) => {
-          const source = resolveProjectSource({ artifacts: projectSources }, file)
-          return source ? [source.sourceId] : []
-        })
         const activeSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
-        const matchedSourceIds = searchFiles.flatMap((file) => {
-          if ((successfulCounts[file.id] ?? 0) < 1) return []
+        const scopedSearchRows = searchFiles.flatMap((file) => {
           const source = resolveProjectSource({ artifacts: projectSources }, file)
-          return source ? [source.sourceId] : []
+          if (!source || (activeSource && source.rootId !== activeSource.rootId)) return []
+          return [{ file, source }]
         })
+        const sourceIds = scopedSearchRows.map(({ source }) => source.sourceId)
+        const matchedSourceIds = scopedSearchRows.flatMap(({ file, source }) => {
+          if ((successfulCounts[file.id] ?? 0) < 1) return []
+          return [source.sourceId]
+        })
+        const scopedMatchCount = scopedSearchRows.reduce((sum, { file }) => sum + (successfulCounts[file.id] ?? 0), 0)
         if (api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
+          const evaluationScopeId = activeSource?.rootId
           void api.nativeAgent.recordSearch({
             projectId, sourceIds: [...new Set(sourceIds)], query: compiled.query, mode: compiled.mode,
             caseSensitive: options.caseSensitive,
-            scope: searchScope === 'file' ? 'current' : searchScope === 'open' ? 'open' : 'project',
-            matchCount: total,
+            scope: searchScope === 'file' ? 'current' : searchScope === 'folder' ? 'folder' : searchScope === 'open' ? 'open' : 'project',
+            matchCount: scopedMatchCount,
             observedAt,
+            ...(evaluationScopeId ? { evaluationScopeId } : {}),
             ...(activeSource ? { activeSourceId: activeSource.sourceId, activeMatchCount: successfulCounts[activeFile!.id] ?? 0 } : {}),
             matchedSourceIds: [...new Set(matchedSourceIds)],
           }).catch(() => undefined)
@@ -2349,6 +2359,7 @@ export function WorkbenchView({
       if (api?.nativeAgent && source && projectId !== 'log-workbench') {
         void api.nativeAgent.completeEvaluation({
           projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
+          ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
           ...(selectedRecipeObservations.length >= 2 ? { workflowSelection: selectedRecipeObservations.map((observation) => ({
             query: observation.query,
             mode: observation.matcherKind,
@@ -2833,6 +2844,7 @@ export function WorkbenchView({
             <Search size={18} />
             <select className="find-scope-select" value={searchScope} onChange={(event) => openSearch(event.target.value as SearchScope)} aria-label="검색 범위" title="검색 범위">
               <option value="file">현재 로그</option>
+              <option value="folder">현재 평가 폴더</option>
               <option value="open">열린 탭</option>
               <option value="workspace">전체 로그</option>
             </select>

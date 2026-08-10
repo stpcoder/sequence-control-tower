@@ -127,11 +127,11 @@ export class LpddrAgentToolService {
     const project = await this.project(projectId)
     const allowed = this.sources(project, allowedSourceIds)
     switch (call.name) {
-      case 'project_context_get': return this.context(project)
-      case 'project_history_get': return this.history(project)
+      case 'project_context_get': return this.context(project, allowed)
+      case 'project_history_get': return this.history(project, allowed)
       case 'similar_case_search': return this.similar(project, safe(call.args?.query, 240))
-      case 'search_history_get': return this.searchHistory(project)
-      case 'engineer_workflow_memory_get': return this.workflowMemory(project)
+      case 'search_history_get': return this.searchHistory(project, allowed)
+      case 'engineer_workflow_memory_get': return this.workflowMemory(project, allowed)
       case 'engineer_workflow_apply': return this.applyWorkflow(project, allowed, call.args)
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
       case 'soc_boot_profile_scan': return this.bootProfiles(project, allowed)
@@ -157,7 +157,7 @@ export class LpddrAgentToolService {
     return sources
   }
 
-  private context(project: ProjectSnapshot): LpddrAgentToolResult {
+  private context(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): LpddrAgentToolResult {
     const savedLayouts = project.exportPresets.filter((item) => !item.archived).slice(-10).map((item) => {
       if (item.id === 'sequence-control-tower.results-export.v1') {
         return { id: item.id, name: item.name, format: item.format, columns: Array.isArray(item.options.columns) ? item.options.columns.slice(0, 32) : [] }
@@ -176,13 +176,19 @@ export class LpddrAgentToolService {
       name: project.name, description: project.description, ...project.lpddrDevelopmentContext, onboarding: project.onboardingAnswers,
       savedLayouts,
     }
-    return { name: 'project_context_get', label: '프로젝트 조건', summary: `${project.name} · 로그 ${project.artifacts.length}개 · 평가 ${project.evaluationNodes?.length ?? 0}건`, data, evidenceSourceIds: [] }
+    return { name: 'project_context_get', label: '프로젝트 조건', summary: `${project.name} · 현재 평가 로그 ${sources.length}개 · 평가 ${project.evaluationNodes?.length ?? 0}건`, data, evidenceSourceIds: [] }
   }
 
-  private history(project: ProjectSnapshot): LpddrAgentToolResult {
+  private history(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): LpddrAgentToolResult {
+    const allowed = new Set(sources.map((source) => source.sourceId))
+    const evidence = (project.evidenceRecords ?? []).filter((item) => item.sourceIds.some((sourceId) => allowed.has(sourceId))).slice(-200)
+    const nodeIds = new Set(evidence.map((item) => item.evaluationNodeId))
+    const nodes = (project.evaluationNodes ?? []).filter((item) => nodeIds.has(item.id)).slice(-100)
+    const hypothesisIds = new Set(nodes.map((item) => item.hypothesisId))
     const data = {
-      hypotheses: (project.failureHypotheses ?? []).slice(-50), nodes: (project.evaluationNodes ?? []).slice(-100).map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions) })),
-      evidence: (project.evidenceRecords ?? []).slice(-200).map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions), note: safe(item.note, 500) }))
+      hypotheses: (project.failureHypotheses ?? []).filter((item) => hypothesisIds.has(item.id)).slice(-50),
+      nodes: nodes.map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions) })),
+      evidence: evidence.map((item) => ({ ...item, dimensions: agentDimensionView(item.dimensions), note: safe(item.note, 500) }))
     }
     return { name: 'project_history_get', label: '평가 이력', summary: `가설 ${data.hypotheses.length}개 · 평가 ${data.nodes.length}개 · 근거 ${data.evidence.length}개`, data, evidenceSourceIds: [...new Set(data.evidence.flatMap((item) => item.sourceIds))] }
   }
@@ -200,21 +206,28 @@ export class LpddrAgentToolService {
     return { name: 'similar_case_search', label: '유사 사례', summary: data.length ? `과거 프로젝트 ${data.length}개에서 유사 사례 발견` : '저장된 과거 프로젝트에서 유사 사례 없음', data, evidenceSourceIds: [] }
   }
 
-  private async searchHistory(project: ProjectSnapshot): Promise<LpddrAgentToolResult> {
-    const data = await this.deps.agentStore.searchHistory(project.id, 40)
+  private async searchHistory(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    const allowed = new Set(sources.map((source) => source.sourceId))
+    const data = (await this.deps.agentStore.searchHistory(project.id, 100)).filter((item) => item.sourceIds.some((sourceId) => allowed.has(sourceId))).slice(0, 40)
     return { name: 'search_history_get', label: '검색 기록', summary: `최근 Ctrl-F/정규식 확인 ${data.length}건`, data, evidenceSourceIds: [...new Set(data.flatMap((item) => item.sourceIds))] }
   }
 
-  private async workflowMemory(project: ProjectSnapshot): Promise<LpddrAgentToolResult> {
-    const [workflows, recentSearches, conversation, attempts, commandKnowledge, profileBindings, consolePromptRules] = await Promise.all([
+  private async workflowMemory(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+    const allowed = new Set(sources.map((source) => source.sourceId))
+    const scopeIds = new Set(sources.map((source) => source.rootId))
+    const [allWorkflows, allSearches, allConversation, allAttempts, commandKnowledge, profileBindings, consolePromptRules] = await Promise.all([
       this.deps.agentStore.workflowMemories(project.id, 50),
-      this.deps.agentStore.searchHistory(project.id, 20),
-      this.deps.agentStore.conversationHistory(project.id, 20),
-      this.deps.agentStore.attemptHistory(project.id, 100),
+      this.deps.agentStore.searchHistory(project.id, 100),
+      this.deps.agentStore.conversationHistory(project.id, 50),
+      this.deps.agentStore.attemptHistory(project.id, 500),
       this.deps.agentStore.commandKnowledge(project.id, 100),
       this.deps.agentStore.profileBindings(project.id),
       this.deps.agentStore.consolePromptRules(project.id),
     ])
+    const workflows = allWorkflows.filter((item) => item.evaluationScopeId ? scopeIds.has(item.evaluationScopeId) : item.sourceIds.some((sourceId) => allowed.has(sourceId)))
+    const recentSearches = allSearches.filter((item) => item.sourceIds.some((sourceId) => allowed.has(sourceId))).slice(0, 20)
+    const conversation = allConversation.filter((item) => item.evaluationScopeId ? scopeIds.has(item.evaluationScopeId) : item.evidenceSourceIds?.some((sourceId) => allowed.has(sourceId))).slice(-20)
+    const attempts = allAttempts.filter((item) => allowed.has(item.sourceId)).slice(0, 100)
     const data = {
       confirmed: workflows.map((item) => ({
         ...item,
@@ -250,7 +263,10 @@ export class LpddrAgentToolService {
   ): Promise<LpddrAgentToolResult> {
     const requestedId = safe(args?.workflowId, 160)
     const [storedMemories, bindings] = await Promise.all([this.deps.agentStore.workflowMemories(project.id, 50), this.deps.agentStore.profileBindings(project.id)])
+    const scopeIds = new Set(sources.map((source) => source.rootId))
+    const sourceIds = new Set(sources.map((source) => source.sourceId))
     const memories = storedMemories
+      .filter((item) => item.evaluationScopeId ? scopeIds.has(item.evaluationScopeId) : item.sourceIds.some((sourceId) => sourceIds.has(sourceId)))
       .filter((item) => !requestedId || item.id === requestedId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, requestedId ? 1 : 3)
