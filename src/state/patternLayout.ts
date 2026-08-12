@@ -27,7 +27,7 @@ const DIMENSIONS = new Set<PivotDimension>([
   'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'timingSkewPs',
   'grid', 'result', 'review', 'folder', 'run',
 ])
-const AGGREGATIONS = new Set<PivotAggregation>(['count', 'sample_count', 'grid_count', 'pass_count', 'fail_count', 'fail_rate'])
+const AGGREGATIONS = new Set<PivotAggregation>(['count', 'sample_count', 'grid_count', 'pass_count', 'fail_count', 'pass_fail', 'fail_rate'])
 const RESULTS = new Set<ResultLabel>(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
 
 function normalizedAxis(value: unknown, fallback: readonly PivotDimension[]): PivotDimension[] {

@@ -74,7 +74,7 @@ export interface LogRecordFilters {
 export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
   | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs'
 export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
-export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'fail_rate' | 'evidence_count'
+export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'evidence_count'
 
 /** Configuration for the results pivot. Axis lists are intentionally bounded to three dimensions. */
 export interface PivotConfig {
@@ -93,6 +93,13 @@ export interface PivotHeader {
 export interface PivotCell {
   value: number
   sourceIds: readonly string[]
+  breakdown?: PivotOutcomeBreakdown
+}
+
+export interface PivotOutcomeBreakdown {
+  passCount: number
+  failCount: number
+  definitiveCount: number
 }
 
 export interface PivotGrid {
@@ -101,6 +108,7 @@ export interface PivotGrid {
   cells: readonly (readonly PivotCell[])[]
   total: number
   sourceIds: readonly string[]
+  breakdown?: PivotOutcomeBreakdown
 }
 
 /** Returns whether a renderer's selected pivot cell still exists in its current scope. */
@@ -641,6 +649,7 @@ function pivotAccumulatorValue(value: PivotAccumulator, aggregation: PivotAggreg
   if (aggregation === 'grid_count') return value.gridIds.size
   if (aggregation === 'pass_count') return value.passCount
   if (aggregation === 'fail_count') return value.failCount
+  if (aggregation === 'pass_fail') return value.definitiveCount
   if (aggregation === 'fail_rate') return value.definitiveCount ? Math.round((value.failCount / value.definitiveCount) * 1_000) / 10 : 0
   return value.recordCount
 }
@@ -696,6 +705,7 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
       || (config.aggregation === 'sample_count' && sampleId !== undefined && sampleId !== null && String(sampleId).trim() !== '')
       || (config.aggregation === 'grid_count' && Boolean(gridKey))
       || (config.aggregation === 'pass_count' && passed)
+      || (config.aggregation === 'pass_fail' && definitive)
       || (config.aggregation === 'fail_rate' && definitive)
       || (config.aggregation === 'fail_count' && failed)
       || (config.aggregation === 'evidence_count' && row.evidenceCount > 0)
@@ -708,7 +718,15 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
   const pivotColumns = [...columnMap.values()].sort(comparePivotHeaders)
   const cells = pivotRows.map((rowHeader) => pivotColumns.map((columnHeader) => {
     const cell = values.get(`${rowHeader.key}\u0000${columnHeader.key}`)
-    return { value: cell ? pivotAccumulatorValue(cell, config.aggregation) : 0, sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]) }
+    return {
+      value: cell ? pivotAccumulatorValue(cell, config.aggregation) : 0,
+      sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]),
+      ...(config.aggregation === 'pass_fail' ? { breakdown: {
+        passCount: cell?.passCount ?? 0,
+        failCount: cell?.failCount ?? 0,
+        definitiveCount: cell?.definitiveCount ?? 0,
+      } } : {}),
+    }
   }))
   return {
     rows: Object.freeze(pivotRows.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
@@ -716,6 +734,11 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
     cells: Object.freeze(cells.map((row) => Object.freeze(row))),
     total: pivotAccumulatorValue(total, config.aggregation),
     sourceIds: Object.freeze(allSourceIds),
+    ...(config.aggregation === 'pass_fail' ? { breakdown: {
+      passCount: total.passCount,
+      failCount: total.failCount,
+      definitiveCount: total.definitiveCount,
+    } } : {}),
   }
 }
 
@@ -964,31 +987,33 @@ export function normalizedExportCell(value: unknown): string {
 
 /** Exports the visible n×m pivot exactly as arranged on screen. */
 export type PivotGridExportOptions = {
-  rowTotals?: readonly number[]
-  columnTotals?: readonly number[]
-  grandTotal?: number
+  rowTotals?: readonly (number | string)[]
+  columnTotals?: readonly (number | string)[]
+  grandTotal?: number | string
   totalLabel?: string
   formatValue?: (value: number) => string | number
+  formatCell?: (cell: PivotCell, rowIndex: number, columnIndex: number) => string | number
 }
 
 function pivotGridExportRows(grid: PivotGrid, rowHeader: string | readonly string[], options: PivotGridExportOptions = {}): unknown[][] {
   const rowHeaders = typeof rowHeader === 'string' ? [rowHeader] : [...rowHeader]
   const useSeparateRowValues = typeof rowHeader !== 'string'
   const format = options.formatValue ?? ((value: number) => value)
+  const formatTotal = (value: number | string) => typeof value === 'number' ? format(value) : value
   const includeTotals = Boolean(options.rowTotals && options.columnTotals)
   const rows: unknown[][] = [
     [...rowHeaders, ...grid.columns.map((column) => column.label), ...(includeTotals ? [options.totalLabel ?? '합계'] : [])],
     ...grid.rows.map((row, rowIndex) => [
       ...(useSeparateRowValues ? row.values : [row.label]),
-      ...grid.cells[rowIndex].map((cell) => format(cell.value)),
-      ...(includeTotals ? [format(options.rowTotals?.[rowIndex] ?? 0)] : []),
+      ...grid.cells[rowIndex].map((cell, columnIndex) => options.formatCell?.(cell, rowIndex, columnIndex) ?? format(cell.value)),
+      ...(includeTotals ? [formatTotal(options.rowTotals?.[rowIndex] ?? 0)] : []),
     ]),
   ]
   if (includeTotals) rows.push([
     options.totalLabel ?? '합계',
     ...Array.from({ length: Math.max(0, rowHeaders.length - 1) }, () => ''),
-    ...(options.columnTotals ?? []).map(format),
-    format(options.grandTotal ?? grid.total),
+    ...(options.columnTotals ?? []).map(formatTotal),
+    formatTotal(options.grandTotal ?? grid.total),
   ])
   return rows
 }

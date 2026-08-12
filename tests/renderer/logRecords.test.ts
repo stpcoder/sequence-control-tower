@@ -283,6 +283,28 @@ describe('renderer log result projection', () => {
     expect(grid.total).toBe(66.7)
   })
 
+  it('keeps PASS and FAIL counts together in one grid cell and export', () => {
+    const grid = buildPivotGrid(projectLogRecords(files), {
+      rows: ['temperature'], columns: [], aggregation: 'pass_fail', filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(grid.cells[0][0]).toEqual({
+      value: 2,
+      sourceIds: ['pass', 'halt'],
+      breakdown: { passCount: 1, failCount: 1, definitiveCount: 2 },
+    })
+    expect(grid.breakdown).toEqual({ passCount: 1, failCount: 2, definitiveCount: 3 })
+    const display = (cell: typeof grid.cells[number][number]) => `P ${cell.breakdown?.passCount ?? 0} · F ${cell.breakdown?.failCount ?? 0}`
+    const csv = serializePivotGridCsv(grid, ['온도'], {
+      formatCell: display,
+      rowTotals: grid.cells.map((cells) => display(cells[0])),
+      columnTotals: [`P ${grid.breakdown?.passCount ?? 0} · F ${grid.breakdown?.failCount ?? 0}`],
+      grandTotal: `P ${grid.breakdown?.passCount ?? 0} · F ${grid.breakdown?.failCount ?? 0}`,
+    })
+    expect(csv).toContain('"P 1 · F 1"')
+    expect(csv).toContain('"P 1 · F 2"')
+  })
+
   it('counts distinct Samples and excludes unknown outcomes from the FAIL-rate denominator', () => {
     const rows = projectLogRecords([
       { id: 'pass-a', name: 'SMP-01_T85.log', text: '@PASS' },
@@ -293,6 +315,7 @@ describe('renderer log result projection', () => {
     const filters = { query: '', result: 'all' as const, review: 'all' as const }
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'sample_count', filters }).total).toBe(3)
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_count', filters }).total).toBe(2)
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_fail', filters }).breakdown).toEqual({ passCount: 2, failCount: 1, definitiveCount: 3 })
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'fail_rate', filters }).total).toBe(33.3)
   })
 

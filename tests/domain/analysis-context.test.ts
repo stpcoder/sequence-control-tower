@@ -60,4 +60,14 @@ describe('analysis selections handed to the native Agent', () => {
     expect(request.prompt).toContain('VDD=1.315 · FAIL률 0%')
     expect(request.prompt).toContain('서로 다른 평가 폴더는 합치지 말고')
   })
+
+  it('hands the combined PASS and FAIL cell value to the Agent unchanged', () => {
+    const request = pivotSelectionAgentContext({
+      rows: [row('a', 'screen', 'PASS'), row('b', 'screen', 'TEST_FAIL')],
+      rowAxes: ['skew'], columnAxes: ['vdd'], rowValues: ['SS'], columnValues: ['1.295'],
+      aggregation: 'pass_fail', displayValue: 'P 1 · F 1',
+    })
+    expect(request.prompt).toContain('PASS / FAIL P 1 · F 1')
+    expect(request.prompt).toContain('PASS 1, TEST_FAIL 1')
+  })
 })

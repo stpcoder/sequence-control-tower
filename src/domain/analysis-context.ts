@@ -33,7 +33,7 @@ const dimensionLabel = (dimension: PivotDimension): string => ({
 })[dimension]
 
 const aggregationLabel = (aggregation: PivotAggregation): string => ({
-  count: '로그 파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 로그', fail_count: 'FAIL 로그', fail_rate: 'FAIL률', evidence_count: '판정 신호 수',
+  count: '로그 파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 로그', fail_count: 'FAIL 로그', pass_fail: 'PASS / FAIL', fail_rate: 'FAIL률', evidence_count: '판정 신호 수',
 })[aggregation]
 
 export function searchAgentContext(input: SearchAnalysisContextInput): AgentAnalysisContextRequest {

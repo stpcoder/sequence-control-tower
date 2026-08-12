@@ -35,6 +35,7 @@ import {
   type LogRecordFilters,
   type LogResultRecord,
   type PivotAggregation,
+  type PivotCell,
   type PivotDimension,
   type PivotHeader,
 } from '../state/logRecords'
@@ -106,6 +107,7 @@ const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
   { value: 'grid_count', label: 'Grid 수' },
   { value: 'pass_count', label: 'PASS 로그' },
   { value: 'fail_count', label: 'FAIL 로그' },
+  { value: 'pass_fail', label: 'PASS / FAIL' },
   { value: 'fail_rate', label: 'FAIL률' },
 ]
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
@@ -123,6 +125,7 @@ type MarkedPivotCell = {
   column: PivotHeader
   value: number
   sourceIds: readonly string[]
+  breakdown?: PivotCell['breakdown']
 }
 
 export type PivotColumnGroup = { key: string; label: string; span: number }
@@ -203,7 +206,8 @@ async function copyText(contents: string): Promise<void> {
   if (!copied) throw new Error('클립보드에 복사하지 못했습니다.')
 }
 
-function formatPivotValue(value: number, aggregation: PivotAggregation): string {
+function formatPivotValue(value: number, aggregation: PivotAggregation, breakdown?: PivotCell['breakdown']): string {
+  if (aggregation === 'pass_fail') return `P ${breakdown?.passCount ?? 0} · F ${breakdown?.failCount ?? 0}`
   if (aggregation === 'fail_rate') return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
   return value.toLocaleString('ko-KR')
 }
@@ -231,6 +235,7 @@ export function evaluationMetricSummary(aggregation: PivotAggregation, rows: rea
   if (aggregation === 'grid_count') return `확인된 Grid ${gridKeys.size.toLocaleString()}개${gridUnknown ? ` · Grid 미확인 로그 ${gridUnknown.toLocaleString()}개 제외` : ''}`
   if (aggregation === 'pass_count') return `PASS로 판정된 로그 파일 ${pass.toLocaleString()}개`
   if (aggregation === 'fail_count') return `FAIL·Training Fail·Halt·Reboot로 판정된 로그 파일 ${fail.toLocaleString()}개`
+  if (aggregation === 'pass_fail') return `PASS ${pass.toLocaleString()}회 / FAIL ${fail.toLocaleString()}회 · 판정 완료 ${decided.toLocaleString()}회`
   if (aggregation === 'fail_rate') return `FAIL ${fail.toLocaleString()}회 / 판정 완료 ${decided.toLocaleString()}회 · 미확인 결과는 제외`
   if (aggregation === 'evidence_count') return '판정에 사용한 marker 줄 수'
   return `현재 범위의 로그 파일 ${rows.length.toLocaleString()}개`
@@ -353,8 +358,8 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const grid = useMemo(() => buildPivotGrid(scopedRecords, { rows: rowAxes, columns: columnAxes, ...pivotConfig }), [columnAxes, pivotConfig, rowAxes, scopedRecords])
   const rowTotals = useMemo(() => buildPivotGrid(scopedRecords, { rows: rowAxes, columns: [], ...pivotConfig }), [pivotConfig, rowAxes, scopedRecords])
   const columnTotals = useMemo(() => buildPivotGrid(scopedRecords, { rows: [], columns: columnAxes, ...pivotConfig }), [columnAxes, pivotConfig, scopedRecords])
-  const rowTotalByKey = useMemo(() => new Map(rowTotals.rows.map((row, index) => [row.key, rowTotals.cells[index]?.[0]?.value ?? 0])), [rowTotals])
-  const columnTotalByKey = useMemo(() => new Map(columnTotals.columns.map((column, index) => [column.key, columnTotals.cells[0]?.[index]?.value ?? 0])), [columnTotals])
+  const rowTotalByKey = useMemo(() => new Map(rowTotals.rows.map((row, index) => [row.key, rowTotals.cells[index]?.[0]])), [rowTotals])
+  const columnTotalByKey = useMemo(() => new Map(columnTotals.columns.map((column, index) => [column.key, columnTotals.cells[0]?.[index]])), [columnTotals])
   const columnHeaderRows = useMemo(() => pivotColumnHeaderRows(grid.columns, columnAxes.length), [columnAxes.length, grid.columns])
   const maxCellValue = useMemo(() => Math.max(0, ...grid.cells.flat().map((cell) => cell.value)), [grid.cells])
 
@@ -364,6 +369,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     column,
     value: grid.cells[rowIndex][columnIndex].value,
     sourceIds: grid.cells[rowIndex][columnIndex].sourceIds,
+    breakdown: grid.cells[rowIndex][columnIndex].breakdown,
   }))), [grid])
   const markedCells = useMemo(() => pivotCells.filter((cell) => markedCellKeys.has(cell.key) && cell.sourceIds.length), [markedCellKeys, pivotCells])
   const markedSourceIds = useMemo(() => new Set(markedCells.flatMap((cell) => cell.sourceIds)), [markedCells])
@@ -438,9 +444,14 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     setResultFilter('all'); setFolderFilter('all'); setFailOnly(false); setUnknownMetadataOnly(false); clearSelection()
   }
   const rowLabels = rowAxes.length ? rowAxes.map((axis) => DIMENSION_LABEL[axis]) : ['전체']
-  const pivotExportOptions = {
-    rowTotals: grid.rows.map((row) => rowTotalByKey.get(row.key) ?? 0),
-    columnTotals: grid.columns.map((column) => columnTotalByKey.get(column.key) ?? 0),
+  const pivotExportOptions = aggregation === 'pass_fail' ? {
+    rowTotals: grid.rows.map((row) => { const cell = rowTotalByKey.get(row.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
+    columnTotals: grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
+    grandTotal: formatPivotValue(grid.total, aggregation, grid.breakdown),
+    formatCell: (cell: PivotCell) => formatPivotValue(cell.value, aggregation, cell.breakdown),
+  } : {
+    rowTotals: grid.rows.map((row) => rowTotalByKey.get(row.key)?.value ?? 0),
+    columnTotals: grid.columns.map((column) => columnTotalByKey.get(column.key)?.value ?? 0),
     grandTotal: grid.total,
     formatValue: (value: number) => aggregation === 'fail_rate' ? formatPivotValue(value, aggregation) : value,
   }
@@ -480,7 +491,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       selections: markedCells.map((cell) => ({
         rowValues: cell.row.values,
         columnValues: cell.column.values,
-        displayValue: formatPivotValue(cell.value, aggregation),
+        displayValue: formatPivotValue(cell.value, aggregation, cell.breakdown),
       })),
     }))
   }
@@ -522,11 +533,13 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
             const cellKey = `${row.key}-${column.key}`
             const active = markedCellKeys.has(cellKey)
             const selectable = cell.sourceIds.length > 0
-            const display = formatPivotValue(cell.value, aggregation)
-            const intensity = maxCellValue ? Math.max(.05, cell.value / maxCellValue) : 0
+            const display = formatPivotValue(cell.value, aggregation, cell.breakdown)
+            const intensity = aggregation === 'pass_fail'
+              ? cell.breakdown?.definitiveCount ? Math.max(.05, cell.breakdown.failCount / cell.breakdown.definitiveCount) : 0
+              : maxCellValue ? Math.max(.05, cell.value / maxCellValue) : 0
             return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} aria-pressed={active} title={selectable ? `${cell.sourceIds.length.toLocaleString()}개 로그 · Ctrl/⌘ 클릭으로 조건 추가` : '관련 로그 없음'} aria-label={selectable ? `${display}, 관련 로그 ${cell.sourceIds.length}개${active ? ', 선택됨' : ''}` : `${display}, 관련 로그 없음`} onClick={(event) => setMarkedCellKeys((current) => nextPivotMarking(current, cellKey, event.ctrlKey || event.metaKey || event.shiftKey))}>{display}</button></td>
-          })}<td className="pivot-total">{formatPivotValue(rowTotalByKey.get(row.key) ?? 0, aggregation)}</td></tr>)}</tbody>
-          <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => <td className="pivot-total" key={column.key}>{formatPivotValue(columnTotalByKey.get(column.key) ?? 0, aggregation)}</td>)}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation)}</td></tr></tfoot>
+          })}<td className="pivot-total">{formatPivotValue(rowTotalByKey.get(row.key)?.value ?? 0, aggregation, rowTotalByKey.get(row.key)?.breakdown)}</td></tr>)}</tbody>
+          <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => <td className="pivot-total" key={column.key}>{formatPivotValue(columnTotalByKey.get(column.key)?.value ?? 0, aggregation, columnTotalByKey.get(column.key)?.breakdown)}</td>)}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation, grid.breakdown)}</td></tr></tfoot>
         </table></div>
       </section>
 

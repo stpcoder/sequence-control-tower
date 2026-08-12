@@ -29,6 +29,10 @@ describe('pattern layout persistence', () => {
     })).toMatchObject({ rowAxes: ['frequencyMHz', 'vdd', 'pattern'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate' })
   })
 
+  it('persists the combined PASS and FAIL display', () => {
+    expect(normalizePatternLayout({ aggregation: 'pass_fail' }).aggregation).toBe('pass_fail')
+  })
+
   it('keeps the layout preset in a reused project clone plan', () => {
     const source: ProjectSnapshot = {
       schemaVersion: 2, id: 'source', name: 'source', revision: 3, archived: false,

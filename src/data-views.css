@@ -1200,6 +1200,7 @@
 }
 
 .pivot-table.metric-fail_count td button,
+.pivot-table.metric-pass_fail td button,
 .pivot-table.metric-fail_rate td button { background: rgba(239, 124, 130, calc(var(--pivot-intensity, 0) * .2)); }
 .pivot-table.metric-evidence_count td button { background: rgba(178, 154, 241, calc(var(--pivot-intensity, 0) * .18)); }
 .pivot-table td button:disabled { color: #6f7782; opacity: 1; }
