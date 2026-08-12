@@ -24,8 +24,10 @@
 3. marker 존재·부재·개수·순서를 규칙으로 저장하고 로그를 일괄 판정합니다.
 4. Agent가 파일명 조건, SoC 부팅 profile, 입력 명령, 상태 marker와 조건별 실패 경향을 확인합니다.
 5. 엔지니어가 사용한 Ctrl-F·정규식 순서를 확인한 뒤 프로젝트 분석 절차로 재사용합니다.
-6. 결과를 N × M 표로 정리하고 CSV/TSV로 내보냅니다.
+6. 결과 항목을 가로·세로로 배치하고 FAIL률을 확인한 뒤 Excel용 표 또는 Spotfire용 원본 CSV로 공유합니다.
 7. 불량 가설, 평가, RT, 개선·검출 실험과 source 근거를 평가 이력에 남깁니다.
+
+아직 정리하지 않은 평가 폴더의 Agent 분석을 시작하면 목적과 결론에 필요한 미확인 항목만 한 번에 하나씩 묻습니다. 기존 폴더에서 확정한 Ctrl-F·정규식 순서는 testMode·SoC·Boot profile이 호환될 때만 새 폴더의 검토 후보로 적용됩니다.
 
 ## Agent 네이티브 구조
 
@@ -36,7 +38,8 @@ Agent는 일반 채팅에 로그 전체를 올리는 방식이 아닙니다. 프
 - Qualcomm/MediaTek SoC 및 부팅 profile
 - 콘솔 입력 명령과 장비 출력 분리
 - 결정적 Pass/Fail·training fail·reboot·halt 판정
-- 온도, VDD, DQ, BL, Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column, Pattern, 주파수, SKEW, Lot, Sample, Die별 분자·분모
+- Sample·SKEW별 평가 범위, Grid·Sequence 조건, 온도/VDD/4-Corner/주파수/Test Mode별 분자·분모
+- Hdiag Fail 본문의 CS, Rank, Bank Group, Bank, Row, Column, WR, RD, DQ, BL 분포
 - 제한 검색과 최대 24줄 근거 확인
 - 확정된 엔지니어 분석 절차 적용
 

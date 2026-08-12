@@ -7,7 +7,7 @@ describe('manual and product contract', () => {
   it('documents configurable result fields without exposing retired candidate columns', async () => {
     const manual = await readFile(resolve('docs/manual/04-결과-정리.md'), 'utf8')
     expect(manual).toContain('열 선택')
-    expect(manual).toContain('근거 개수')
+    expect(manual).toContain('판정 근거 열')
     expect(manual).not.toContain('sample_candidate')
     expect(DEFAULT_EXPORT_COLUMNS.length).toBeGreaterThan(5)
     expect(EVIDENCE_EXPORT_COLUMNS.length).toBeGreaterThan(0)

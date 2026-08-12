@@ -67,8 +67,8 @@ describe('ProjectStore', () => {
       equipmentProfiles: [{ alias: 'SM-8975 실장기', profileId: 'qualcomm-default', vendor: 'qualcomm' as const, socModels: ['SM-8975'], filenameAliases: ['SM8975'], updatedAt: '2026-08-10T00:00:00.000Z' }],
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [
-        { id: 'base', name: 'baseline', purpose: 'screening' as const, dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
-        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', evaluationScopeId: attached.folders[0].rootId, name: 'DQ9 RT', purpose: 'reproduction' as const, dimensions: { dq: 9, testMode: 'VPERI' }, interpretation: 'DQ9에서 동일 조건 재평가도 실패했습니다.', authorship: 'agent' as const, reviewState: 'confirmed' as const, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
+        { id: 'base', name: 'baseline', purpose: 'screening' as const, relation: 'baseline' as const, relationConfidence: 1, relationReason: '최초 불량', dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
+        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', evaluationScopeId: attached.folders[0].rootId, name: 'DQ9 RT', purpose: 'reproduction' as const, relation: 'retest' as const, relationConfidence: .96, relationReason: '같은 Sample·Sequence·조건', dimensions: { dq: 9, testMode: 'VPERI' }, interpretation: 'DQ9에서 동일 조건 재평가도 실패했습니다.', authorship: 'agent' as const, reviewState: 'confirmed' as const, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
       ],
       evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
     }

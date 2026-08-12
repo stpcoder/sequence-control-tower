@@ -59,8 +59,8 @@ const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'grid', label: 'Grid' },
   { key: 'stageResults', label: '진행 단계' },
   { key: 'result', label: '결과' },
-  { key: 'review', label: '판정 검토' },
-  { key: 'evidenceCount', label: '근거' },
+  { key: 'review', label: '확인 상태' },
+  { key: 'evidenceCount', label: '판정 신호 수' },
 ]
 
 const DEFAULT_UI_EXPORT_COLUMNS = EXPORT_COLUMN_DEFINITIONS
@@ -289,7 +289,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
               <div className="export-columns-heading"><strong>내보낼 열</strong></div>
               <label className="export-column-option export-column-group">
                 <input type="checkbox" checked={evidenceColumnsSelected} onChange={(event) => toggleEvidenceColumns(event.target.checked)} />
-                <span><strong>근거 수 포함</strong></span>
+                <span><strong>판정 근거 열</strong></span>
               </label>
               {EXPORT_SECTIONS.map((section) => <section className="export-column-section" key={section.key}><h3>{section.label}</h3>{EXPORT_COLUMN_DEFINITIONS.filter((column) => column.section === section.key).map((column) => (
                 <label className="export-column-option" key={column.key}><input type="checkbox" checked={selectedExportColumnKeys.has(column.key)} onChange={(event) => toggleExportColumn(column.key, event.target.checked)} /><span>{column.label}</span></label>
@@ -307,11 +307,11 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
 
       <section className="data-filter-bar" aria-label="결과 필터">
         <label className="data-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="파일명, 폴더, 조건 검색" aria-label="결과 검색" /></label>
-        <label><span>평가</span><select value={folder} onChange={(event) => { setFolder(event.target.value); setPage(1) }}><option value="all">전체 폴더</option>{folders.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
+        <label><span>평가 폴더</span><select value={folder} onChange={(event) => { setFolder(event.target.value); setPage(1) }}><option value="all">전체 폴더</option>{folders.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
         <label><span>결과</span><select value={result} onChange={(event) => { setResult(event.target.value as ResultLabel | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_LABEL_KO).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <label><span>검토</span><select value={review} onChange={(event) => { setReview(event.target.value as ReviewState | 'all'); setPage(1) }}><option value="all">전체</option><option value="needs_review">검토 필요</option><option value="confirmed">확정</option></select></label>
-        <label><span>구간</span><select value={stage} onChange={(event) => { setStage(event.target.value as ResultStageGroup | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_STAGE_GROUP_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <label><span>판정</span><select value={stageStatus} onChange={(event) => { setStageStatus(event.target.value as EvaluationStageStatus | 'all'); setPage(1) }}><option value="all">전체</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="reached">도달</option></select></label>
+        <label><span>확인 상태</span><select value={review} onChange={(event) => { setReview(event.target.value as ReviewState | 'all'); setPage(1) }}><option value="all">전체</option><option value="needs_review">검토 필요</option><option value="confirmed">확정</option></select></label>
+        <label><span>진행 단계</span><select value={stage} onChange={(event) => { setStage(event.target.value as ResultStageGroup | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_STAGE_GROUP_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label><span>단계 결과</span><select value={stageStatus} onChange={(event) => { setStageStatus(event.target.value as EvaluationStageStatus | 'all'); setPage(1) }}><option value="all">전체</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="reached">도달</option></select></label>
         <button className="results-preset" aria-pressed={preset === 'fail'} onClick={() => { setPreset((current) => current === 'fail' ? null : 'fail'); setPage(1) }}>FAIL만</button>
         <button className="results-preset" aria-pressed={preset === 'needs_review'} onClick={() => { setPreset((current) => current === 'needs_review' ? null : 'needs_review'); setReview('all'); setPage(1) }}>검토 필요만</button>
         {hasFilters ? <button className="clear-filter" onClick={clearFilters}><FilterX size={16} />초기화</button> : null}
@@ -337,7 +337,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
                 <td><div className="stage-results">{resultStageCheckpoints(row.stageResults, row.fileName, row.result).length ? resultStageCheckpoints(row.stageResults, row.fileName, row.result).map((item) => <span className={`stage-result ${item.status}`} key={item.group}>{item.label} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
                 <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span>{row.resultSource === 'candidate' ? <small className="row-note">후보</small> : null}</td>
                 <td><span className={`review-label ${row.review}`}>{row.review === 'confirmed' ? '확정' : '검토 필요'}</span></td>
-                <td><span className="evidence-count">{row.evidenceCount}</span>{row.selectedEvidenceCount ? <small className="row-note">선택됨</small> : null}</td>
+                <td title="PASS·FAIL·Halt·Reboot 등 현재 판정에 사용된 로그 줄 수"><span className="evidence-count">{row.evidenceCount}</span>{row.selectedEvidenceCount ? <small className="row-note">직접 선택</small> : null}</td>
               </tr>
             ))}
           </tbody>

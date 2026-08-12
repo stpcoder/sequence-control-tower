@@ -18,7 +18,7 @@ features:
   - title: 로그 검색
     details: 긴 로그에서 문자열과 정규식을 찾고 결과 순서를 저장합니다.
   - title: 결과 정리
-    details: 판정과 조건을 표로 확인하고 CSV 또는 TSV로 저장합니다.
+    details: 조건을 가로·세로로 배치해 FAIL률을 확인하고, Excel용 표 또는 Spotfire용 원본 CSV로 공유합니다.
   - title: 평가 이력
     details: 평가 폴더의 목적, 결과, 조건, 정성 해석을 기록합니다.
 ---

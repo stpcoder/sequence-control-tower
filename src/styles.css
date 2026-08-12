@@ -630,6 +630,8 @@ button:disabled {
   background: var(--blue);
 }
 
+.workbench-is-open .agent-fab { display: none; }
+
 .view {
   min-height: 100%;
   padding: 22px 26px 30px;
@@ -779,6 +781,7 @@ button:disabled {
 }
 
 .agent-empty p { margin: 0; }
+.agent-empty .agent-loading { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .agent-start,
 .agent-review-actions button {
   display: inline-flex;
@@ -876,7 +879,11 @@ button:disabled {
 .native-agent-tools > div small { display: block; margin-top: 2px; overflow-wrap: anywhere; color: var(--dim); font-size: 11px; white-space: normal; }
 .native-agent-tools > div.running small { color: var(--blue); }
 .native-agent-tools > div.failed small { color: var(--signal); }
-.native-agent-running-tools { padding: 8px 0; color: var(--blue); font-size: 11px; }
+.native-agent-running-tools { display: grid; padding: 7px 0; color: var(--muted); font-size: 11px; }
+.native-agent-running-tools > div { display: grid; min-width: 0; grid-template-columns: 14px minmax(76px, auto) 1fr; align-items: baseline; gap: 6px; padding: 4px 0; }
+.native-agent-running-tools svg { color: var(--blue); }
+.native-agent-running-tools span { color: #c3c9d2; }
+.native-agent-running-tools small { min-width: 0; overflow: hidden; color: var(--dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .agent-stage.retry-only { justify-content: flex-end; min-height: 36px; }
 .agent-stage.retry-only button { display: grid; width: 28px; height: 28px; margin-left: 0; place-items: center; border-radius: 6px; }
 .agent-stage.retry-only button:hover { color: var(--text); background: #242a33; }
@@ -958,7 +965,9 @@ button:disabled {
 .native-agent-controls button svg { width: 18px; height: 18px; }
 .agent-evaluation-review { margin: 8px 0 4px; border-top: 1px solid var(--sct-line); border-bottom: 1px solid var(--sct-line); }
 .agent-evaluation-review-head { display: flex; min-height: 42px; align-items: center; justify-content: space-between; }
+.agent-evaluation-review-head > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
 .agent-evaluation-review-head strong { font-size: 13px; font-weight: 650; }
+.agent-evaluation-review-head span { color: var(--sct-dim); font-size: 11px; }
 .agent-evaluation-review-head button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 6px; color: var(--sct-dim); background: transparent; cursor: pointer; }
 .agent-evaluation-review-head button:hover { color: var(--sct-text); background: var(--sct-hover); }
 .agent-evaluation-progress { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px solid var(--sct-line-soft); color: var(--sct-muted); font-size: 12px; }
@@ -973,11 +982,27 @@ button:disabled {
 .agent-evaluation-proposal > div:first-child span { color: var(--sct-dim); font-size: 11px; }
 .agent-evaluation-proposal p { margin: 8px 0; color: var(--sct-muted); font-size: 12px; line-height: 1.55; }
 .agent-evaluation-proposal ul { display: flex; flex-wrap: wrap; gap: 5px 12px; margin: 0; padding: 0; color: var(--sct-dim); font-size: 11px; list-style: none; }
+.agent-evaluation-relation { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--sct-line-soft); }
+.agent-evaluation-relation > div:first-child { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 7px; align-items: center; }
+.agent-evaluation-relation > div:first-child > span { color: var(--sct-dim); font-size: 11px; }
+.agent-evaluation-relation > div:first-child > strong { overflow: hidden; color: var(--sct-text); font-size: 12px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.agent-evaluation-relation > div:first-child > button { padding: 3px 4px; border: 0; color: var(--sct-blue); background: transparent; font-size: 11px; cursor: pointer; }
+.agent-evaluation-relation > small { display: block; margin-top: 5px; color: var(--sct-dim); font-size: 11px; line-height: 1.45; }
+.agent-evaluation-relation-options { display: grid; margin-top: 7px; }
+.agent-evaluation-relation-options button { display: flex; min-height: 31px; align-items: center; gap: 7px; padding: 0; border: 0; border-top: 1px solid rgba(51,56,66,.45); color: var(--sct-muted); background: transparent; font-size: 11.5px; text-align: left; cursor: pointer; }
+.agent-evaluation-relation-options button i { width: 13px; height: 13px; border: 1px solid #596370; border-radius: 50%; }
+.agent-evaluation-relation-options button.is-selected { color: var(--sct-text); }
+.agent-evaluation-relation-options button.is-selected i { border: 4px solid var(--sct-blue); }
 .agent-file-mentions { position: absolute; z-index: 5; right: 0; bottom: calc(100% + 6px); left: 0; display: grid; max-height: 220px; overflow: auto; padding: 4px; border: 1px solid #3b424e; border-radius: 8px; background: #191d23; box-shadow: 0 14px 34px rgba(0,0,0,.38); }
 .agent-file-mentions button { display: grid; gap: 2px; width: 100%; padding: 7px 8px; border: 0; border-radius: 5px; color: #dce0e5; text-align: left; background: transparent; cursor: pointer; }
 .agent-file-mentions button:hover { background: #272d36; }
 .agent-file-mentions span, .agent-file-mentions small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-file-mentions small { color: #7e8794; font-size: 10px; }
+.agent-selected-files { display: flex; min-width: 0; gap: 5px; margin-bottom: 6px; overflow-x: auto; }
+.agent-selected-files > span { display: flex; min-width: 0; max-width: 100%; height: 27px; align-items: center; gap: 5px; padding: 0 3px 0 7px; border: 1px solid #3b424e; border-radius: 6px; color: #aeb7c4; background: #20252d; }
+.agent-selected-files b { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.agent-selected-files button { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; color: #7e8794; background: transparent; cursor: pointer; }
+.agent-selected-files button:hover { color: #eef0f3; background: #303640; }
 
 @media (max-width: 600px) {
   .agent-panel { top: 8px; right: 8px; bottom: 8px; width: calc(100vw - 16px); }

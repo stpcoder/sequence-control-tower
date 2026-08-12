@@ -14,7 +14,7 @@ describe('pattern layout persistence', () => {
     expect(normalizePatternLayout({
       rowAxes: ['sample', 'sample'], columnAxes: ['not-a-dimension', 'folder'], aggregation: 'invalid',
       resultFilter: 'INVALID', folderFilter: 'bad\nfolder', failOnly: 'yes', unknownMetadataOnly: true,
-    })).toEqual({ ...DEFAULT_PATTERN_LAYOUT, columnAxes: ['temperature', 'folder'], unknownMetadataOnly: true })
+    })).toEqual({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['sample'], columnAxes: ['folder'], unknownMetadataOnly: true })
   })
 
   it('writes one reserved JSON preset identity with the complete layout', () => {
@@ -25,8 +25,8 @@ describe('pattern layout persistence', () => {
 
   it('retains DRAM and operating-condition axes', () => {
     expect(normalizePatternLayout({
-      rowAxes: ['frequencyMHz', 'vdd'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_count',
-    })).toMatchObject({ rowAxes: ['frequencyMHz', 'vdd'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_count' })
+      rowAxes: ['frequencyMHz', 'vdd', 'pattern', 'mode'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate',
+    })).toMatchObject({ rowAxes: ['frequencyMHz', 'vdd', 'pattern'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate' })
   })
 
   it('keeps the layout preset in a reused project clone plan', () => {

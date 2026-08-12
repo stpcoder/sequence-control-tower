@@ -65,15 +65,15 @@ export function saveConfirmationMessage(
   apiKeyProvided: boolean,
 ): string {
   if (summary.managedByEnvironment.apiKey) {
-    return '설정을 저장했습니다. API key는 환경변수로 공급되므로 이 앱에 암호화 저장되지 않습니다.'
+    return '설정을 저장했습니다. API 키는 환경변수로 공급되므로 이 앱에 암호화 저장되지 않습니다.'
   }
   if (hostChanged && !apiKeyProvided) {
-    return 'Gateway 주소가 바뀌어 이전 host의 API key를 안전하게 해제했습니다.'
+    return 'API 주소가 바뀌어 이전 주소의 API 키를 안전하게 해제했습니다.'
   }
   if (summary.apiKeyPersisted) {
-    return '설정과 암호화된 API key를 저장했습니다.'
+    return '설정과 암호화된 API 키를 저장했습니다.'
   }
-  return '설정을 저장했습니다. API key는 OS 암호화 가능 여부에 따라 세션에만 유지될 수 있습니다.'
+  return '설정을 저장했습니다. API 키는 OS 암호화 가능 여부에 따라 세션에만 유지될 수 있습니다.'
 }
 
 export function SettingsView() {
@@ -157,7 +157,7 @@ export function SettingsView() {
       setSummary(updated)
       setLoadedBaseUrl(updated.baseUrl)
       setApiKey('')
-      setMessage(hostChanged && !apiKey ? 'API key를 다시 입력해 주세요.' : '')
+      setMessage(hostChanged && !apiKey ? 'API 키를 다시 입력해 주세요.' : '')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '설정을 저장하지 못했습니다.')
     } finally {
@@ -171,23 +171,23 @@ export function SettingsView() {
     const action = apiKeyAction(apiKey, summary)
     if (action === 'clear-input') {
       setApiKey('')
-      setMessage('입력 중인 API key를 지웠습니다.')
+      setMessage('입력 중인 API 키를 지웠습니다.')
       return
     }
     if (action === 'environment-managed') {
-      setMessage('API key는 환경변수로 관리되어 앱에서 삭제할 수 없습니다.')
+      setMessage('API 키는 환경변수로 관리되어 앱에서 삭제할 수 없습니다.')
       return
     }
     if (action !== 'clear-stored') return
 
     const api = window.sequenceIntelligence
     if (!api) {
-      setMessage('웹 미리보기에서는 저장된 API key를 삭제하지 않습니다.')
+      setMessage('웹 미리보기에서는 저장된 API 키를 삭제하지 않습니다.')
       return
     }
 
     setSavingState(true)
-    setMessage('저장된 API key를 삭제하고 있습니다…')
+    setMessage('저장된 API 키를 삭제하고 있습니다…')
     try {
       const updated = await api.settings.saveLlm(buildApiKeyClearRequest({
         baseUrl,
@@ -200,9 +200,9 @@ export function SettingsView() {
       setSummary(updated)
       setLoadedBaseUrl(updated.baseUrl)
       setApiKey('')
-      setMessage('저장된 API key를 삭제했습니다.')
+      setMessage('저장된 API 키를 삭제했습니다.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '저장된 API key를 삭제하지 못했습니다.')
+      setMessage(error instanceof Error ? error.message : '저장된 API 키를 삭제하지 못했습니다.')
     } finally {
       setSavingState(false)
     }
@@ -237,22 +237,22 @@ export function SettingsView() {
     <div className="view settings-view">
       <div className="settings-layout">
         <section className="settings-content guide-llm-settings">
-          <div className="settings-title"><h2>LLM 연결</h2><p>OpenAI-compatible 사내 API를 연결합니다. API key는 환경변수 또는 이 PC의 안전한 저장소를 사용합니다.</p></div>
+          <div className="settings-title"><h2>LLM 연결</h2><p>OpenAI-compatible 사내 API를 연결합니다. API 키는 환경변수 또는 이 PC의 안전한 저장소를 사용합니다.</p></div>
 
           <div className="settings-card">
-            <div className="setting-row"><label htmlFor="base-url"><strong>Base URL</strong><span>/v1 endpoint</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://llm-gateway.example/v1" /></div>
-            <div className="setting-row"><label htmlFor="model"><strong>Model</strong><span>{models.length ? `${models.length}개 확인됨` : '모델 ID'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="예: qwen3-32b" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
-            <div className="setting-row"><label htmlFor="key"><strong>API key</strong><span>{summary?.managedByEnvironment.apiKey ? '환경변수 관리 중' : summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · key 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : isVertexBaseUrl(baseUrl) ? 'gcloud 자동 인증' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} disabled={saving || summary?.managedByEnvironment.apiKey === true} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.managedByEnvironment.apiKey ? '환경변수로 관리됨' : summary?.apiKeyConfigured ? '••••••••••••••••' : isVertexBaseUrl(baseUrl) ? '입력하지 않음' : '선택 사항'} /><button type="button" disabled={saving || apiKeyAction(apiKey, summary) === 'environment-managed'} onClick={() => void handleApiKeyAction()}>{saving ? '처리 중…' : apiKeyActionLabel(apiKeyAction(apiKey, summary))}</button></div>{summary?.managedByEnvironment.apiKey && <p className="settings-note">환경변수로 관리 중인 API key는 앱에서 입력하거나 저장할 수 없습니다.</p>}</div>
+            <div className="setting-row"><label htmlFor="base-url"><strong>API 주소</strong><span>/v1 엔드포인트</span></label><input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://llm-gateway.example/v1" /></div>
+            <div className="setting-row"><label htmlFor="model"><strong>모델</strong><span>{models.length ? `${models.length}개 확인됨` : '모델 ID'}</span></label><input id="model" list="available-models" value={model} onChange={(event) => setModel(event.target.value)} placeholder="예: qwen3-32b" /><datalist id="available-models">{models.map((item) => <option value={item} key={item} />)}</datalist></div>
+            <div className="setting-row"><label htmlFor="key"><strong>API 키</strong><span>{summary?.managedByEnvironment.apiKey ? '환경변수 관리 중' : summary?.apiKeyConfigured && urlOrigin(loadedBaseUrl) !== urlOrigin(baseUrl) ? '주소 변경 · 키 재입력 필요' : summary?.apiKeyConfigured ? '설정됨' : isVertexBaseUrl(baseUrl) ? 'gcloud 자동 인증' : '선택 사항'}</span></label><div className="secret-input"><KeyRound size={16} /><input id="key" type="password" value={apiKey} disabled={saving || summary?.managedByEnvironment.apiKey === true} onChange={(event) => setApiKey(event.target.value)} placeholder={summary?.managedByEnvironment.apiKey ? '환경변수로 관리됨' : summary?.apiKeyConfigured ? '••••••••••••••••' : isVertexBaseUrl(baseUrl) ? '입력하지 않음' : '선택 사항'} /><button type="button" disabled={saving || apiKeyAction(apiKey, summary) === 'environment-managed'} onClick={() => void handleApiKeyAction()}>{saving ? '처리 중…' : apiKeyActionLabel(apiKeyAction(apiKey, summary))}</button></div>{summary?.managedByEnvironment.apiKey && <p className="settings-note">환경변수로 관리 중인 API 키는 앱에서 입력하거나 저장할 수 없습니다.</p>}</div>
             <div className="connection-test"><span><i className={summary?.configured || models.length ? '' : 'idle'} /> {summary?.configured || models.length ? '연결됨' : '로컬 분석'}</span><button type="button" disabled={discovering || refreshing || !baseUrl.trim()} onClick={() => void discoverModels()}><PlugZap size={15} /> {discovering ? '연결 중' : '모델 확인'}</button></div>
           </div>
 
           <div className="settings-two-column">
             <div className="settings-card compact-card guide-rate-limits">
               <div className="settings-section-title"><strong>호출 제한</strong></div>
-              <label className="inline-field"><span>RPM</span><input type="number" min={1} max={10_000} step={1} value={requestsPerMinute} onChange={(event) => setRequestsPerMinute(event.target.value)} /></label>
-              <label className="inline-field"><span>TPM</span><input type="number" min={MIN_LLM_TOKENS_PER_MINUTE} max={10_000_000} step={1} value={tokensPerMinute} onChange={(event) => setTokensPerMinute(event.target.value)} /></label>
-              <label className="inline-field"><span>응답 시간 (초)</span><input type="number" min={5} max={300} step={1} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} /></label>
-              <label className="inline-field"><span>Retries</span><input type="number" min={0} max={5} step={1} value={maxRetries} onChange={(event) => setMaxRetries(event.target.value)} /></label>
+              <label className="inline-field"><span>분당 요청 (RPM)</span><input type="number" min={1} max={10_000} step={1} value={requestsPerMinute} onChange={(event) => setRequestsPerMinute(event.target.value)} /></label>
+              <label className="inline-field"><span>분당 토큰 (TPM)</span><input type="number" min={MIN_LLM_TOKENS_PER_MINUTE} max={10_000_000} step={1} value={tokensPerMinute} onChange={(event) => setTokensPerMinute(event.target.value)} /></label>
+              <label className="inline-field"><span>응답 제한 시간 (초)</span><input type="number" min={5} max={300} step={1} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} /></label>
+              <label className="inline-field"><span>재시도 횟수</span><input type="number" min={0} max={5} step={1} value={maxRetries} onChange={(event) => setMaxRetries(event.target.value)} /></label>
             </div>
 
             <div className="settings-card compact-card">

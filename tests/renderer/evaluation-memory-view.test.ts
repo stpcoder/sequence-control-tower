@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationFolderBranches, evaluationFolderFlow, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
+import { addEvaluationWithEvidence, addFailureHypothesis, buildEvaluationContextMarkdown, evaluationAnalysisRequest, evaluationBranchSummary, evaluationFolderBranches, evaluationFolderFlow, evaluationLogResultLabel, evaluationMemoryCsv, groupEvaluationFolders, linkedEvidenceLogIds, openIdForEvidenceLog, shouldProactivelyAnalyzeFolder, trendInterpretation, withProjectConditions } from '../../src/views/EvaluationMemoryView'
 import type { DominanceFinding, EvaluationMemory } from '../../src/domain/evaluation-memory'
 
 const memory: EvaluationMemory = { project: { id: 'p', name: 'LPDDR6', customer: 'Customer A', targetDevice: 'SoC-X', densityGb: 16, nominalVoltage: 1.1 }, hypotheses: [], nodes: [], evidence: [] }
 describe('evaluation memory workflow helpers', () => {
+  it('shows unresolved logs in product language instead of the internal UNKNOWN token', () => {
+    expect(evaluationLogResultLabel('UNKNOWN')).toBe('미정')
+    expect(evaluationLogResultLabel(undefined)).toBe('미정')
+    expect(evaluationLogResultLabel('SYSTEM_HALT')).toBe('SYSTEM_HALT')
+  })
   it('adds a hypothesis', () => { const next = addFailureHypothesis(memory, { title: 'DQ issue', origin: 'ai-proposed' }); expect(next.hypotheses[0]).toMatchObject({ projectId: 'p', title: 'DQ issue' }) })
   it('adds and reopens linked durable log evidence through its renderer open ID', () => { const withHypothesis = addFailureHypothesis(memory, { title: 'DQ issue', origin: 'engineer-confirmed' }); const next = addEvaluationWithEvidence(withHypothesis, { name: '105C sweep', purpose: 'screening', hypothesisId: withHypothesis.hypotheses[0].id, status: 'fail', dimensions: { dq: 7, pattern: 6060 }, logIds: ['source-1'], origin: 'engineer-confirmed' }); expect(next.nodes[0]).toMatchObject({ hypothesisId: withHypothesis.hypotheses[0].id, purpose: 'screening' }); expect(next.evidence[0]).toMatchObject({ evaluationNodeId: next.nodes[0].id, logRef: 'source-1', sourceIds: ['source-1'] }); expect(linkedEvidenceLogIds(next, next.nodes[0].id)).toEqual(['source-1']); expect(openIdForEvidenceLog('source-1', [{ id: 'source-1', openId: 'renderer-file-1', name: 'run.log' }])).toBe('renderer-file-1') })
   it('batches edited project conditions into one memory payload', () => { const next = withProjectConditions(memory, { ...memory.project, customer: 'Customer B', nominalVoltage: 1.05 }); expect(next.project).toMatchObject({ id: 'p', name: 'LPDDR6', customer: 'Customer B', nominalVoltage: 1.05 }); expect(memory.project.customer).toBe('Customer A') })
@@ -34,13 +39,17 @@ describe('evaluation memory workflow helpers', () => {
       { id: 'root-a', parent: undefined }, { id: 'root-b', parent: 'root-a' },
     ])
   })
-  it('renders persisted branch ids as separate horizontal evaluation lanes', () => {
+  it('keeps purpose changes in one failure issue lane and groups uncertain folders in one queue', () => {
     const scoped: EvaluationMemory = {
       ...memory,
+      hypotheses: [
+        { id: 'h-vperi', projectId: 'p', title: 'VPERI DQ9 반복 불량', origin: 'engineer-confirmed', evaluationNodeIds: ['n-fail', 'n-pass'] },
+        { id: 'h-retention', projectId: 'p', title: 'Retention DQ4 불량', origin: 'ai-proposed', evaluationNodeIds: ['n-unknown'] },
+      ],
       nodes: [
-        { id: 'n-fail', projectId: 'p', evaluationScopeId: 'root-fail', branchId: 'screen', name: 'screen', purpose: 'screening', dimensions: {}, status: 'fail' },
-        { id: 'n-pass', projectId: 'p', evaluationScopeId: 'root-pass', parentId: 'n-fail', branchId: 'improve', name: 'improve', purpose: 'improvement', dimensions: {}, status: 'pass' },
-        { id: 'n-unknown', projectId: 'p', evaluationScopeId: 'root-unknown', parentId: 'n-fail', branchId: 'pending', name: 'retention', purpose: 'characterization', dimensions: {}, status: 'inconclusive' },
+        { id: 'n-fail', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'root-fail', branchId: 'screen', relation: 'baseline', name: 'screen', purpose: 'screening', dimensions: {}, status: 'fail' },
+        { id: 'n-pass', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'root-pass', parentId: 'n-fail', branchId: 'improve', relation: 'improvement', name: 'improve', purpose: 'improvement', dimensions: {}, status: 'pass' },
+        { id: 'n-unknown', projectId: 'p', hypothesisId: 'h-retention', evaluationScopeId: 'root-unknown', parentId: 'n-fail', branchId: 'pending', relation: 'baseline', name: 'retention', purpose: 'characterization', dimensions: {}, status: 'inconclusive' },
       ], evidence: [],
     }
     const groups = groupEvaluationFolders(scoped, [
@@ -50,13 +59,22 @@ describe('evaluation memory workflow helpers', () => {
       { id: 'n', rootId: 'root-new', folderName: '분석 전 평가', name: 'new.log' },
       { id: 'n2', rootId: 'root-new-2', folderName: '추가 분석 평가', name: 'new-2.log' },
     ])
-    const branches = evaluationFolderBranches(evaluationFolderFlow(scoped, groups))
-    expect(branches.map((branch) => ({ id: branch.id, label: branch.label, parent: branch.parentGroupId, groups: branch.items.map((item) => item.group.id) }))).toEqual([
-      { id: 'screen', label: '불량 검출 · 재현', parent: undefined, groups: ['root-fail'] },
-      { id: 'improve', label: '개선 조건 검증', parent: 'root-fail', groups: ['root-pass'] },
-      { id: 'pending', label: '불량 경향 확인', parent: 'root-fail', groups: ['root-unknown'] },
-      { id: 'unclassified', label: '추가 분석', parent: undefined, groups: ['root-new', 'root-new-2'] },
+    const branches = evaluationFolderBranches(scoped, evaluationFolderFlow(scoped, groups))
+    expect(branches.map((branch) => ({ id: branch.id, label: branch.label, kind: branch.kind, parent: branch.parentGroupId, groups: branch.items.map((item) => item.group.id) }))).toEqual([
+      { id: 'h-vperi', label: 'VPERI DQ9 반복 불량', kind: 'issue', parent: undefined, groups: ['root-fail', 'root-pass'] },
+      { id: 'h-retention', label: 'Retention DQ4 불량', kind: 'issue', parent: undefined, groups: ['root-unknown'] },
+      { id: 'classification-queue', label: '분류 대기', kind: 'queue', parent: undefined, groups: ['root-new', 'root-new-2'] },
     ])
+    expect(evaluationBranchSummary(branches[0])).toBe('2개 평가 · FAIL → PASS')
+    expect(evaluationBranchSummary(branches[2])).toBe('2개 평가 · 확인 필요')
+  })
+  it('opens a bounded purpose question only for an unreviewed folder and preserves confirmed intent', () => {
+    const unreviewed = { id: 'root-new', label: '05-boot-training', logs: [{ id: 's-new', openId: 'open-new', name: 'run.log' }], nodes: [], evidence: [] }
+    expect(shouldProactivelyAnalyzeFolder(unreviewed)).toBe(true)
+    expect(evaluationAnalysisRequest(unreviewed)).toEqual({ evaluationScopeId: 'root-new', title: '05-boot-training', sourceIds: ['s-new'], openId: 'open-new' })
+    const confirmed = { ...unreviewed, nodes: [{ id: 'n', projectId: 'p', name: '부팅 후 메모리 테스트', evaluationScopeId: 'root-new', purpose: 'verification' as const, status: 'pass' as const, dimensions: {}, interpretation: 'VDD 변경 후 개선 효과 검증', reviewState: 'confirmed' as const }] }
+    expect(shouldProactivelyAnalyzeFolder(confirmed)).toBe(false)
+    expect(evaluationAnalysisRequest(confirmed, confirmed.nodes[0])).toMatchObject({ intent: 'VDD 변경 후 개선 효과 검증' })
   })
   it('exports concise client context and complete CSV', () => { const next = addEvaluationWithEvidence(memory, { name: 'fail run', status: 'fail', dimensions: { dq: 7 }, logIds: ['log-1'], origin: 'ai-proposed' }); const context = buildEvaluationContextMarkdown(next); expect(context).toContain('fail run'); expect(context).toContain('Customer: Customer A'); expect(context).toContain('Target device: SoC-X'); expect(context).toContain('Density: 16Gb'); expect(context).toContain('Nominal voltage: 1.1V'); expect(context).toContain('log-1'); const csv = evaluationMemoryCsv(next); expect(csv).toContain('customer,targetDevice,densityGb,nominalVoltage,program,phase'); expect(csv).toContain('sourceIds'); expect(csv).toContain('"log-1"') })
 })

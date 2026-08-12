@@ -9,6 +9,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2/client'
 import type { EffectiveLlmConfig } from './llm-service'
 import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
 import { isVertexOpenAiBaseUrl, vertexAccessTokenProvider, type VertexAccessTokenProvider } from './vertex-auth'
+import type { SctMcpToolTrace } from './sct-mcp-server'
 
 const execFileAsync = promisify(execFile)
 const clean = (value: unknown, max = 12_000): string => typeof value === 'string'
@@ -70,11 +71,27 @@ export interface OpenCodeReply {
   externalSessionId: string
   content: string
   toolNames: string[]
+  toolTraces: SctMcpToolTrace[]
 }
 
 interface OpenCodeMessageRecord {
   info?: { role?: string; time?: { created?: number } }
   parts?: Array<{ type?: string; tool?: string; name?: string }>
+}
+
+export const REQUIRED_OPEN_CODE_SKILL = 'lpddr-failure-analysis'
+
+/** OpenCode advertises skills by their path-derived ID. Validate the isolated
+ * runtime before accepting a session so a packaging mistake cannot silently
+ * downgrade the LPDDR analyst into a generic chat Agent. */
+export function hasRequiredOpenCodeSkill(skills: unknown, required = REQUIRED_OPEN_CODE_SKILL): boolean {
+  return Array.isArray(skills) && skills.some((skill) => {
+    if (!skill || typeof skill !== 'object') return false
+    const value = skill as { name?: unknown; location?: unknown }
+    const name = clean(value.name, 100).toLowerCase()
+    const location = clean(value.location, 2_000).replace(/\\/g, '/').toLowerCase()
+    return name === required || location.includes(`/${required}/skill.md`)
+  })
 }
 
 /** A prompt can span several assistant messages. OpenCode's prompt response only
@@ -107,6 +124,10 @@ export class OpenCodeHost {
     skillRoot: string
     mcpUrl: string
     mcpToken: string
+    createMcpScope: (projectId: string, sourceIds: readonly string[]) => string
+    mcpScopeTraces: (scopeToken: string) => SctMcpToolTrace[]
+    subscribeMcpScope: (scopeToken: string, listener: (trace: SctMcpToolTrace) => void) => () => void
+    releaseMcpScope: (scopeToken: string) => void
     effectiveLlm: () => Promise<EffectiveLlmConfig>
   }, private readonly vertexAuth: Pick<VertexAccessTokenProvider, 'token'> = vertexAccessTokenProvider) {}
 
@@ -123,10 +144,18 @@ export class OpenCodeHost {
     sourceIds: string[]
     title: string
     content: string
+    requiredToolNames?: string[]
+    onToolTrace?: (trace: SctMcpToolTrace) => void
   }): Promise<OpenCodeReply> {
     const config = await this.authenticatedLlm()
     const state = await this.ensureStarted(config)
+    const scopeToken = this.options.createMcpScope(input.projectId, input.sourceIds)
+    const unsubscribe = input.onToolTrace
+      ? this.options.subscribeMcpScope(scopeToken, input.onToolTrace)
+      : () => undefined
+    try {
     let externalSessionId = input.externalSessionId
+    const requireSkillLoad = !externalSessionId
     if (!externalSessionId) {
       const created = await state.client.session.create({
         directory: join(this.options.dataRoot, 'agent-workspace'),
@@ -136,7 +165,14 @@ export class OpenCodeHost {
       externalSessionId = created.data?.id
     }
     if (!externalSessionId) throw new Error('OPENCODE_SESSION_CREATE_FAILED')
-    const scope = `\n\n[Sequence Control Tower scope]\nprojectId=${input.projectId}\nallowedSourceIds=${input.sourceIds.join(',')}\n각 MCP 도구에 projectId와 필요한 sourceIds를 전달하십시오.`
+    const requiredTools = [...new Set((input.requiredToolNames ?? []).map((name) => clean(name, 100).replace(/^sct_/, '')).filter(Boolean))].slice(0, 4)
+    const required = requiredTools.length
+      ? `\n이 요청의 최소 근거 도구: ${requiredTools.join(', ')}. 답변을 작성하기 전에 각각 한 번 실행하십시오. 도구 결과가 비어 있어도 실행 사실과 미확인 상태를 근거로 사용하십시오.`
+      : ''
+    const skill = requireSkillLoad
+      ? `\n새 분석 세션입니다. 다른 분석보다 먼저 skill 도구로 ${REQUIRED_OPEN_CODE_SKILL}을 로드하고 그 기준을 이번 대화 전체에 적용하십시오.`
+      : ''
+    const scope = `\n\n[Sequence Control Tower scope]\nprojectId=${input.projectId}\nscopeToken=${scopeToken}\nallowedSourceIds=${input.sourceIds.join(',')}\n각 MCP 도구에 projectId와 scopeToken을 반드시 전달하십시오. sourceIds를 생략하면 현재 평가 폴더 전체가 사용되며, 허용 범위 밖 sourceId는 서버에서 거부됩니다.${skill}${required}`
     const response = await state.client.session.prompt({
       sessionID: externalSessionId,
       directory: join(this.options.dataRoot, 'agent-workspace'),
@@ -153,8 +189,25 @@ export class OpenCodeHost {
       limit: 32
     }).catch(() => null)
     const toolNames = latestRunToolNames(history?.data, parts)
+    const skillLoaded = toolNames.some((name) => clean(name, 100).toLowerCase() === 'skill')
+    const toolTraces = [
+      ...(requireSkillLoad && skillLoaded ? [{
+        name: `skill:${REQUIRED_OPEN_CODE_SKILL}`,
+        label: 'LPDDR 불량분석 기준',
+        summary: '평가 단위·근거 순서·이력 관계 기준을 현재 대화에 적용',
+        evidenceSourceIds: [],
+      }] : []),
+      ...this.options.mcpScopeTraces(scopeToken),
+    ]
+    if (requireSkillLoad && !skillLoaded) {
+      throw new Error('OPENCODE_REQUIRED_SKILL_MISSING')
+    }
     if (!content) throw new Error('OPENCODE_EMPTY_RESPONSE')
-    return { externalSessionId, content, toolNames }
+    return { externalSessionId, content, toolNames, toolTraces }
+    } finally {
+      unsubscribe()
+      this.options.releaseMcpScope(scopeToken)
+    }
   }
 
   async abort(externalSessionId: string): Promise<void> {
@@ -211,7 +264,7 @@ export class OpenCodeHost {
       agent: {
         'sct-analyst': {
           description: 'Evidence-bound LPDDR evaluation analyst', mode: 'primary', model: `${providerID}/${modelID}`,
-          prompt: NATIVE_AGENT_SYSTEM_PROMPT, temperature: 0.1, maxSteps: 6, tools: builtinTools,
+          prompt: NATIVE_AGENT_SYSTEM_PROMPT, temperature: 0.1, steps: 10, tools: builtinTools,
           permission: { ...deny, skill: 'allow', 'sct_*': 'allow' }
         }
       },
@@ -273,6 +326,12 @@ export class OpenCodeHost {
     }).catch((error) => { processHandle.kill(); throw error })
     const authorization = `Basic ${Buffer.from(`sct:${password}`).toString('base64')}`
     const state = { process: processHandle, url, binary, configKey, providerID, modelID, client: createOpencodeClient({ baseUrl: url, headers: { Authorization: authorization }, directory: workspace }) }
+    const skills = await state.client.app.skills({ directory: workspace }, { throwOnError: true })
+      .catch(() => null)
+    if (!hasRequiredOpenCodeSkill(skills?.data)) {
+      processHandle.kill()
+      throw new Error('OPENCODE_SKILL_UNAVAILABLE')
+    }
     processHandle.once('exit', () => { if (this.state?.process === processHandle) this.state = null })
     this.state = state
     return state

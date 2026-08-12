@@ -31,4 +31,31 @@ describe('AgentMarkdown', () => {
     expect(markup).toContain('<hr')
     expect(markup).not.toContain('\\n')
   })
+
+  it('repairs a model table placed directly after a list sentence', () => {
+    const source = '* **정확한 분석 순서**:\n| 순서 | 검색어 |\n| --- | --- |\n| 1 | `set_rail` |'
+    const normalized = normalizeAgentMarkdown(source)
+    const markup = renderToStaticMarkup(<AgentMarkdown>{source}</AgentMarkdown>)
+    expect(normalized).toContain('분석 순서**:\n\n| 순서')
+    expect(markup).toContain('<table>')
+    expect(markup).toContain('<code>set_rail</code>')
+  })
+
+  it('renders model-generated LaTeX sequence arrows as plain readable arrows', () => {
+    expect(normalizeAgentMarkdown('PBL $\\rightarrow$ LK \\to OS')).toBe('PBL → LK → OS')
+  })
+
+  it('repairs Korean strong emphasis with inner spaces or a joined postposition', () => {
+    const markup = renderToStaticMarkup(<AgentMarkdown>{'thermal은 **판정 규칙이 아닌 단순 탐색**으로 분류됩니다.\n\n** POST_PBL → LK → @PASS **'}</AgentMarkdown>)
+    expect(markup).toContain('<strong>판정 규칙이 아닌 단순 탐색으로</strong>')
+    expect(markup).toContain('<strong>POST_PBL → LK → @PASS</strong>')
+    expect(markup).not.toContain('**')
+  })
+
+  it('repairs emphasis attached to the preceding word in real model responses', () => {
+    const markup = renderToStaticMarkup(<AgentMarkdown>{'핵심** 불량**은 DQ9입니다.\n\n최종**@FAIL** 상태'}</AgentMarkdown>)
+    expect(markup).toContain('핵심 <strong>불량은</strong> DQ9입니다.')
+    expect(markup).toContain('최종 <strong>@FAIL</strong> 상태')
+    expect(markup).not.toContain('**')
+  })
 })

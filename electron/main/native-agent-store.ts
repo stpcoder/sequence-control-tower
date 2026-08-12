@@ -7,7 +7,8 @@ import type {
   NativeAgentToolTraceView, ProjectEvaluationDimensions
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
-import { buildEngineerWorkflowCandidate, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
+import { buildEngineerWorkflowCandidate, engineerWorkflowContextCompatibility, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
+import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 
 export interface StoredNativeAgentSession extends NativeAgentSessionView {
   externalSessionId?: string
@@ -122,13 +123,14 @@ export class NativeAgentStore {
     const database = await this.store.read()
     return Object.values(database.sessions)
       .filter((session) => session.projectId === wanted && (!wantedScope || session.evaluationScopeId === wantedScope))
+      .filter((session) => this.displayable(session))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(({ messages, tools, question: _question, externalSessionId, lastRequest, ...summary }) => summary)
+      .map(({ messages, tools, question: _question, evaluationIntent: _evaluationIntent, externalSessionId, lastRequest, ...summary }) => summary)
   }
 
   async get(sessionId: string): Promise<StoredNativeAgentSession | null> {
     const value = (await this.store.read()).sessions[clean(sessionId, 160)]
-    return value ? structuredClone(value) : null
+    return value && this.displayable(value) ? structuredClone(value) : null
   }
 
   async update(
@@ -142,6 +144,7 @@ export class NativeAgentStore {
       change(session)
       session.title = clean(session.title, 160) || '새 분석'
       session.failure = session.failure ? clean(session.failure, 500) : undefined
+      session.evaluationIntent = session.evaluationIntent ? clean(session.evaluationIntent, 400) : undefined
       session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
       session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
       if (session.question) {
@@ -158,11 +161,12 @@ export class NativeAgentStore {
           lineNumber: Number.isSafeInteger(session.question.lineNumber) && session.question.lineNumber > 0 ? session.question.lineNumber : 1,
           promptSignature: clean(session.question.promptSignature, 160), promptKind: clean(session.question.promptKind, 80), command: clean(session.question.command, 500),
         }
-        else session.question = {
+        else if (session.question.kind === 'command-purpose') session.question = {
           ...base, kind: 'command-purpose', command: clean(session.question.command, 160),
           ...(session.question.bootProfileId ? { bootProfileId: clean(session.question.bootProfileId, 160) } : {}),
           ...(session.question.socModel ? { socModel: clean(session.question.socModel, 160) } : {}),
         }
+        else session.question = { ...base, kind: 'evaluation-purpose' }
       }
       session.updatedAt = now()
       session.lastMessage = [...session.messages].reverse().find((item) => item.role !== 'tool')?.content.slice(0, 160)
@@ -305,8 +309,16 @@ export class NativeAgentStore {
         if (priorReview.state !== 'dismissed' || Date.now() - Date.parse(priorReview.createdAt) < 7 * 24 * 60 * 60 * 1_000) return
       }
       const similar = workflows
-        .filter((memory) => (memory.evaluationScopeId ?? '') === evaluationScopeId)
-        .map((memory) => ({ memory, score: engineerWorkflowSimilarity(candidate, memory) }))
+        .flatMap((memory) => {
+          const sameScope = (memory.evaluationScopeId ?? '') === evaluationScopeId
+          const compatibility = sameScope ? 1 : engineerWorkflowContextCompatibility(memory, input.dimensions ?? {})
+          if (!sameScope && compatibility === null) return []
+          const contextScore = compatibility ?? 0
+          return [{
+            memory,
+            score: engineerWorkflowSimilarity(candidate, memory) + (sameScope ? 0.05 : Math.min(contextScore, 5) * 0.01),
+          }]
+        })
         .filter((item) => item.score >= 0.45)
         .sort((a, b) => b.score - a.score)[0]?.memory
       const suggestions = [...new Set([...(similar ? [similar.purpose] : []), ...candidate.suggestions, '직접 입력'])].slice(0, 4)
@@ -541,7 +553,10 @@ export class NativeAgentStore {
       const existingIndex = rows.findIndex((item) => item.sourceId === input.sourceId)
       const dimensions = structuredClone(input.dimensions ?? {})
       const signature = clean(input.sequenceSignature, 200)
-      const identityKeys: Array<keyof ProjectEvaluationDimensions> = ['skew', 'lot', 'material', 'die']
+      const identityKeys: Array<keyof ProjectEvaluationDimensions> = [
+        'skew', 'lot', 'material', 'die', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner',
+        'conditionCorner', 'frequencyMHz', 'testMode', 'pattern',
+      ]
       const related = rows.filter((item) => item.sourceId !== input.sourceId && (item.evaluationScopeId ?? '') === evaluationScopeId && signature && item.sequenceSignature === signature
         && Boolean(dimensions.sample) && item.dimensions.sample === dimensions.sample
         && identityKeys.every((key) => dimensions[key] === undefined || item.dimensions[key] === undefined || String(dimensions[key]) === String(item.dimensions[key])))
@@ -569,6 +584,14 @@ export class NativeAgentStore {
   public(session: StoredNativeAgentSession): NativeAgentSessionView {
     const { externalSessionId, lastRequest, ...view } = structuredClone(session)
     return view
+  }
+
+  /** Keep malformed historical automation/IME debris on disk for audit, but
+   * do not reopen it as a real engineer conversation. Empty new sessions stay
+   * visible until the first valid message is entered. */
+  private displayable(session: StoredNativeAgentSession): boolean {
+    const userMessages = session.messages.filter((message) => message.role === 'user')
+    return userMessages.length === 0 || userMessages.some((message) => hasMeaningfulAgentMessage(message.content))
   }
 
   private message = (message: NativeAgentMessageView): NativeAgentMessageView => ({

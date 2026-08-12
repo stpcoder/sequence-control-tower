@@ -37,7 +37,7 @@ const stateLabel: Record<EvaluationStatus, string> = {
   pass: 'PASS', fail: 'FAIL', inconclusive: 'INCONCLUSIVE', running: 'RUNNING',
 }
 export const evaluationPurposeLabel: Record<EvaluationPurpose, string> = {
-  screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현', characterization: '불량 경향 파악', verification: '개선 효과 검증',
+  screening: '불량 검출 강화', improvement: '개선 조건 확인', reproduction: '동일 불량 재현', characterization: '불량 경향 파악', verification: '개선 효과 검증', 'stage-verification': '부팅·Training 확인',
 }
 export const evaluationPurposeDescription: Record<EvaluationPurpose, string> = {
   screening: '불량을 더 빠르게 검출할 조건을 찾는 평가',
@@ -45,12 +45,14 @@ export const evaluationPurposeDescription: Record<EvaluationPurpose, string> = {
   reproduction: '같은 Sample과 Sequence에서 불량이 다시 발생하는지 확인하는 평가',
   characterization: '온도·전압·주파수·DRAM 위치별 불량 집중을 비교하는 평가',
   verification: '선택한 개선 조건을 반복해 효과를 확정하는 평가',
+  'stage-verification': '부팅·펌웨어·OS·Training 단계 도달 여부를 확인하는 평가',
 }
 
 /** Gives old saved evaluations a visible candidate purpose without rewriting them. */
 export function displayEvaluationPurpose(node: Pick<EvaluationNode, 'name' | 'purpose'>): { purpose?: EvaluationPurpose; inferred: boolean } {
   if (node.purpose) return { purpose: node.purpose, inferred: false }
   const name = node.name.toLocaleLowerCase('ko-KR')
+  if (/부팅|트레이닝|training|boot|uefi|pbl|xbl|\blk\b/.test(name)) return { purpose: 'stage-verification', inferred: true }
   if (/가속|스크린|screen/.test(name)) return { purpose: 'screening', inferred: true }
   if (/개선.*검증|효과.*확인|verify/.test(name)) return { purpose: 'verification', inferred: true }
   if (/개선|완화|마진/.test(name)) return { purpose: 'improvement', inferred: true }

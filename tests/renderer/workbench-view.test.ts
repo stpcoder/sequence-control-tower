@@ -30,7 +30,10 @@ import {
   DEFAULT_WORKBENCH_PANE_WIDTHS,
   clauseSpecKey,
   filterUserRecipeRevisions,
+  folderSelectionTargetId,
+  groupWorkspaceSearchHits,
   recipeEvidenceSpecs,
+  recentSearchQueries,
   resolveRecipeEvidenceCounts,
   dedupeWorkbenchFiles,
   groupWorkbenchFiles,
@@ -119,6 +122,26 @@ function evidence(sourceId: string, rules: RecipeRule[], count = 1): Precomputed
 }
 
 describe('Log Workbench UI data hardening', () => {
+  it('recalls the active log search history from newest to oldest without duplicates', () => {
+    const observation = (id: string, query: string) => ({ id, sourceId: 'log-a', query, matcherKind: 'literal' as const, target: 'content' as const, caseSensitive: false, matched: true, matchCount: 1, role: 'search_history' as const, excerpts: [] })
+    expect(recentSearchQueries([
+      observation('a', '@PASS'),
+      observation('b', '@FAIL'),
+      observation('c', '@pass'),
+      observation('d', 'reboot_reason'),
+    ])).toEqual(['reboot_reason', '@pass', '@FAIL'])
+  })
+
+  it('groups workspace matches by file while preserving navigation indexes', () => {
+    const groups = groupWorkspaceSearchHits([
+      { fileId: 'a', line: 1, start: 0, end: 4, excerpt: 'FAIL' },
+      { fileId: 'a', line: 9, start: 2, end: 6, excerpt: 'x FAIL' },
+      { fileId: 'b', line: 3, start: 0, end: 4, excerpt: 'FAIL' },
+    ])
+    expect(groups.map((group) => [group.fileId, group.matches.map((item) => item.index)])).toEqual([
+      ['a', [0, 1]], ['b', [2]],
+    ])
+  })
   it('lets an engineer select and reorder the exact Ctrl-F procedure to remember', () => {
     const checks = [
       { query: 'POST_PBL', mode: 'literal' as const, caseSensitive: false, expected: 'present' as const, matchCount: 1, stage: 'post-pbl' as const, order: 1 },
@@ -357,6 +380,7 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('api.analysis.onJobUpdate')
     expect(workbenchSource).toContain("sideMode === 'search' ? '검색 결과'")
     expect(workbenchSource).toContain('className={`search-result ${index === currentHit ? \'active\' : \'\'}`}')
+    expect(workbenchSource).toContain('className="workspace-search-group"')
     expect(workbenchSource).toContain('className="search-result-file"')
     expect(workbenchSource).toContain('className="search-result-line"')
     expect(workbenchSource).toContain('<b>Ln {hit.line}</b>')
@@ -365,9 +389,9 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('검색 중…')
     expect(workbenchSource).toContain('find-match-count')
     expect(workbenchSource).toContain('aria-live="polite"')
-    expect(workbenchSource).toContain('placeholder="검토 메모 (선택)"')
-    expect(workbenchSource).toContain('<SearchCode size={13} /> 검토 실행')
-    expect(workbenchSource).not.toContain("patternReviewBusy ? '검토 중' : '검토 실행'")
+    expect(workbenchSource).toContain('placeholder="확인할 내용 (선택)"')
+    expect(workbenchSource).toContain('<SearchCode size={13} /> AI로 검토')
+    expect(workbenchSource).not.toContain("patternReviewBusy ? '검토 중' : 'AI로 검토'")
     expect(workbenchSource).toContain('경고 {patternReview.result.warnings.length}건')
     expect(workbenchSource).not.toContain('검토용 제안 · 판정은 엔지니어가 확정')
     expect(workbenchSource).not.toContain('pattern-review-source')
@@ -381,6 +405,11 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).toContain('.search-result-line {')
     expect(workbenchCss).toContain('font-size: 13px')
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
+    expect(workbenchSource).toContain("const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])")
+    expect(workbenchSource).toContain('const rules = [candidate]')
+    expect(workbenchSource).toContain('현재 폴더에 미리 적용')
+    expect(workbenchSource).not.toContain('전체에 미리 적용')
+    expect(workbenchSource).toContain('<Sparkles size={14} />Agent')
   })
 
   it('resolves current, evaluation-folder, open-tab, and all-log scopes without crossing folders', () => {
@@ -538,7 +567,7 @@ describe('Log Workbench UI data hardening', () => {
   it('resets the undisclosed-first-hit contract before input and async result transitions', () => {
     expect(workbenchSource).toContain('const resetSearchNavigation = useCallback(() => {')
     expect(workbenchSource).toContain('resetSearchNavigation()\n    scheduleAnimationFrame(() => searchInputRef.current?.select())')
-    expect(workbenchSource).toContain("onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }}")
+    expect(workbenchSource).toContain("searchHistoryDraftRef.current = event.target.value; resetSearchNavigation(); setQuery(event.target.value)")
     expect(workbenchSource).toContain("onClick={() => { resetSearchNavigation(); setOptions((current) => ({ ...current, [option]: !current[option] })) }}")
     expect(workbenchSource).toContain('// Reset synchronously with result invalidation so an Enter pressed before')
     expect(workbenchSource).toContain('setCurrentHit(0)\n    searchHasNavigatedRef.current = false')
@@ -643,6 +672,15 @@ describe('Log Workbench UI data hardening', () => {
       expect.objectContaining({ key: 'root:root-one', label: 'logs · 1', files: [first] }),
       expect.objectContaining({ key: 'root:root-two', label: 'logs · 2', files: [second] }),
     ])
+  })
+
+  it('opens the selected evaluation folder instead of leaving another folder in the editor', () => {
+    const group = { key: 'root:evaluation-a', label: 'evaluation-a', files: [
+      { id: 'a-1', name: 'first.log', rootId: 'evaluation-a' },
+      { id: 'a-2', name: 'second.log', rootId: 'evaluation-a' },
+    ] }
+    expect(folderSelectionTargetId(group, 'other-folder-log')).toBe('a-1')
+    expect(folderSelectionTargetId(group, 'a-2')).toBeNull()
   })
 
   it('keeps duplicate-label ordinals mapped to stable roots when input order changes', () => {

@@ -18,6 +18,7 @@ import { startSctMcpServer, type SctMcpServerHandle } from './sct-mcp-server'
 import { OpenCodeHost } from './opencode-host'
 import { NativeAgentService } from './native-agent-service'
 import { SampleProjectService } from './sample-project-service'
+import { loadEvaluationPolicyFromSkill } from './failure-analysis-skill'
 import { isSameRendererDocument } from './renderer-document'
 import { IPC_CHANNELS } from '../shared/contracts'
 import type { RendererCommand } from '../shared/contracts'
@@ -117,6 +118,10 @@ function installApplicationMenu(): void {
 
 async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'sequence-intelligence')
+  const skillRoot = app.isPackaged ? join(process.resourcesPath, 'agent-skills') : join(app.getAppPath(), 'agent-skills')
+  // Both Agent runtimes must start from the same packaged LPDDR Skill. A
+  // missing/invalid contract is a packaging error, not a silent generic mode.
+  const evaluationSkillPolicy = await loadEvaluationPolicyFromSkill(skillRoot)
   const artifacts = new ArtifactService(dataRoot)
   const evaluations = new EvaluationStore(dataRoot)
   const projects = new ProjectStore(dataRoot)
@@ -130,8 +135,8 @@ async function bootstrap(): Promise<void> {
   })
   const agent = new AgentService({ artifacts, evaluations, projects, llm, llmConfig })
   const evaluationAgentSessions = new EvaluationAgentSessionStore(dataRoot)
-  const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm, sessions: evaluationAgentSessions })
   const nativeAgentStore = new NativeAgentStore(dataRoot)
+  const evaluationAgent = new EvaluationAgentService({ artifacts, projects, llm, engineerMemory: nativeAgentStore, sessions: evaluationAgentSessions, skillPolicy: evaluationSkillPolicy })
   await Promise.all([
     artifacts.initialize(),
     evaluations.initialize(),
@@ -144,8 +149,14 @@ async function bootstrap(): Promise<void> {
   ])
   const nativeTools = new LpddrAgentToolService({ artifacts, projects, agentStore: nativeAgentStore })
   const mcp = await startSctMcpServer(nativeTools)
-  const skillRoot = app.isPackaged ? join(process.resourcesPath, 'agent-skills') : join(app.getAppPath(), 'agent-skills')
-  const opencode = new OpenCodeHost({ dataRoot, skillRoot, mcpUrl: mcp.url, mcpToken: mcp.token, effectiveLlm: () => llmConfig.effective() })
+  const opencode = new OpenCodeHost({
+    dataRoot, skillRoot, mcpUrl: mcp.url, mcpToken: mcp.token,
+    createMcpScope: (projectId, sourceIds) => mcp.createScope(projectId, sourceIds),
+    mcpScopeTraces: (scopeToken) => mcp.scopeTraces(scopeToken),
+    subscribeMcpScope: (scopeToken, listener) => mcp.subscribeScope(scopeToken, listener),
+    releaseMcpScope: (scopeToken) => mcp.releaseScope(scopeToken),
+    effectiveLlm: () => llmConfig.effective()
+  })
   const nativeAgent = new NativeAgentService({ store: nativeAgentStore, tools: nativeTools, projects, artifacts, llm, opencode })
   const samples = new SampleProjectService(dataRoot, { artifacts, projects })
   nativeAgentForShutdown = nativeAgent

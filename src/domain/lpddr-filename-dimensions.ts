@@ -1,5 +1,6 @@
 import type { ProjectEquipmentProfile, ProjectEvaluationDimensions } from '../../electron/shared/contracts'
 import { detectSocFilenameContext, type SocFilenameContext } from './soc-profile'
+import { explicitLpddrConditions } from './lpddr-evaluation-baseline'
 
 const fileBaseName = (value: string): string => value.replace(/\\/g, '/').split('/').at(-1) ?? value
 const safeName = (value: string): string => fileBaseName(value)
@@ -36,16 +37,23 @@ export function projectSocContext(fileName: string, profiles: readonly ProjectEq
 /** One deterministic filename vocabulary shared by the renderer tables and the native Agent. */
 export function extractLpddrFilenameDimensions(fileName: string, profiles: readonly ProjectEquipmentProfile[] = []): ProjectEvaluationDimensions {
   const name = safeName(fileName)
+  const explicitConditions = explicitLpddrConditions(name)
   const temperature = capture(name, /(?:^|[_\-.])(?:TEMP|T)(?:=|_)?(-?\d{1,3})(?:C)?(?:[_\-.]|$)/i)
   const vdd = capture(name, /(?:^|[_\-.])VDD(?:=|_|-)?(\d+(?:[p.]\d+)?)(?:V)?(?:[_\-.]|$)/i)
   const frequency = capture(name, /(?:^|[_\-.])(?:FREQ|F)(?:=|_|-)?(\d{3,5})(?:MHZ|MT)?(?:[_\-.]|$)/i)
     ?? capture(name, /(?:^|[_\-.])(\d{3,5})MT(?:[_\-.]|$)/i)
-  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9-]+)/i)
-    ?.replace(/-(?:DQ|BL|CH|CHANNEL|SUBCH|SCH|RANK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|PASS|FAIL|HALT|TRAIN).*$/i, '')
+  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9][A-Z0-9_-]*?)(?=[_.-](?:DQ|BL|CH|CHANNEL|SUBCH|SCH|CS|RANK|RK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|PASS|FAIL|HALT|REBOOT|TRAIN)(?:=|_|-)?|\.LOG$|$)/i)
   const samples = captures(name, /(?:^|[_\-.])(?:SAMPLE|SMP)(?:=|_|-)?([A-Z0-9]+(?:-[A-Z0-9]+)*?)(?=[_.-](?:SAMPLE|SMP)(?:=|_|-)|[_.]|$)/gi)
   const soc = projectSocContext(name, profiles)
+  const prefixedSkew = capture(name, /(?:^|[_\-.])SKEW(?:=|_|-)?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i)
+  const standardSkew = capture(name, /(?:^|[_\-.])(TT|SS|SF|FS|FF)(?=[_.-]|$)/i)
+  const parsedTemperature = decimal(temperature)
+  const parsedVdd = decimal(vdd)
+  const parsedFrequency = decimal(frequency)
+  const parsedTestMode = capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i)?.toUpperCase()
   return {
-    skew: capture(name, /(?:^|[_\-.])SKEW(?:=|_|-)?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
+    ...explicitConditions,
+    skew: (prefixedSkew ?? standardSkew)?.toUpperCase(),
     lot: capture(name, /(?:^|[_\-.])LOT(?:=|_|-)?([A-Z0-9-]+)/i),
     material: capture(name, /(?:^|[_\-.])(?:MAT|MATERIAL)(?:=|_|-)?([A-Z0-9-]+)/i),
     die: capture(name, /(?:^|[_\-.])DIE(?:=|_|-)?([A-Z0-9-]+)/i),
@@ -54,17 +62,20 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
     dq: capture(name, /(?:^|[_\-.])DQ(?:=|_|-)?(\d+)/i),
     channel: capture(name, /(?:^|[_\-.])(?:CH|CHANNEL)(?:=|_|-)?(\d+)/i),
     subChannel: capture(name, /(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)(?:=|_|-)?(\d+)/i),
+    chipSelect: capture(name, /(?:^|[_\-.])(?:CS|CHIPSELECT)(?:=|_|-)?(\d+)/i),
     rank: capture(name, /(?:^|[_\-.])(?:RANK|RK)(?:=|_|-)?(\d+)/i),
     bank: capture(name, /(?:^|[_\-.])BANK(?:=|_|-)?(\d+)/i),
     bankGroup: capture(name, /(?:^|[_\-.])(?:BG|BANKGROUP)(?:=|_|-)?(\d+)/i),
     row: capture(name, /(?:^|[_\-.])ROW(?:=|_|-)?([A-F0-9x]+)/i),
     column: capture(name, /(?:^|[_\-.])(?:COL|COLUMN)(?:=|_|-)?([A-F0-9x]+)/i),
+    writeData: capture(name, /(?:^|[_\-.])(?:WR|WRITE)(?:=|_|-)?([A-F0-9x]+)/i),
+    readData: capture(name, /(?:^|[_\-.])(?:RD|READ)(?:=|_|-)?([A-F0-9x]+)/i),
     pattern,
-    frequencyMHz: decimal(frequency),
-    temperatureC: decimal(temperature),
-    vdd: decimal(vdd),
+    frequencyMHz: parsedFrequency ?? explicitConditions.frequencyMHz,
+    temperatureC: parsedTemperature ?? explicitConditions.temperatureC,
+    vdd: parsedVdd ?? explicitConditions.vdd,
     timingSkewPs: decimal(capture(name, /(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)(?:=|_|-)?(-?\d+(?:[p.]\d+)?)(?:PS)?/i)),
-    testMode: capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i)?.toUpperCase(),
+    testMode: parsedTestMode ?? explicitConditions.testMode,
     ...(soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId }),
   }
 }

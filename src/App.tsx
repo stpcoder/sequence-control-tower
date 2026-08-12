@@ -321,6 +321,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<AppPage>(readInitialPage)
   const [files, setFiles] = useState<WorkbenchFile[]>(initialFiles)
   const [selectedFileId, setSelectedFileId] = useState<string | null>(() => initialFiles()[1]?.id ?? initialFiles()[0]?.id ?? null)
+  const [selectedEvaluationRootId, setSelectedEvaluationRootId] = useState<string | undefined>()
   const [agentOpen, setAgentOpen] = useState(false)
   const [evaluationAgentLaunch, setEvaluationAgentLaunch] = useState<EvaluationAgentLaunchRequest | null>(null)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
@@ -432,6 +433,7 @@ export default function App() {
     filesRef.current = next.files
     setFiles(next.files)
     setSelectedFileId(next.selectedFileId)
+    setSelectedEvaluationRootId(undefined)
   }, [])
 
   const projectUpdated = useCallback((nextProject: ProjectSnapshot) => {
@@ -440,6 +442,7 @@ export default function App() {
     filesRef.current = next.files
     setFiles(next.files)
     setSelectedFileId(next.selectedFileId)
+    setSelectedEvaluationRootId((current) => current && nextProject.artifacts.some((source) => source.rootId === current) ? current : undefined)
   }, [project, selectedFileId])
   projectUpdatedRef.current = projectUpdated
 
@@ -613,11 +616,13 @@ export default function App() {
 
   const saveRecipeRevision = useCallback(async (draft: WorkbenchRecipeDraft) => {
     if (!draft.rule) return
+    const source = filesRef.current.find((file) => file.id === draft.sourceFileId)
+    const folderLabel = source?.origin || source?.relativePath?.replace(/\\/g, '/').split('/')[0]
     await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.saveRecipe({
       projectId: activeProjectId,
       expectedRevision: snapshot.revision,
       recipeId: draft.recipeId ?? draft.rule!.id,
-      name: `${draft.decision} 판정 규칙`,
+      name: `${folderLabel ? `${folderLabel} · ` : ''}${draft.decision} 판정`,
       rules: [draft.rule!] as EvaluationRecipeRule[],
     }), '분석 규칙을 저장하지 못했습니다')
   }, [activeProjectId, enqueueEvaluation])
@@ -754,6 +759,8 @@ export default function App() {
 
   const openFile = useCallback((fileId: string) => {
     setSelectedFileId(fileId)
+    const next = filesRef.current.find((file) => file.id === fileId)
+    setSelectedEvaluationRootId(next && projectRef.current ? resolveProjectSource(projectRef.current, next)?.rootId : undefined)
     navigate('workbench')
   }, [navigate])
 
@@ -814,8 +821,14 @@ export default function App() {
       durableRules={durableRules}
       durableRecipes={durableRecipes}
       selectedFileId={selectedFileId ?? undefined}
+      selectedFolderRootId={selectedEvaluationRootId}
       onFilesChange={updateFiles}
-      onSelectedFileChange={setSelectedFileId}
+      onSelectedFileChange={(fileId) => {
+        setSelectedFileId(fileId)
+        const next = filesRef.current.find((file) => file.id === fileId)
+        setSelectedEvaluationRootId(next && projectRef.current ? resolveProjectSource(projectRef.current, next)?.rootId : undefined)
+      }}
+      onSelectedFolderChange={(rootId) => setSelectedEvaluationRootId(rootId ?? undefined)}
       onEvidenceCountChange={updateEvidenceCount}
       onDecision={updateDecision}
       onSaveRecipe={saveRecipeRevision}
@@ -824,6 +837,7 @@ export default function App() {
       onApplyMetadataSuggestion={applyMetadataSuggestion}
       onImportProjectFolder={project ? importProjectFolder : undefined}
       onNotify={notify}
+      onOpenAgent={() => setAgentOpen(true)}
       projectId={project?.id ?? PROJECT_ID}
       projectSources={project?.artifacts ?? []}
     />
@@ -837,12 +851,18 @@ export default function App() {
       availableLogs={availableLogs}
       onChange={saveEvaluationMemory}
       onOpenLog={openFile}
-      onSelectLog={(id) => setSelectedFileId(id)}
+      onSelectLog={(id) => {
+        setSelectedFileId(id)
+        const next = filesRef.current.find((file) => file.id === id)
+        setSelectedEvaluationRootId(next && projectRef.current ? resolveProjectSource(projectRef.current, next)?.rootId : undefined)
+      }}
       onAnalyzeEvaluation={(request) => {
         if (request.openId) setSelectedFileId(request.openId)
-        setEvaluationAgentLaunch({ id: `${Date.now()}-${request.evaluationScopeId}`, evaluationScopeId: request.evaluationScopeId, title: request.title, sourceIds: request.sourceIds })
+        setSelectedEvaluationRootId(request.evaluationScopeId)
+        setEvaluationAgentLaunch({ id: `${Date.now()}-${request.evaluationScopeId}`, evaluationScopeId: request.evaluationScopeId, title: request.title, sourceIds: request.sourceIds, ...(request.intent ? { intent: request.intent } : {}) })
         setAgentOpen(true)
       }}
+      selectedEvaluationScopeId={selectedEvaluationRootId}
       onNotify={notify}
     />
   ) : <SettingsView />
@@ -862,6 +882,7 @@ export default function App() {
         onClose={() => setAgentOpen(false)}
         project={project}
         selectedFile={selectedFile}
+        selectedEvaluationRootId={selectedEvaluationRootId}
         evaluationSnapshot={evaluationSnapshot}
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
         onProjectUpdated={projectUpdated}

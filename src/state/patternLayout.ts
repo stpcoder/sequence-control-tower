@@ -3,11 +3,12 @@ import type { ResultLabel } from '../domain/workbench'
 import type { PivotAggregation, PivotDimension } from './logRecords'
 
 export const PATTERN_LAYOUT_PRESET_ID = 'sequence-control-tower.patterns-layout.v1'
-export const PATTERN_LAYOUT_PRESET_NAME = 'N×M 결과 요약 레이아웃'
+export const PATTERN_LAYOUT_PRESET_NAME = '결과 정리 표 구성'
+export const MAX_PATTERN_AXES = 3
 
 export type PatternLayout = {
-  rowAxes: [PivotDimension, PivotDimension | 'none']
-  columnAxes: [PivotDimension, PivotDimension | 'none']
+  rowAxes: PivotDimension[]
+  columnAxes: PivotDimension[]
   aggregation: PivotAggregation
   resultFilter: ResultLabel | 'all'
   folderFilter: string
@@ -16,40 +17,46 @@ export type PatternLayout = {
 }
 
 export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
-  rowAxes: ['sample', 'none'], columnAxes: ['temperature', 'none'], aggregation: 'count',
+  rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'fail_rate',
   resultFilter: 'all', folderFilter: 'all', failOnly: false, unknownMetadataOnly: false,
 }
 
 const DIMENSIONS = new Set<PivotDimension>([
-  'sample', 'temperature', 'mode', 'skew', 'frequencyMHz', 'vdd', 'pattern',
+  'sample', 'temperature', 'temperatureCorner', 'mode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
   'lot', 'material', 'die', 'socModel',
-  'dq', 'bl', 'channel', 'subChannel', 'rank', 'bankGroup', 'bank', 'row', 'column', 'timingSkewPs',
+  'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'timingSkewPs',
   'grid', 'result', 'review', 'folder', 'run',
 ])
-const AGGREGATIONS = new Set<PivotAggregation>(['count', 'fail_count', 'evidence_count'])
+const AGGREGATIONS = new Set<PivotAggregation>(['count', 'sample_count', 'grid_count', 'pass_count', 'fail_count', 'fail_rate'])
 const RESULTS = new Set<ResultLabel>(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
 
-function dimension(value: unknown, fallback: PivotDimension | 'none'): PivotDimension | 'none' {
-  return typeof value === 'string' && (value === 'none' || DIMENSIONS.has(value as PivotDimension)) ? value as PivotDimension | 'none' : fallback
+function normalizedAxis(value: unknown, fallback: readonly PivotDimension[]): PivotDimension[] {
+  if (!Array.isArray(value)) return [...fallback]
+  return value
+    .filter((item): item is PivotDimension => typeof item === 'string' && DIMENSIONS.has(item as PivotDimension))
+    .slice(0, MAX_PATTERN_AXES)
 }
 
 function uniqueAxes(rows: PatternLayout['rowAxes'], columns: PatternLayout['columnAxes']): PatternLayout {
   const used = new Set<PivotDimension>()
-  const groups = [rows, columns].map((group, groupIndex) => group.map((axis, axisIndex) => {
-    if (axis === 'none' || used.has(axis)) return groupIndex === 0 && axisIndex === 0 ? 'sample' : 'none'
-    used.add(axis); return axis
-  }) as [PivotDimension, PivotDimension | 'none'])
+  const groups = [rows, columns].map((group) => group.filter((axis) => {
+    if (used.has(axis)) return false
+    used.add(axis)
+    return true
+  }))
   return { ...DEFAULT_PATTERN_LAYOUT, rowAxes: groups[0], columnAxes: groups[1] }
 }
 
 export function normalizePatternLayout(value: unknown): PatternLayout {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  const rows: PatternLayout['rowAxes'] = [dimension(Array.isArray(source.rowAxes) ? source.rowAxes[0] : undefined, 'sample') as PivotDimension, dimension(Array.isArray(source.rowAxes) ? source.rowAxes[1] : undefined, 'none')]
-  const columns: PatternLayout['columnAxes'] = [dimension(Array.isArray(source.columnAxes) ? source.columnAxes[0] : undefined, 'temperature') as PivotDimension, dimension(Array.isArray(source.columnAxes) ? source.columnAxes[1] : undefined, 'none')]
+  const rows = normalizedAxis(source.rowAxes, DEFAULT_PATTERN_LAYOUT.rowAxes)
+  const columns = normalizedAxis(source.columnAxes, DEFAULT_PATTERN_LAYOUT.columnAxes)
   const normalized = uniqueAxes(rows, columns)
   return {
     ...normalized,
-    aggregation: typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation,
+    aggregation: source.aggregation === 'evidence_count'
+      ? 'count'
+      : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation,
     resultFilter: typeof source.resultFilter === 'string' && (source.resultFilter === 'all' || RESULTS.has(source.resultFilter as ResultLabel)) ? source.resultFilter as ResultLabel | 'all' : 'all',
     folderFilter: typeof source.folderFilter === 'string' && source.folderFilter.length <= 240 && !/[\u0000-\u001f\u007f\r\n]/.test(source.folderFilter) ? source.folderFilter : 'all',
     failOnly: source.failOnly === true,

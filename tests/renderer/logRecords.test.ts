@@ -15,6 +15,7 @@ import {
   serializeLogRecordsCsv,
   serializeLogRecordsTsv,
   serializePivotGridCsv,
+  serializePivotGridTsv,
   previewLogRecordExport,
   sortLogRecords,
   toggleLogRecordSelection,
@@ -63,6 +64,14 @@ describe('renderer log result projection', () => {
     expect(csv).toContain('"Sample"')
     expect(csv).toContain('"85"')
     expect(csv.split('\r\n')).toHaveLength(grid.rows.length + 1)
+    expect(serializePivotGridTsv(grid, ['Sample'])).toContain('Sample\t85')
+    const report = serializePivotGridCsv(grid, ['Sample'], {
+      rowTotals: grid.rows.map((_, index) => grid.cells[index].reduce((sum, cell) => sum + cell.value, 0)),
+      columnTotals: grid.columns.map((_, index) => grid.cells.reduce((sum, row) => sum + row[index].value, 0)),
+      grandTotal: grid.total,
+    })
+    expect(report.split('\r\n')).toHaveLength(grid.rows.length + 2)
+    expect(report).toContain('"합계"')
   })
 
   it('keeps one source log per row and marks filename metadata as unconfirmed candidates', () => {
@@ -262,6 +271,46 @@ describe('renderer log result projection', () => {
     expect(serializeLogRecordsCsv(rows, ['filename', 'frequency_mhz', 'vdd', 'dq', 'bl', 'channel', 'sub_channel', 'row', 'column'])).toContain('"9600","1.275","9","16","0","1","0x2A","0x14"')
   })
 
+  it('calculates a shareable FAIL rate while retaining every denominator log as source evidence', () => {
+    const rows = projectLogRecords(files)
+    const grid = buildPivotGrid(rows, {
+      rows: ['temperature'], columns: [], aggregation: 'fail_rate', filters: { query: '', result: 'all', review: 'all' },
+    })
+
+    expect(grid.rows.map((row) => row.label)).toEqual(['85', '105'])
+    expect(grid.cells[0][0]).toEqual({ value: 50, sourceIds: ['pass', 'halt'] })
+    expect(grid.cells[1][0]).toEqual({ value: 100, sourceIds: ['training'] })
+    expect(grid.total).toBe(66.7)
+  })
+
+  it('counts distinct Samples and excludes unknown outcomes from the FAIL-rate denominator', () => {
+    const rows = projectLogRecords([
+      { id: 'pass-a', name: 'SMP-01_T85.log', text: '@PASS' },
+      { id: 'pass-a-repeat', name: 'SMP-01_T85_RT2.log', text: '@PASS' },
+      { id: 'fail-b', name: 'SMP-02_T85.log', text: '@FAIL' },
+      { id: 'unknown-c', name: 'SMP-03_T85.log', text: '' },
+    ])
+    const filters = { query: '', result: 'all' as const, review: 'all' as const }
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'sample_count', filters }).total).toBe(3)
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_count', filters }).total).toBe(2)
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'fail_rate', filters }).total).toBe(33.3)
+  })
+
+  it('counts only explicit Grid identities and keeps logs separate from Grid units', () => {
+    const rows = projectLogRecords([
+      { id: 'grid-1-a', name: 'SMP-01_GRID-01_partA.log', text: '@PASS' },
+      { id: 'grid-1-b', name: 'SMP-01_GRID-01_partB.log', text: '@PASS' },
+      { id: 'grid-2', name: 'SMP-01_GRID-02.log', text: '@FAIL' },
+      { id: 'other-sample-grid-1', name: 'SMP-02_GRID-01.log', text: '@PASS' },
+      { id: 'unknown-grid', name: 'SMP-03_plain.log', text: '@PASS' },
+    ])
+    const filters = { query: '', result: 'all' as const, review: 'all' as const }
+    const grid = buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'grid_count', filters })
+    expect(grid.total).toBe(3)
+    expect(grid.cells[0][0].sourceIds).toEqual(['grid-1-a', 'grid-1-b', 'grid-2', 'other-sample-grid-1'])
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'count', filters }).total).toBe(5)
+  })
+
   it('keeps zero-valued fail and evidence pivot rows out of cell source tracing while preserving counts', () => {
     const rows = projectLogRecords([
       { id: 'pass', name: 'pass.log', text: '' },
@@ -285,10 +334,14 @@ describe('renderer log result projection', () => {
     expect(countGrid.cells[0][0].sourceIds).toEqual(['pass', 'fail'])
   })
 
-  it('rejects pivot axes over two dimensions and keeps export preview immutable and formula-safe', () => {
+  it('supports three-level pivots, rejects deeper axes, and keeps export preview immutable and formula-safe', () => {
     const rows = projectLogRecords(files)
     expect(() => buildPivotGrid(rows, {
       rows: ['sample', 'temperature', 'mode'], columns: [], aggregation: 'count',
+      filters: { query: '', result: 'all', review: 'all' },
+    })).not.toThrow()
+    expect(() => buildPivotGrid(rows, {
+      rows: ['sample', 'temperature', 'mode', 'result'], columns: [], aggregation: 'count',
       filters: { query: '', result: 'all', review: 'all' },
     })).toThrow(RangeError)
 

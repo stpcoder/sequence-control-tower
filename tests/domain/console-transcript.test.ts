@@ -23,6 +23,7 @@ describe('console transcript classification', () => {
     expect(classifyConsoleLine('# sleep 20').role).toBe('ambiguous')
     expect(classifyConsoleLine('# sleep 20', [{ promptSignature: 'bare-root-hash', role: 'input' }])).toMatchObject({ role: 'input' })
     expect(classifyConsoleLine('# generated report heading', [{ promptSignature: 'bare-root-hash', role: 'output' }])).toMatchObject({ role: 'output' })
+    expect(classifyConsoleLine('# SYNTHETIC_PUBLIC_FLOW_CORPUS: not a vendor capture', [{ promptSignature: 'bare-root-hash', role: 'input' }])).toMatchObject({ role: 'output' })
   })
 
   it('does not mistake debug output containing a command name for input', () => {

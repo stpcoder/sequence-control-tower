@@ -51,6 +51,22 @@ export function projectListSecondary(project: ProjectSnapshot): string {
   return target ? `${target} · ${scope}` : `${scope} · ${new Date(project.updatedAt).toLocaleDateString('ko-KR')}`
 }
 
+/** Hide only superseded, explicitly marked built-in samples. User projects
+ * with the same name remain separate and visible. */
+export function visibleProjectList(projects: readonly ProjectSnapshot[]): ProjectSnapshot[] {
+  const marker = /^(SCT_SAMPLE_.+)_V(\d+)\b/
+  const newest = new Map<string, number>()
+  projects.forEach((project) => {
+    const match = marker.exec(project.description ?? '')
+    if (!match) return
+    newest.set(match[1], Math.max(newest.get(match[1]) ?? 0, Number(match[2])))
+  })
+  return projects.filter((project) => {
+    const match = marker.exec(project.description ?? '')
+    return !match || Number(match[2]) === newest.get(match[1])
+  })
+}
+
 interface ProjectControlProps {
   project: ProjectSnapshot | null
   onLoaded: (result: ProjectLoadResult) => void
@@ -89,7 +105,7 @@ export function ProjectControl({ project, onLoaded, onProjectUpdated, onError }:
   const refresh = async () => {
     if (!api?.projects) return
     try {
-      const items = await api.projects.list(); setProjects(items)
+      const items = visibleProjectList(await api.projects.list()); setProjects(items)
       if (!project && items[0]) await load(items[0].id)
     } catch (error) { onError(error instanceof Error ? error.message : '프로젝트 목록을 불러오지 못했습니다.') }
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EngineerWorkflowMemoryView } from '../shared/contracts'
-import { extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
+import { engineerWorkflowCompatibility, extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
@@ -28,17 +28,88 @@ describe('LPDDR agent tools', () => {
     expect(JSON.stringify(result.data)).not.toContain('do-not-send')
   })
 
-  it('returns history only from the selected evaluation folder', async () => {
+  it('separates project context from the confirmed purpose of the selected evaluation folder', async () => {
+    const contextProject = {
+      ...project,
+      description: 'LPDDR6 전체 프로젝트에서 VPERI 불량을 개선한다.',
+      artifacts: [project.artifacts[0], { ...project.artifacts[1], rootId: 'other-folder' }],
+      folders: [
+        { rootId: 'r', displayLabel: '01-screening', status: 'available' as const, connectedAt: '' },
+        { rootId: 'other-folder', displayLabel: '02-improvement', status: 'available' as const, connectedAt: '' },
+      ],
+      evaluationNodes: [
+        {
+          id: 'n-current', projectId: 'p', hypothesisId: 'h-current', evaluationScopeId: 'r',
+          name: 'Retention 재현 평가', purpose: '고온 Retention 불량 재현', interpretation: '105°C에서 Halt 여부 확인',
+          status: 'fail' as const, reviewState: 'confirmed' as const, dimensions: {},
+        },
+        {
+          id: 'n-other', projectId: 'p', hypothesisId: 'h-other', evaluationScopeId: 'other-folder',
+          name: 'VDD 개선 평가', purpose: 'VDD 개선 효과 확인', status: 'pass' as const,
+          reviewState: 'confirmed' as const, dimensions: {},
+        },
+      ],
+    }
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => contextProject), list: vi.fn(async () => [contextProject]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'project_context_get' }, ['s1'])
+    expect(result.data).toMatchObject({
+      contextScope: 'project',
+      description: 'LPDDR6 전체 프로젝트에서 VPERI 불량을 개선한다.',
+      currentEvaluation: {
+        folders: ['01-screening'], logCount: 1, confirmed: true,
+        name: 'Retention 재현 평가', purpose: '고온 Retention 불량 재현', interpretation: '105°C에서 Halt 여부 확인',
+      },
+    })
+    expect(JSON.stringify(result.data)).not.toContain('VDD 개선 평가')
+  })
+
+  it('does not leak a project onboarding target into an unconfirmed folder purpose', async () => {
+    const contextProject = {
+      ...project,
+      onboardingAnswers: {
+        evaluationTarget: 'VPERI 개선 전압 확인',
+        importantMetadata: ['temperature', 'vdd'],
+        reuseRules: '같은 SoC profile만 재사용',
+      },
+      evaluationNodes: [{
+        id: 'n-proposed', projectId: 'p', hypothesisId: 'h1', evaluationScopeId: 'r',
+        name: '고온 Retention 후보', purpose: 'characterization', status: 'inconclusive' as const,
+        reviewState: 'proposed' as const, interpretation: '105°C Halt 1건', dimensions: {},
+      }],
+    }
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => contextProject), list: vi.fn(async () => [contextProject]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'project_context_get' }, ['s1'])
+    expect(result.data).toMatchObject({
+      onboarding: { importantMetadata: ['temperature', 'vdd'], reuseRules: '같은 SoC profile만 재사용' },
+      currentEvaluation: { confirmed: false, proposal: { name: '고온 Retention 후보' } },
+    })
+    expect(JSON.stringify(result.data)).not.toContain('VPERI 개선 전압 확인')
+  })
+
+  it('returns bounded project history while marking the selected folder and hiding other source ids', async () => {
     const scopedProject = {
       ...project,
       artifacts: [project.artifacts[0], { ...project.artifacts[1], rootId: 'other-folder' }],
+      folders: [
+        { rootId: 'r', displayLabel: '01-screening', status: 'available' as const, connectedAt: '' },
+        { rootId: 'other-folder', displayLabel: '02-improvement', status: 'available' as const, connectedAt: '' },
+      ],
       failureHypotheses: [
         { id: 'h1', projectId: 'p', title: 'folder A', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['n1'] },
         { id: 'h2', projectId: 'p', title: 'folder B', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['n2'] },
       ],
       evaluationNodes: [
-        { id: 'n1', projectId: 'p', hypothesisId: 'h1', name: 'A 평가', status: 'fail' as const, dimensions: {} },
-        { id: 'n2', projectId: 'p', hypothesisId: 'h2', name: 'B 평가', status: 'pass' as const, dimensions: {} },
+        { id: 'n1', projectId: 'p', hypothesisId: 'h1', evaluationScopeId: 'r', name: 'A 평가', relation: 'baseline' as const, relationReason: '최초 불량', status: 'fail' as const, dimensions: {} },
+        { id: 'n2', projectId: 'p', hypothesisId: 'h2', evaluationScopeId: 'other-folder', name: 'B 평가', relation: 'improvement' as const, relationReason: '개선 조건 비교', status: 'pass' as const, dimensions: {} },
+        { id: 'legacy-node', projectId: 'p', name: '예전 미연결 평가', status: 'inconclusive' as const, dimensions: {} },
       ],
       evidenceRecords: [
         { id: 'e1', projectId: 'p', evaluationNodeId: 'n1', status: 'fail' as const, sourceIds: ['s1'] },
@@ -51,8 +122,71 @@ describe('LPDDR agent tools', () => {
       agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
     })
     const result = await tools.execute('p', { name: 'project_history_get' }, ['s1'])
-    expect(result.data).toMatchObject({ hypotheses: [{ id: 'h1' }], nodes: [{ id: 'n1' }], evidence: [{ id: 'e1' }] })
-    expect(JSON.stringify(result.data)).not.toContain('folder B')
+    expect(result.data).toMatchObject({
+      lineageRule: expect.stringContaining('previousEvaluation'),
+      currentFolders: ['01-screening'],
+      hypotheses: [{ title: 'folder A' }, { title: 'folder B' }],
+      nodes: [
+        { folder: '01-screening', name: 'A 평가', issue: 'folder A', relation: 'baseline', relationReason: '최초 불량', current: true },
+        { folder: '02-improvement', name: 'B 평가', issue: 'folder B', relation: 'improvement', relationReason: '개선 조건 비교', current: false },
+      ],
+      unlinkedEvaluations: [{ name: '예전 미연결 평가', action: '폴더 연결 필요' }],
+      evidence: [
+        { evaluation: 'A 평가', current: true, sourceCount: 1 },
+        { evaluation: 'B 평가', current: false, sourceCount: 1 },
+      ],
+    })
+    expect(result.summary).toContain('저장된 평가 2건 · 선택 폴더 기록 1건 · 연결 로그 2개')
+    expect(result.summary).toContain('폴더 연결 필요 1건')
+    expect(JSON.stringify(result.data)).not.toMatch(/"(?:id|evaluationScopeId|sourceIds)"/)
+    expect(JSON.stringify(result.data)).not.toContain('other-folder')
+    expect(JSON.stringify(result.data)).not.toContain('"s2"')
+    expect(JSON.stringify(result.data)).not.toContain('"order"')
+    expect(result.evidenceSourceIds).toEqual(['s1'])
+  })
+
+  it('uses the same bounded relation engine that saves Agent proposals to place complex evaluation folders', async () => {
+    const artifactId = 'c'.repeat(64)
+    const relationProject = {
+      ...project,
+      artifacts: [{ sourceId: 's-new', artifactId, rootId: 'folder-new', relativePath: 'SM-8975_TM-VPERI_PAT-WR_DQ9_BL16_CH0_SMP-01_RT2.log' }],
+      folders: [
+        { rootId: 'folder-screen', displayLabel: '01-screening', status: 'available' as const, connectedAt: '' },
+        { rootId: 'folder-new', displayLabel: '02-same-condition-RT2', status: 'available' as const, connectedAt: '' },
+      ],
+      failureHypotheses: [{ id: 'h-vperi', projectId: 'p', title: 'VPERI DQ9 반복 불량', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['n-screen'] }],
+      evaluationNodes: [{
+        id: 'n-screen', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'folder-screen',
+        name: 'VPERI screening', purpose: 'screening' as const, status: 'fail' as const,
+        sequenceSignature: 'seq:same', dimensions: { socModel: 'SM-8975', testMode: 'VPERI', pattern: 'WR', dq: 9, bl: 16, channel: 0 },
+      }],
+    }
+    const inspectEvidence = vi.fn(async (input: { sources: Array<{ sourceId: string; artifactId: string; relativePath: string }>; specs: Array<{ id: string }> }) => ({
+      sources: input.sources.map((source) => ({ ...source, fileName: source.relativePath, evidence: input.specs.map((spec) => ({ specId: spec.id, occurrenceCount: spec.id === 'at-fail' ? 1 : 0 })) })),
+    }))
+    const tools = new LpddrAgentToolService({
+      artifacts: {
+        inspectEvidence,
+        list: vi.fn(async () => [{ id: artifactId, fingerprint: { structuralHash: 'same', commandCount: 1, commandSignatures: ['diagnostic:hdiag'] } }]),
+        search: vi.fn(async () => ({ query: '', mode: 'regex', caseSensitive: false, totalMatchCount: 0, truncated: false, files: [], matches: [] })),
+        lineWindow: vi.fn(),
+      } as never,
+      projects: { get: vi.fn(async () => relationProject), list: vi.fn(async () => [relationProject]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'evaluation_relation_suggest', args: { purpose: 'reproduction' } }, ['s-new'])
+    expect(result.summary).toContain('VPERI DQ9 반복 불량 · 동일 조건 RT')
+    expect(result.data).toMatchObject({
+      classification: 'existing-issue', relation: 'retest', issue: 'VPERI DQ9 반복 불량',
+      previousEvaluation: 'VPERI screening', confirmationRequired: true,
+      currentEvaluation: { folder: '02-same-condition-RT2', purpose: 'reproduction', status: 'fail' },
+    })
+    expect(result.evidenceSourceIds).toEqual(['s-new'])
+
+    relationProject.artifacts[0].relativePath = 'SM-8975_TM-VPERI_PAT-WR_DQ6_BL12_CH0_TM2.log'
+    relationProject.folders[1].displayLabel = '03-TM2-improvement'
+    const sideEffect = await tools.execute('p', { name: 'evaluation_relation_suggest', args: { purpose: 'improvement' } }, ['s-new'])
+    expect(sideEffect.data).toMatchObject({ classification: 'existing-issue', relation: 'side-effect', confirmationRequired: true })
   })
 
   it('extracts LPDDR conditions without swallowing adjacent tokens', () => {
@@ -86,6 +220,38 @@ describe('LPDDR agent tools', () => {
     expect(rows[0].bootProfileId).toBe('mediatek-default')
     expect(rows[0].stages.map((item) => item.stage)).toEqual(expect.arrayContaining(['post-pbl', 'lk', 'os']))
     expect(rows[0].stages.map((item) => item.stage)).not.toContain('uefi')
+  })
+
+  it('groups explicit power cycles into bounded Grid candidates with their Sequence conditions', async () => {
+    const search = vi.fn(async () => ({
+      query: '', mode: 'regex' as const, caseSensitive: false, totalMatchCount: 8, truncated: false, files: [],
+      matches: [
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 1, lineText: 'GRID_START ID=G01' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 2, lineText: 'TEMP=85C HOT VDD=1.315V HVDD CORNER=HH FREQ=9600 TM=VPERI' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 3, lineText: 'UEFI> setddrclk 9600' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 90, lineText: 'HIDAG @FAIL DQ=9' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 100, lineText: 'POWER_ON' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 101, lineText: 'TEMP=-20C COLD VDD=1.275V LVDD CORNER=CL FREQ=8533 TM=VPERI' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 102, lineText: '# hdiag start' },
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 190, lineText: '@PASS' },
+      ].map((item) => ({ ...item, columnStart: 1, columnEnd: 2, lineTruncated: false, before: [], after: [] })),
+    }))
+    const tools = new LpddrAgentToolService({
+      artifacts: { search, inspectEvidence: vi.fn(), list: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
+      agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) },
+    })
+    const result = await tools.execute('p', { name: 'evaluation_grid_scan' }, ['s1'])
+    const data = result.data as { rows: Array<{ gridCount: number; explicitBoundary: boolean; grids: Array<{ conditions: Record<string, unknown>; commands: string[]; results: string[] }> }> }
+    expect(data.rows[0]).toMatchObject({ gridCount: 2, explicitBoundary: true })
+    expect(data.rows[0].grids[0]).toMatchObject({
+      conditions: { gridId: 'G01', temperatureC: 85, temperatureCorner: 'HOT', vdd: 1.315, vddCorner: 'HVDD', conditionCorner: 'HH', frequencyMHz: 9600, testMode: 'VPERI' },
+      commands: ['setddrclk 9600'], results: ['FAIL'],
+    })
+    expect(data.rows[0].grids[1]).toMatchObject({
+      conditions: { temperatureC: -20, temperatureCorner: 'COLD', vdd: 1.275, vddCorner: 'LVDD', conditionCorner: 'CL', frequencyMHz: 8533, testMode: 'VPERI' },
+      commands: ['hdiag start'], results: ['PASS'],
+    })
   })
 
   it('classifies marker precedence locally and returns the denominator', async () => {
@@ -137,13 +303,23 @@ describe('LPDDR agent tools', () => {
     const tools = new LpddrAgentToolService({
       artifacts: {
         inspectEvidence: vi.fn(async () => ({ sources: [evidence('s1', 'fail'), evidence('s2', 'pass'), evidence('s3', 'pass')] })),
-        list: vi.fn(async () => trendProject.artifacts.map((source) => ({ id: source.artifactId, fingerprint: { structuralHash: source.sourceId, commandSignatures: source.sourceId === 's2' ? ['training:train'] : ['diagnostic:hdiag'] } }))), search: vi.fn(), lineWindow: vi.fn()
+        list: vi.fn(async () => trendProject.artifacts.map((source) => ({ id: source.artifactId, fingerprint: { structuralHash: source.sourceId, commandSignatures: source.sourceId === 's2' ? ['training:train'] : ['diagnostic:hdiag'] } }))),
+        search: vi.fn(async () => ({ query: '', mode: 'regex' as const, caseSensitive: false, totalMatchCount: 1, truncated: false, files: [], matches: [{
+          artifactId: project.artifacts[0].artifactId, fileName: 's1.log', lineNumber: 880,
+          lineText: 'HIDAG @FAIL CH=0 SUBCH=1 CS=0 BK=5 RK=0 BG=2 ROW=0x2A COL=0x14 WR=0xAA RD=0xA8 DQ=0,1,2 BL=16',
+          columnStart: 1, columnEnd: 2, lineTruncated: false, before: [], after: [],
+        }] })), lineWindow: vi.fn()
       } as never,
       projects: { get: vi.fn(async () => trendProject), list: vi.fn(async () => [trendProject]) } as never,
       agentStore: { searchHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []) }
     })
     const result = await tools.execute('p', { name: 'failure_trends_get' })
-    const data = result.data as { denominator: number; live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }> }
+    const data = result.data as {
+      denominator: number
+      coverage: Array<{ skew: string; sampleCount: number; logCount: number; pass: number; fail: number }>
+      failAddress: { events: number; distribution: Array<{ dimension: string; value: string; eventCount: number; sourceCount: number }> }
+      live: Array<{ dimension: string; value: string; failures: number; total: number; failureRate: number }>
+    }
     expect(data.denominator).toBe(3)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: '온도', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: 'SS' }))
@@ -151,7 +327,11 @@ describe('LPDDR agent tools', () => {
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Timing SKEW (ps)', value: '12' }))
     expect(data.live.some((item) => item.dimension === 'sku')).toBe(false)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
-    expect(result.summary).toContain('1/2 fail (50.0%)')
+    expect(data.coverage).toContainEqual(expect.objectContaining({ skew: 'SS', sampleCount: 2, logCount: 2, pass: 1, fail: 1 }))
+    expect(data.failAddress.events).toBe(1)
+    expect(data.failAddress.distribution).toContainEqual(expect.objectContaining({ dimension: 'Channel', value: '0', eventCount: 1, sourceCount: 1 }))
+    expect(data.failAddress.distribution).toContainEqual(expect.objectContaining({ dimension: 'DQ', value: '0,1,2', eventCount: 1, sourceCount: 1 }))
+    expect(result.summary).toContain('1/2 FAIL (50.0%)')
   })
 
   it('applies a confirmed engineer procedure with absence and marker order locally', async () => {
@@ -191,10 +371,81 @@ describe('LPDDR agent tools', () => {
     expect(result.summary).toContain('1개 중 1개')
   })
 
+  it('reuses a compatible procedure from another folder only as an unconfirmed candidate', async () => {
+    const workflow: EngineerWorkflowMemoryView = {
+      id: 'w-old', projectId: 'p', evaluationScopeId: 'old-folder', name: 'VPERI 판정', purpose: 'VPERI 불량 검출',
+      stages: ['uefi', 'memory-test'],
+      checks: [
+        { query: 'UEFI', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'uefi', order: 1 },
+        { query: '@PASS', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'memory-test', order: 2 },
+      ],
+      result: 'PASS', sourceIds: ['old-source'], evidenceLines: [10, 90],
+      dimensions: { testMode: 'VPERI', pattern: 'WR', temperatureC: 25, vdd: 1.275 },
+      confirmedCount: 2, appliedCount: 3, createdAt: '2026-01-01', updatedAt: '2026-01-02',
+    }
+    const inspectEvidence = vi.fn(async (input: { sources: Array<{ sourceId: string; artifactId: string }>; specs: Array<{ id: string; query: string }> }) => ({
+      sources: input.sources.map((source) => ({ ...source, fileName: 'run.log', evidence: input.specs.map((spec, index) => ({
+        specId: spec.id, occurrenceCount: 1,
+        firstOccurrence: { lineNumber: 10 + index * 80, columnStart: 1, columnEnd: 5, target: 'content', excerpt: spec.query, excerptTruncated: false },
+      })) })),
+    }))
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence, list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
+      agentStore: {
+        searchHistory: vi.fn(async () => []), conversationHistory: vi.fn(async () => []), workflowMemories: vi.fn(async () => [workflow]),
+        attemptHistory: vi.fn(async () => []), commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []),
+      },
+    })
+    const result = await tools.execute('p', { name: 'engineer_workflow_apply' }, ['s1'])
+    expect(result.summary).toContain('유사 평가의 확정 절차 후보')
+    expect(result.data).toMatchObject({ rows: [{ workflowId: 'w-old', matched: true, scopeMatch: false }] })
+    expect(engineerWorkflowCompatibility(workflow, { testMode: 'BOOT', pattern: 'WR' })).toBeNull()
+  })
+
+  it('shows exact procedures from other evaluations without treating an incompatible one as current', async () => {
+    const workflow: EngineerWorkflowMemoryView = {
+      id: 'w-vperi', projectId: 'p', evaluationScopeId: 'vperi-folder', name: 'VDD 개선 확인', purpose: '개선 조건 유효성 확인',
+      stages: ['unknown', 'memory-test'],
+      checks: [
+        { query: 'set_rail', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'unknown', order: 1 },
+        { query: 'stressapptest BEGIN', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'memory-test', order: 2 },
+        { query: '@PASS', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'memory-test', order: 3 },
+      ],
+      result: 'PASS', sourceIds: ['old-source'], evidenceLines: [10, 20, 90],
+      dimensions: { testMode: 'BOOT', pattern: 'WR', socVendor: 'qualcomm' },
+      confirmedCount: 1, appliedCount: 2, createdAt: '2026-01-01', updatedAt: '2026-01-02',
+    }
+    const tools = new LpddrAgentToolService({
+      artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+      projects: { get: vi.fn(async () => project), list: vi.fn(async () => [project]) } as never,
+      agentStore: {
+        searchHistory: vi.fn(async () => []), conversationHistory: vi.fn(async () => []),
+        workflowMemories: vi.fn(async () => [workflow]), attemptHistory: vi.fn(async () => []),
+        commandKnowledge: vi.fn(async () => []), profileBindings: vi.fn(async () => []), consolePromptRules: vi.fn(async () => []),
+      },
+    })
+    const result = await tools.execute('p', { name: 'engineer_workflow_memory_get' }, ['s1'])
+    const data = result.data as {
+      confirmed: unknown[]
+      otherEvaluationCandidates: Array<{ compatibility: string; checks: Array<{ query: string }> }>
+    }
+    expect(data.confirmed).toEqual([])
+    expect(data.otherEvaluationCandidates).toEqual([expect.objectContaining({
+      compatibility: 'incompatible',
+      checks: [{ query: 'set_rail', mode: 'literal', caseSensitive: false, expected: 'present', stage: 'unknown', order: 1 },
+        { query: 'stressapptest BEGIN', mode: 'literal', caseSensitive: false, expected: 'present', stage: 'memory-test', order: 2 },
+        { query: '@PASS', mode: 'literal', caseSensitive: false, expected: 'present', stage: 'memory-test', order: 3 }],
+    })])
+    expect(JSON.stringify(data)).not.toContain('DDR init')
+    expect(result.summary).toContain('현재 폴더 확정 절차 0개 · 다른 평가 절차 1개')
+  })
+
   it('separates prompt commands from output and applies the confirmed bare-prompt rule', async () => {
     const search = vi.fn(async () => ({
-      query: '', mode: 'regex' as const, caseSensitive: false, totalMatchCount: 3, truncated: false, files: [],
+      query: '', mode: 'regex' as const, caseSensitive: false, totalMatchCount: 4, truncated: false, files: [],
       matches: [
+        { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 1, columnStart: 1, columnEnd: 8, lineText: '# SYNTHETIC_PUBLIC_FLOW_CORPUS: not a vendor capture', lineTruncated: false, before: [], after: [] },
         { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 10, columnStart: 1, columnEnd: 8, lineText: '[00:00:00] UEFI> set_rail VDD 1.295', lineTruncated: false, before: [], after: [] },
         { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 20, columnStart: 1, columnEnd: 8, lineText: '# sleep 20', lineTruncated: false, before: [], after: [] },
         { artifactId: project.artifacts[0].artifactId, fileName: 'run.log', lineNumber: 30, columnStart: 1, columnEnd: 8, lineText: 'INFO set_rail completed', lineTruncated: false, before: [], after: [] },
@@ -216,7 +467,10 @@ describe('LPDDR agent tools', () => {
       expect.objectContaining({ command: 'set_rail VDD 1.295' }),
       expect.objectContaining({ command: 'sleep 20', searchedByEngineer: true }),
     ]))
+    expect(data.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: expect.stringContaining('SYNTHETIC_PUBLIC') }),
+    ]))
     expect(data.ambiguous).toEqual([])
-    expect(result.summary).toContain('상태 신호 1개')
+    expect(result.summary).toContain('입력 명령 2개 · 상태 신호 1개')
   })
 })

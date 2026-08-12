@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { ArtifactService } from '../../electron/main/artifact-service'
-import { classifyLpddrStatus, extractLpddrFilenameDimensions, LPDDR_STATUS_SPECS } from '../../electron/main/lpddr-agent-tools'
+import { classifyLpddrStatus, extractLpddrFilenameDimensions, LpddrAgentToolService, LPDDR_STATUS_SPECS } from '../../electron/main/lpddr-agent-tools'
 import { detectSocFilenameContext } from '../../src/domain/soc-profile'
 
 type CorpusManifest = { scenarios: Array<{ file: string; vendor: 'qualcomm' | 'mediatek'; expected: string; lineCount: number }> }
@@ -46,5 +46,40 @@ describe('long tangled SoC corpus', () => {
     const deep = await artifacts.search({ artifactIds: imported.artifacts.map((item) => item.id), query: 'EDAC MC', maxMatches: 20, contextLines: 0 })
     expect(deep.matches).toHaveLength(4)
     expect(Math.min(...deep.matches.map((item) => item.lineNumber))).toBeGreaterThan(6_000)
+
+    const projectSources = imported.artifacts.flatMap((artifact) => (artifact.sources ?? []).map((source) => ({
+      sourceId: source.relativePath, artifactId: artifact.id, rootId: source.rootId, relativePath: source.relativePath,
+    })))
+    const project = {
+      schemaVersion: 2 as const, id: 'long-soc', name: '장문 SoC 불량 분석', revision: 0, archived: false,
+      createdAt: '', updatedAt: '', folders: [...new Set(projectSources.map((source) => source.rootId))].map((rootId) => ({ rootId, displayLabel: '장문 평가', status: 'available' as const, connectedAt: '' })),
+      artifacts: projectSources,
+      equipmentProfiles: [], templatePins: [], exportPresets: [], failureHypotheses: [], evaluationNodes: [], evidenceRecords: [], lpddrDevelopmentContext: {},
+    }
+    const tools = new LpddrAgentToolService({
+      artifacts,
+      projects: { get: async () => project, list: async () => [project] } as never,
+      agentStore: {
+        searchHistory: async () => [], workflowMemories: async () => [], conversationHistory: async () => [], attemptHistory: async () => [],
+        commandKnowledge: async () => [], profileBindings: async () => [], consolePromptRules: async () => [],
+      } as never,
+    })
+    const trend = await tools.execute(project.id, { name: 'failure_trends_get' })
+    const trendData = trend.data as {
+      denominator: number; numerator: number
+      coverage: Array<{ skew: string; sampleCount: number; logCount: number }>
+      failAddress: { events: number; distribution: Array<{ dimension: string; value: string; eventCount: number; sourceCount: number }> }
+    }
+    expect(trendData).toMatchObject({ denominator: 6, numerator: 4 })
+    expect(trendData.coverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ skew: 'SS', sampleCount: 3, logCount: 3 }),
+      expect.objectContaining({ skew: 'SF', sampleCount: 1, logCount: 1 }),
+    ]))
+    expect(trendData.failAddress.events).toBeGreaterThanOrEqual(4)
+    expect(trendData.failAddress.distribution).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dimension: 'DQ', value: '9', eventCount: 2, sourceCount: 2 }),
+      expect.objectContaining({ dimension: 'Channel', value: '0', eventCount: 2, sourceCount: 2 }),
+      expect.objectContaining({ dimension: 'Sub Channel', value: '1', eventCount: 3, sourceCount: 3 }),
+    ]))
   }, 30_000)
 })

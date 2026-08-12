@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { EvaluationAgentRuntime, proposalToEvaluationMemory, type EvaluationAgentSession, type EvaluationFile, type LogReader } from '../../src/domain/evaluation-agent'
+import { EVALUATION_OUTCOMES, EvaluationAgentRuntime, proposalToEvaluationMemory, type EvaluationAgentSession, type EvaluationAgentSkillPolicy, type EvaluationFile, type EvaluationOutcome, type LogReader } from '../../src/domain/evaluation-agent'
 import type { AssessmentOrigin, EvidenceRecord, EvaluationNode, FailureHypothesis } from '../../src/domain/evaluation-memory'
-import { parseFilenameMetadata } from '../../src/domain/workbench/filenameMetadata'
-import { detectSocFilenameContext } from '../../src/domain/soc-profile'
+import { extractLpddrFilenameDimensions } from '../../src/domain/lpddr-filename-dimensions'
 import type { ArtifactRecord, ProjectSnapshot } from '../shared/contracts'
 import type { ArtifactService } from './artifact-service'
 import type { OpenAiCompatibleClient } from './llm-service'
+import type { NativeAgentStore } from './native-agent-store'
 import type { ProjectStore } from './project-store'
+import { classifyLpddrStatus, LPDDR_STATUS_SPECS } from './lpddr-agent-tools'
 
 export interface EvaluationAgentStartInput { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentStoredSession { projectId: string; evaluationScopeId?: string; sourceIds: string[]; session: EvaluationAgentSession; updatedAt: string }
@@ -17,16 +18,29 @@ export interface EvaluationAgentPersistence {
   save?(record: EvaluationAgentStoredSession): Promise<void>
 }
 export interface EvaluationAgentServiceDeps {
-  artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'> & Partial<Pick<ArtifactService, 'inspectStages'>>
+  artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'> & Partial<Pick<ArtifactService, 'inspectStages' | 'inspectEvidence'>>
   projects: Pick<ProjectStore, 'get'>
   llm: Pick<OpenAiCompatibleClient, 'complete'>
+  engineerMemory?: Pick<NativeAgentStore, 'workflowMemories'>
   sessions?: EvaluationAgentPersistence
+  /** The packaged lpddr-failure-analysis Skill contract shared with OpenCode. */
+  skillPolicy?: EvaluationAgentSkillPolicy
   id?: () => string
 }
 
 export interface EvaluationMemorySavePayload { hypothesis: FailureHypothesis; node: EvaluationNode; evidence: EvidenceRecord[] }
 
-type Source = { sourceId: string; artifactId: string; rootId: string; relativePath: string; fileName: string; artifact?: ArtifactRecord }
+type Source = {
+  sourceId: string
+  artifactId: string
+  /** Stable project folder identity used by chat, history and session restore. */
+  rootId: string
+  /** Physical artifact location used only for local file access. */
+  artifactRootId: string
+  relativePath: string
+  fileName: string
+  artifact?: ArtifactRecord
+}
 
 function safe(value: unknown, max = 240): string { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '' }
 /** Preserve engineering tokens while removing credential-like filename values before any provider-facing metadata exists. */
@@ -34,39 +48,13 @@ function safeFilename(value: unknown): string {
   return safe(value, 240)
     .replace(/(?:api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[^\s,;_]+/gi, '<SECRET>')
 }
-function safeEvidence(value: string): string {
-  return safe(value, 800)
+function safeEvidence(value: string, max = 800): string {
+  return safe(value, max)
     .replace(/(?:[A-Za-z]:[\\/]|\\\\|\/)(?:[^\\/\s]+[\\/])+[^\\/\s,;)]*/g, '<PATH>')
     .replace(/\b(?:api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, '<SECRET>')
 }
-function numeric(value: string | null): number | undefined { if (!value) return undefined; const found = Number(value.replace(',', '.').replace(/[pP]/g, '.').match(/-?\d+(?:\.\d+)?/)?.[0]); return Number.isFinite(found) ? found : undefined }
-function patternCapture(name: string): string | undefined {
-  const marker = /(?:^|[_\-.])(?:PATTERN|PAT)[=:_-]?/i.exec(name)
-  if (!marker) return undefined
-  const tail = name.slice(marker.index + marker[0].length).replace(/\.[^.]+$/, '')
-  const stop = tail.search(/(?:_|-)(?:DQ|BL|CH|CHANNEL|SUBCH|SUBCHANNEL|SCH|RANK|RK|BANK|BG|BANKGROUP|ROW|COL|COLUMN|FREQ|FREQUENCY|F|TEMP|TEMPERATURE|T|VDD|SKEW|TSKEW|TIMINGSKEW|TM|MODE|PASS|FAIL|HALT|REBOOT|TRAIN)(?=[=:_-]?[A-Z0-9])/i)
-  const value = (stop < 0 ? tail : tail.slice(0, stop)).replace(/^[-_]+|[-_]+$/g, '')
-  return value || undefined
-}
 function filenameDimensions(fileName: string): EvaluationFile['metadata'] {
-  const parsed = parseFilenameMetadata(fileName); const name = fileName
-  const soc = detectSocFilenameContext(fileName)
-  const capture = (expression: RegExp): string | undefined => expression.exec(name)?.[1]
-  const numberCapture = (expression: RegExp): number | undefined => numeric(capture(expression) ?? null)
-  return {
-    skew: capture(/(?:^|[_\-.])SKEW[=:_-]?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
-    lot: capture(/(?:^|[_\-.])LOT[=:_-]?([A-Z0-9-]+)/i),
-    material: capture(/(?:^|[_\-.])(?:MAT|MATERIAL)[=:_-]?([A-Z0-9-]+)/i),
-    die: capture(/(?:^|[_\-.])DIE[=:_-]?([A-Z0-9-]+)/i),
-    sample: parsed.sample.value ?? undefined,
-    temperatureC: numeric(parsed.temperature.value),
-    testMode: parsed.mode.value ?? capture(/(?:^|[_\-.])(?:TM|MODE)[=:_-]?([A-Z][A-Z0-9-]*)(?=[_.]|$)/i),
-    bl: capture(/(?:^|[_\-.])BL[=:_-]?(\d+)/i), dq: capture(/(?:^|[_\-.])DQ[=:_-]?(\d+)/i),
-    channel: capture(/(?:^|[_\-.])(?:CH|CHANNEL)[=:_-]?(\d+)/i), subChannel: capture(/(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)[=:_-]?(\d+)/i), rank: capture(/(?:^|[_\-.])(?:RANK|RK)[=:_-]?(\d+)/i), bank: capture(/(?:^|[_\-.])BANK[=:_-]?(\d+)/i), bankGroup: capture(/(?:^|[_\-.])(?:BG|BANKGROUP)[=:_-]?(\d+)/i), row: capture(/(?:^|[_\-.])ROW[=:_-]?([A-F0-9x]+)/i), column: capture(/(?:^|[_\-.])(?:COL|COLUMN)[=:_-]?([A-F0-9x]+)/i),
-    pattern: patternCapture(name), frequencyMHz: numberCapture(/(?:^|[_\-.])(?:FREQ|FREQUENCY|F)[=:_-]?(\d+(?:[p.]\d+)?)/i) ?? numberCapture(/(?:^|[_\-.])(\d{3,5})MT/i),
-    vdd: numberCapture(/(?:^|[_\-.])VDD[=:_-]?(\d+(?:[p.]\d+)?)/i), timingSkewPs: numberCapture(/(?:^|[_\-.])(?:TSKEW|TIMINGSKEW)[=:_-]?(\d+(?:[p.]\d+)?)(?:PS)?/i),
-    ...(soc.vendor === 'unknown' ? {} : { socVendor: soc.vendor, socModel: soc.socModel, bootProfileId: soc.bootProfileId })
-  }
+  return extractLpddrFilenameDimensions(fileName)
 }
 
 /** Main-process boundary: only selected project sources may reach the runtime. */
@@ -87,13 +75,19 @@ export class EvaluationAgentService {
     const sources = await this.authorize(project, input.sourceIds)
     const id = this.id(); this.sourceMaps.set(id, sources); this.projectIds.set(id, project.id)
     const roots = [...new Set(sources.map((source) => source.rootId))]
-    this.evaluationScopeIds.set(id, roots.length === 1 ? roots[0] : undefined)
+    const evaluationScopeId = roots.length === 1 ? roots[0] : undefined
+    this.evaluationScopeIds.set(id, evaluationScopeId)
     const runtime = this.runtime(sources)
-    const session = await runtime.prepare(id)
+    const requestedIntent = safe(input.intent, 400)
+    const evaluationIntent = /^(?:failure[- ]?trend|analysis)$/i.test(requestedIntent) ? '' : requestedIntent
+    const session = await runtime.prepare(id, {
+      ...(evaluationIntent ? { evaluationIntent } : {}),
+      priorContext: await this.priorContext(project, evaluationScopeId),
+    })
     // Intent/issue are deliberately transcript labels only; neither can alter tool authority.
     if (safe(input.intent) || safe(input.issueId)) session.transcript.unshift({ at: new Date().toISOString(), role: 'user', type: 'request', detail: `intent=${safe(input.intent)} issue=${safe(input.issueId)}`.trim() })
     await this.remember(session)
-    this.schedule(id, runtime)
+    if (session.status === 'running') this.schedule(id, runtime)
     return session
   }
 
@@ -169,6 +163,35 @@ export class EvaluationAgentService {
     this.runners.set(id, task)
   }
   private async project(id: string): Promise<ProjectSnapshot> { const project = await this.deps.projects.get(safe(id)); if (!project) throw new Error('project not found'); return project }
+  private async priorContext(project: ProjectSnapshot, evaluationScopeId?: string): Promise<string> {
+    const workflows = await this.deps.engineerMemory?.workflowMemories(project.id, 12).catch(() => []) ?? []
+    const nodeById = new Map((project.evaluationNodes ?? []).map((node) => [node.id, node]))
+    const hypothesisById = new Map((project.failureHypotheses ?? []).map((hypothesis) => [hypothesis.id, hypothesis]))
+    const nodes = [...(project.evaluationNodes ?? [])]
+      .sort((left, right) => Number(left.evaluationScopeId === evaluationScopeId) - Number(right.evaluationScopeId === evaluationScopeId))
+      .slice(-8)
+      .map((node) => ({
+        name: safeEvidence(node.name, 160), purpose: node.purpose, status: node.status,
+        issue: safeEvidence(hypothesisById.get(node.hypothesisId ?? '')?.title ?? '', 160),
+        relation: node.relation,
+        previousEvaluation: safeEvidence(node.parentId ? nodeById.get(node.parentId)?.name ?? '' : '', 160),
+        sameFolder: Boolean(evaluationScopeId && node.evaluationScopeId === evaluationScopeId),
+        interpretation: safeEvidence(node.interpretation ?? '', 300), dimensions: node.dimensions,
+      }))
+    const procedures = workflows.slice(0, 8).map((workflow) => ({
+      purpose: safeEvidence(workflow.purpose, 160), result: workflow.result, stages: workflow.stages,
+      sameFolder: Boolean(evaluationScopeId && workflow.evaluationScopeId === evaluationScopeId),
+      dimensions: workflow.dimensions,
+      checks: workflow.checks.slice(0, 8).map((check) => ({
+        query: safeEvidence(check.query, 120), expected: check.expected, stage: check.stage, order: check.order,
+      })),
+    }))
+    return safeEvidence(JSON.stringify({
+      projectTarget: safeEvidence(project.onboardingAnswers?.evaluationTarget ?? project.description ?? '', 300),
+      priorEvaluations: nodes,
+      confirmedSearchProcedures: procedures,
+    }), 2_400)
+  }
   private async authorize(project: ProjectSnapshot, requested?: string[]): Promise<Source[]> {
     const requestedIds = requested?.map((id) => safe(id)).filter(Boolean)
     if (requestedIds && (new Set(requestedIds).size !== requestedIds.length || requestedIds.length > 32)) throw new Error('invalid source selection')
@@ -179,7 +202,8 @@ export class EvaluationAgentService {
     return allowed.map((source) => ({
       sourceId: source.sourceId,
       artifactId: source.artifactId,
-      rootId: source.artifactRootId ?? source.rootId,
+      rootId: source.rootId,
+      artifactRootId: source.artifactRootId ?? source.rootId,
       relativePath: source.relativePath,
       fileName: safeFilename(basename(source.relativePath)),
       artifact: artifacts.get(source.artifactId),
@@ -189,17 +213,31 @@ export class EvaluationAgentService {
     const bySource = new Map(sources.map((source) => [source.sourceId, source]))
     const reader: LogReader = {
       listFiles: async () => {
-        const inspected = this.deps.artifacts.inspectStages
-          ? await this.deps.artifacts.inspectStages({
-              sources: sources.map((source) => ({
-                sourceId: source.sourceId,
-                artifactId: source.artifactId,
-                rootId: source.rootId,
-                relativePath: source.relativePath,
-              })),
+        const sourceInput = sources.map((source) => ({
+          sourceId: source.sourceId,
+          artifactId: source.artifactId,
+          rootId: source.artifactRootId,
+          relativePath: source.relativePath,
+        }))
+        const [inspected, statusInspected] = await Promise.all([
+          this.deps.artifacts.inspectStages
+          ? this.deps.artifacts.inspectStages({
+              sources: sourceInput,
             }).catch(() => null)
-          : null
+          : null,
+          this.deps.artifacts.inspectEvidence
+            ? this.deps.artifacts.inspectEvidence({ sources: sourceInput, specs: LPDDR_STATUS_SPECS }).catch(() => null)
+            : null,
+        ])
         const stagesBySource = new Map(inspected?.sources.map((item) => [item.sourceId, item.stages]) ?? [])
+        const outcomesBySource = new Map(statusInspected?.sources.flatMap((item) => {
+          if (item.error) return []
+          const counts = Object.fromEntries(LPDDR_STATUS_SPECS.map((spec) => [spec.id, item.evidence.find((entry) => entry.specId === spec.id)?.occurrenceCount ?? 0]))
+          const classified = classifyLpddrStatus(counts)
+          return EVALUATION_OUTCOMES.includes(classified.status as EvaluationOutcome)
+            ? [[item.sourceId, { outcome: classified.status as EvaluationOutcome, reason: classified.reason }] as const]
+            : []
+        }) ?? [])
         return sources.map((source) => ({
           id: source.sourceId,
           name: source.fileName,
@@ -207,6 +245,10 @@ export class EvaluationAgentService {
           lineCount: source.artifact?.fingerprint?.lineCount,
           metadata: filenameDimensions(source.fileName),
           stages: stagesBySource.get(source.sourceId),
+          ...(outcomesBySource.get(source.sourceId) ? {
+            deterministicOutcome: outcomesBySource.get(source.sourceId)!.outcome,
+            deterministicReason: outcomesBySource.get(source.sourceId)!.reason,
+          } : {}),
         }))
       },
       search: async (sourceId, query, options) => {
@@ -220,6 +262,11 @@ export class EvaluationAgentService {
         return result.lines.slice(0, 24).map((line) => safeEvidence(line.text))
       }
     }
-    return new EvaluationAgentRuntime(reader, { complete: (prompt, signal) => this.deps.llm.complete(prompt, signal, () => undefined) })
+    return new EvaluationAgentRuntime(
+      reader,
+      { complete: (prompt, signal) => this.deps.llm.complete(prompt, signal, () => undefined) },
+      undefined,
+      this.deps.skillPolicy,
+    )
   }
 }

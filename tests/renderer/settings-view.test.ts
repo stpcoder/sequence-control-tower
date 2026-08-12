@@ -29,17 +29,17 @@ describe('SettingsView save confirmation', () => {
   it('reports an environment-provided API key instead of claiming encrypted storage', () => {
     const message = saveConfirmationMessage(summary(true, true), false, false)
 
-    expect(message).toBe('설정을 저장했습니다. API key는 환경변수로 공급되므로 이 앱에 암호화 저장되지 않습니다.')
-    expect(message).not.toContain('암호화된 API key를 저장했습니다')
+    expect(message).toBe('설정을 저장했습니다. API 키는 환경변수로 공급되므로 이 앱에 암호화 저장되지 않습니다.')
+    expect(message).not.toContain('암호화된 API 키를 저장했습니다')
   })
 
   it('reports an API key as encrypted only when it is persisted without environment management', () => {
-    expect(saveConfirmationMessage(summary(true, false), false, true)).toBe('설정과 암호화된 API key를 저장했습니다.')
+    expect(saveConfirmationMessage(summary(true, false), false, true)).toBe('설정과 암호화된 API 키를 저장했습니다.')
   })
 
   it('keeps the host-cleared and session-only messages for their respective save responses', () => {
-    expect(saveConfirmationMessage(summary(false, false), true, false)).toBe('Gateway 주소가 바뀌어 이전 host의 API key를 안전하게 해제했습니다.')
-    expect(saveConfirmationMessage(summary(false, false), false, true)).toBe('설정을 저장했습니다. API key는 OS 암호화 가능 여부에 따라 세션에만 유지될 수 있습니다.')
+    expect(saveConfirmationMessage(summary(false, false), true, false)).toBe('API 주소가 바뀌어 이전 주소의 API 키를 안전하게 해제했습니다.')
+    expect(saveConfirmationMessage(summary(false, false), false, true)).toBe('설정을 저장했습니다. API 키는 OS 암호화 가능 여부에 따라 세션에만 유지될 수 있습니다.')
   })
 })
 

@@ -249,7 +249,7 @@ export function ReviewView({ workspaceItem, onSaveKnowledge, onNotify }: ReviewV
 
           <div className="analysis-meta">
             <span><Clock3 size={13} /> {analysis ? `${analysis.source}${analysis.cached ? ' · cache' : ''}` : '분석 1.8s · cache'}</span>
-            <span><Link2 size={13} /> 근거 {analysis?.facts.length ?? 6}개</span>
+            <span><Link2 size={13} /> 확인 항목 {analysis?.facts.length ?? 6}개</span>
           </div>
         </aside>
       </div>

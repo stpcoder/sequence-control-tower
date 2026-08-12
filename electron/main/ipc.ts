@@ -138,12 +138,19 @@ function evaluationEvidenceLines(evidence: import('../../src/domain/evaluation-a
 
 /** Removes excerpts/aggregates so the renderer sees decisions, not raw log text. */
 function evaluationAgentView(session: import('../../src/domain/evaluation-agent').EvaluationAgentSession): EvaluationAgentSessionView {
+  const question = session.question
+    ? { ...session.question, field: session.question.field ?? session.question.dimension ?? 'evaluationIntent' as const }
+    : undefined
   return {
     schemaVersion: 1, id: session.id, status: session.status, depth: session.depth, calls: session.calls, searches: session.searches,
     files: session.files.map((file) => ({ sourceId: file.id, name: safeAgentText(file.name, 240), lineCount: file.lineCount, size: file.size, dimensions: file.metadata })),
     evidence: session.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, sourceId: evidence.fileId, summary: safeAgentText(evidence.detail, 400), lineNumbers: evaluationEvidenceLines(evidence) })),
     transcript: session.transcript.map((item) => ({ at: item.at, role: item.role, type: item.type })),
-    dimensions: session.context.dimensions, question: session.question, proposal: session.proposal, failure: session.failure ? safeAgentText(session.failure, 300) : undefined
+    dimensions: session.context.dimensions,
+    ...(session.context.evaluationIntent ? { evaluationIntent: safeAgentText(session.context.evaluationIntent, 400) } : {}),
+    ...(session.context.analysisPolicy ? { analysisPolicy: session.context.analysisPolicy } : {}),
+    ...(question ? { question } : {}),
+    proposal: session.proposal, failure: session.failure ? safeAgentText(session.failure, 300) : undefined
   }
 }
 

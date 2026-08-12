@@ -37,6 +37,31 @@ describe("evaluation memory", () => {
     expect(flattenEvaluationMemory(withSources)[0]).toMatchObject({ sourceIds: "log-a,log-b", logRef: "legacy-ref" });
   });
 
+  it("counts one log once even when the Agent stores several evidence excerpts for it", () => {
+    const repeatedEvidence: EvaluationMemory = {
+      ...memory,
+      evidence: [
+        { ...memory.evidence[0], id: "marker", sourceIds: ["log-1"] },
+        { ...memory.evidence[1], id: "window", sourceIds: ["log-1"] },
+      ],
+    };
+    const dq9 = inferEvaluationTrends(repeatedEvidence).find((trend) => trend.dimension === "dq" && trend.value === "9");
+    expect(dq9).toMatchObject({ evidenceCount: 1, failureCount: 1, passCount: 0, failureRate: 1, dominance: 1 });
+  });
+
+  it("excludes running and inconclusive logs from a condition FAIL-rate denominator", () => {
+    const withUnresolved: EvaluationMemory = {
+      ...memory,
+      evidence: [
+        ...memory.evidence,
+        { id: "running", projectId: "lp6-a", evaluationNodeId: "dq9", status: "running", sourceIds: ["log-running"] },
+        { id: "inconclusive", projectId: "lp6-a", evaluationNodeId: "dq9", status: "inconclusive", sourceIds: ["log-unknown"] },
+      ],
+    };
+    const dq9 = inferEvaluationTrends(withUnresolved).find((trend) => trend.dimension === "dq" && trend.value === "9");
+    expect(dq9).toMatchObject({ evidenceCount: 3, failureCount: 2, passCount: 1, failureRate: 2 / 3 });
+  });
+
   it("stops safely at unknown, foreign, and cyclic parents while retaining valid lineage dimensions", () => {
     const malformed: EvaluationMemory = {
       ...memory,

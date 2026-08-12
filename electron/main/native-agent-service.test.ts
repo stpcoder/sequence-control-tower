@@ -2,12 +2,66 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, NativeAgentService, planLpddrTools } from './native-agent-service'
+import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, isStandardCommandSignature, missingRequiredOpenCodeTools, NativeAgentService, openCodeToolPresentation, planLpddrTools, requiredOpenCodeTools } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
 
 describe('planLpddrTools', () => {
+  it('presents OpenCode tool traces as product language', () => {
+    expect(openCodeToolPresentation('sct_pass_fail_scan')).toEqual({ name: 'pass_fail_scan', label: 'Pass/Fail 판정' })
+    expect(openCodeToolPresentation('sct_evaluation_relation_suggest')).toEqual({ name: 'evaluation_relation_suggest', label: '평가 관계 제안' })
+    expect(openCodeToolPresentation('unknown_internal_name')).toEqual({ name: 'unknown_internal_name', label: 'Agent 근거 확인' })
+  })
+
+  it('fails closed when a model promotes a project goal to an unconfirmed folder purpose', () => {
+    const content = enforceAgentScopeClaims(
+      '- **평가 목적**: VPERI 개선 전압 확인\n- DQ4 특정 위치 타겟\n- sct_log_search(source-a)',
+      { evaluationNodes: [{
+        id: 'n1', hypothesisId: 'h1', evaluationScopeId: 'folder-a', name: '고온 Retention 재현',
+        purpose: 'characterization', status: 'inconclusive', reviewState: 'proposed', dimensions: {},
+        interpretation: '105°C에서 2개 중 1개 Halt가 관찰됐습니다.',
+      }] },
+      'folder-a',
+      ['source-a'],
+    )
+    expect(content).toContain('평가 목적 후보')
+    expect(content).toContain('고온 Retention 재현')
+    expect(content).not.toContain('개선 전압')
+    expect(content).not.toContain('source-a')
+    expect(content).not.toContain('sct_log_search')
+    expect(content).toContain('로그 검색')
+    expect(content).toContain('기록된 위치 조건')
+  })
+
+  it('never presents SKEW corner as die process variation', () => {
+    const content = enforceAgentScopeClaims(
+      '본 불량은 고온 환경 또는 Die 03 자체의 공정 편차(SKEW-SS)에 기인한 것으로 추정됩니다.\n공정 편차(SKEW-FFS)도 확인합니다.\nDie 04 자체의 공정 편차와 위치의 취약성을 의심합니다.\nPASS면 고온 기인성 불량으로 확정할 수 있습니다.\nFAIL이면 Die 04 자체의 고정성 불량으로 판정할 수 있습니다.',
+      { evaluationNodes: [] },
+      'folder-a',
+    )
+    expect(content).toContain('Die 03에 공통된 미확인 요인')
+    expect(content).toContain('SKEW FFS 평가 corner 조건')
+    expect(content).toContain('Die 04에 공통된 미확인 요인')
+    expect(content).toContain('위치 조건과의 연관성')
+    expect(content).toContain('고온 연관 가설을 지지할 수 있습니다')
+    expect(content).toContain('Die 04에 공통된 미확인 요인 가설을 지지할 수 있습니다')
+    expect(content).not.toContain('공정 편차')
+    expect(content).not.toContain('위치의 취약성')
+  })
+
+  it('removes unsupported project-history numbers unless a history tool actually ran', () => {
+    const answer = '- 현재 폴더는 9600MHz 단일 조건입니다. 과거 누적 데이터에서는 8533MHz 2/2, 9600MHz 4/6 FAIL입니다.\n- 다음 split 평가가 필요합니다.'
+    expect(enforceEvidenceBoundHistory(answer, false)).toBe('- 현재 폴더는 9600MHz 단일 조건입니다.\n- 다음 split 평가가 필요합니다.')
+    expect(enforceEvidenceBoundHistory(answer, true)).toContain('4/6 FAIL')
+  })
+
   it('routes a standalone frequency or VDD comparison to the deterministic trend tool', () => {
     expect(planLpddrTools('9600MHz와 8533MHz, VDD별 결과를 비교해줘').map((item) => item.name)).toContain('failure_trends_get')
+  })
+
+  it('does not interrupt the engineer for standard test and condition commands', () => {
+    expect(['shell:stressapptest', 'diagnostic:hdiag', 'shell:set_freq', 'voltage-control:set_rail', 'sleep 20']
+      .every(isStandardCommandSignature)).toBe(true)
+    expect(isStandardCommandSignature('vendor:tskhynix_eye_sweep')).toBe(false)
   })
 
   it('never promotes raw Ctrl-F history to an engineer-confirmed workflow', () => {
@@ -29,6 +83,22 @@ describe('planLpddrTools', () => {
     const names = planLpddrTools('이 로그는 어떤 평가이고 예전에 Ctrl-F로 확인한 순서를 어떻게 적용해야 해?').map((item) => item.name)
     expect(names).toContain('engineer_workflow_memory_get')
     expect(names.length).toBeLessThanOrEqual(8)
+  })
+
+  it('requires exact workflow evidence before OpenCode compares or reuses another folder procedure', () => {
+    expect(requiredOpenCodeTools('다른 평가 폴더에서 확정한 Ctrl-F 분석 절차를 현재 폴더에 호환 적용할 수 있어?'))
+      .toEqual(['engineer_workflow_memory_get', 'engineer_workflow_apply'])
+    expect(missingRequiredOpenCodeTools(
+      ['engineer_workflow_memory_get', 'engineer_workflow_apply'],
+      ['sct_project_history_get', 'sct_engineer_workflow_memory_get'],
+    )).toEqual(['engineer_workflow_apply'])
+  })
+
+  it('requires project history and the bounded relation engine for branch questions', () => {
+    expect(requiredOpenCodeTools('이 재현 평가를 기존 불량 브랜치의 RT로 연결해도 돼?'))
+      .toEqual(['project_history_get', 'evaluation_relation_suggest'])
+    expect(planLpddrTools('이 재현 평가를 기존 불량 브랜치의 RT로 연결해도 돼?').map((item) => item.name))
+      .toEqual(expect.arrayContaining(['project_history_get', 'evaluation_relation_suggest']))
   })
 
   it('binds workflow learning to an exact project source and parses only filename dimensions', async () => {
@@ -71,7 +141,31 @@ describe('planLpddrTools', () => {
     const session = await service.create('p', undefined, 'folder-a', ['s1'])
     expect(session.evaluationScopeId).toBe('folder-a')
     expect(execute.mock.calls.every((call) => JSON.stringify(call[2]) === JSON.stringify(['s1']))).toBe(true)
+    await expect(service.send(session.id, ',         .', ['s1'])).rejects.toThrow('질문이나 확인할 로그 조건')
+    expect((await store.get(session.id))?.messages.some((message) => message.content === ',         .')).toBe(false)
     await expect(service.create('p', undefined, 'folder-a', ['s2'])).rejects.toThrow('평가 폴더 로그 범위')
+  })
+
+  it('reuses a confirmed folder purpose without asking the engineer again', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-confirmed-purpose-')))
+    await store.initialize()
+    const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
+    const service = new NativeAgentService({
+      store,
+      tools: { execute: vi.fn(async (_projectId: string, call: { name: string }) => call.name === 'filename_dimensions_scan'
+        ? result(call.name, { rows: [{ sourceId: 's1', commandSignatures: ['shell:stressapptest', 'diagnostic:hdiag'], dimensions: { socVendor: 'qualcomm' } }] })
+        : call.name === 'engineer_workflow_memory_get' ? result(call.name, { confirmed: [] })
+          : call.name === 'console_transcript_scan' ? result(call.name, { ambiguous: [] }) : result(call.name)) },
+      projects: { get: vi.fn(async () => ({
+        id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM-8975.log' }],
+        evaluationNodes: [{ id: 'n1', evaluationScopeId: 'folder-a', name: 'Screening', purpose: 'screening', interpretation: '85°C에서 2/2 FAIL', reviewState: 'confirmed' }],
+      })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    const created = await service.create('p', undefined, 'folder-a', ['s1'])
+    expect(created.evaluationIntent).toBe('불량 검출 강화')
+    expect(created.question).toBeUndefined()
+    expect(created.messages.at(-1)?.content).toContain('저장된 평가 목적: “불량 검출 강화”')
   })
 
   it('reuses confirmed knowledge only when both project scopes exist', async () => {
@@ -93,15 +187,22 @@ describe('planLpddrTools', () => {
     const service = new NativeAgentService({
       store,
       tools: { execute: vi.fn(async (_projectId: string, call: { name: string }) => call.name === 'filename_dimensions_scan'
-        ? result(call.name, { rows: [{ commandSignatures: ['diagnostic:hdiag'], dimensions: { bootProfileId: 'qualcomm-default', socModel: 'SM-8975' } }] })
+        ? result(call.name, { rows: [{ commandSignatures: ['vendor:tskhynix_eye_sweep'], dimensions: { bootProfileId: 'qualcomm-default', socModel: 'SM-8975' } }] })
         : call.name === 'engineer_workflow_memory_get' ? result(call.name, { confirmed: [] }) : result(call.name)) },
       projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', artifactId: 'a1', relativePath: 'SM-8975_SMP-01.log' }] })) },
       artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
     } as never)
     const created = await service.create('p')
-    expect(created.question).toMatchObject({ kind: 'command-purpose', command: 'diagnostic:hdiag' })
+    expect(created.question).toMatchObject({ kind: 'command-purpose', command: 'vendor:tskhynix_eye_sweep' })
+    const initialAnswer = created.messages.at(-1)?.content ?? ''
+    expect(initialAnswer).toContain('아래 한 가지만 확인해 주세요')
+    expect(initialAnswer).not.toContain('어떤 목적의 평가인가요')
     const answered = await service.send(created.id, '불량 검출용 Screening')
-    expect(answered.question).toBeUndefined()
+    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
+    expect(answered.messages.at(-1)?.content).toContain('평가 목적만 선택')
+    const purposed = await service.send(answered.id, '불량 검출 강화')
+    expect(purposed.question).toBeUndefined()
+    expect(purposed.evaluationIntent).toBe('불량 검출 강화')
     expect(await store.commandKnowledge('p')).toEqual([expect.objectContaining({ purpose: '불량 검출용 Screening', socModel: 'SM-8975' })])
   })
 
@@ -120,8 +221,27 @@ describe('planLpddrTools', () => {
     const created = await service.create('p')
     expect(created.question).toMatchObject({ kind: 'boot-profile', sourceIds: ['s1'] })
     const answered = await service.send(created.id, 'MediaTek · Post-PBL/LK')
-    expect(answered.question).toBeUndefined()
+    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
     expect(await store.profileBindings('p')).toEqual([expect.objectContaining({ vendor: 'mediatek', sourceIds: ['s1'] })])
+  })
+
+  it('continues to the evaluation purpose after leaving an unknown boot profile unconfirmed', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-profile-skip-')))
+    await store.initialize()
+    const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
+    const service = new NativeAgentService({
+      store,
+      tools: { execute: vi.fn(async (_projectId: string, call: { name: string }) => call.name === 'filename_dimensions_scan'
+        ? result(call.name, { rows: [{ sourceId: 's1', dimensions: {} }] })
+        : call.name === 'engineer_workflow_memory_get' ? result(call.name, { confirmed: [] }) : result(call.name)) },
+      projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', artifactId: 'a1', relativePath: 'CUSTOM_BOARD_SMP-01.log' }] })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    const created = await service.create('p')
+    const answered = await service.send(created.id, '미확인으로 유지')
+    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
+    expect(answered.messages.at(-1)?.content).toContain('평가 목적만 선택')
+    expect(await store.profileBindings('p')).toEqual([])
   })
 
   it('asks for an ambiguous console prompt once and persists the project decision', async () => {
@@ -145,7 +265,46 @@ describe('planLpddrTools', () => {
     const created = await service.create('p')
     expect(created.question).toMatchObject({ kind: 'console-role', command: 'sleep 20' })
     const answered = await service.send(created.id, '입력 명령 · 형식 기억')
-    expect(answered.question).toBeUndefined()
+    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
     expect(await store.consolePromptRules('p')).toEqual([expect.objectContaining({ promptSignature: 'bare-root-hash', role: 'input' })])
+  })
+
+  it('publishes bounded OpenCode tool progress before the slow final answer and avoids duplicate traces', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-opencode-progress-')))
+    await store.initialize()
+    const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
+    let releaseAnswer!: () => void
+    const answerGate = new Promise<void>((resolve) => { releaseAnswer = resolve })
+    const opencodeSend = vi.fn(async (input: { requiredToolNames?: string[]; onToolTrace?: (trace: { name: string; label: string; summary: string; evidenceSourceIds: string[] }) => void }) => {
+      input.onToolTrace?.({ name: 'pass_fail_scan', label: 'internal label', summary: 'TEST_FAIL 2건', evidenceSourceIds: ['s1'] })
+      await answerGate
+      return {
+        externalSessionId: 'external-1', content: '확인된 사실\n- FAIL 2건', toolNames: ['pass_fail_scan'],
+        toolTraces: [{ name: 'pass_fail_scan', label: 'internal label', summary: 'TEST_FAIL 2건', evidenceSourceIds: ['s1'] }],
+      }
+    })
+    const service = new NativeAgentService({
+      store,
+      tools: { execute: vi.fn(async (_projectId: string, call: { name: string }) => call.name === 'filename_dimensions_scan'
+        ? result(call.name, { rows: [{ sourceId: 's1', commandSignatures: ['shell:stressapptest', 'diagnostic:hdiag'], dimensions: { socVendor: 'qualcomm' } }] })
+        : call.name === 'engineer_workflow_memory_get' ? result(call.name, { confirmed: [] })
+          : call.name === 'console_transcript_scan' ? result(call.name, { ambiguous: [] }) : result(call.name)) },
+      projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM-8975_SMP-01.log' }], evaluationNodes: [] })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() },
+      opencode: { available: vi.fn(async () => true), send: opencodeSend },
+    } as never)
+    const updates: Array<{ status: string; tools: Array<{ name: string; summary?: string }> }> = []
+    service.onUpdate((session) => updates.push({ status: session.status, tools: session.tools }))
+    const created = await service.create('p', undefined, 'folder-a', ['s1'])
+    const purposed = await service.send(created.id, '부팅·Training 확인')
+    expect(purposed.evaluationIntent).toBe('부팅·Training 확인')
+    await service.send(created.id, 'FAIL 근거를 확인해줘', ['s1'])
+    await vi.waitFor(() => expect(updates.some((update) => update.status === 'running'
+      && update.tools.some((tool) => tool.name === 'pass_fail_scan' && tool.summary === 'TEST_FAIL 2건'))).toBe(true))
+    releaseAnswer()
+    await vi.waitFor(async () => expect((await service.get(created.id))?.status).toBe('idle'))
+    const completed = await service.get(created.id)
+    expect(completed?.tools.filter((tool) => tool.name === 'pass_fail_scan' && tool.summary === 'TEST_FAIL 2건')).toHaveLength(1)
+    expect(opencodeSend).toHaveBeenCalledWith(expect.objectContaining({ requiredToolNames: ['pass_fail_scan'] }))
   })
 })

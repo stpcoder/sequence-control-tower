@@ -793,6 +793,7 @@ export type ProjectEvaluationStatus = 'pass' | 'fail' | 'inconclusive' | 'runnin
 export type ProjectAssessmentOrigin = 'engineer-confirmed' | 'ai-proposed'
 export type ProjectEvaluationAuthorship = 'automatic' | 'agent' | 'engineer'
 export type ProjectEvaluationReviewState = 'proposed' | 'confirmed'
+export type ProjectEvaluationRelationKind = 'baseline' | 'retest' | 'condition-comparison' | 'improvement' | 'verification' | 'side-effect'
 export interface ProjectLpddrDevelopmentContext {
   product?: string; skew?: string; program?: string; phase?: string; customer?: string; targetDevice?: string
   densityGb?: number; nominalVoltage?: number
@@ -800,19 +801,22 @@ export interface ProjectLpddrDevelopmentContext {
 export interface ProjectEvaluationDimensions {
   skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor
   socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number
-  channel?: string | number; subChannel?: string | number; rank?: string | number
+  channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number
   bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number
-  frequencyMHz?: number; temperatureC?: number; vdd?: number; timingSkewPs?: number; testMode?: string
+  writeData?: string | number; readData?: string | number; gridId?: string
+  frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string
+  timingSkewPs?: number; testMode?: string
 }
 export interface ProjectFailureHypothesis {
   id: string; title: string; description?: string; origin: ProjectAssessmentOrigin; evaluationNodeIds?: string[]
 }
 export interface ProjectEvaluationNode {
   id: string; hypothesisId?: string; parentId?: string; branchId?: string; evaluationScopeId?: string; name: string
-  purpose?: 'screening' | 'improvement' | 'reproduction' | 'characterization' | 'verification'
+  purpose?: 'screening' | 'improvement' | 'reproduction' | 'characterization' | 'verification' | 'stage-verification'
   dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
   interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState
   sequenceSignature?: string; attemptNo?: number; retestOf?: string
+  relation?: ProjectEvaluationRelationKind; relationConfidence?: number; relationReason?: string
 }
 export interface ProjectEvidenceRecord {
   id: string; evaluationNodeId: string; occurredAt?: string; status: ProjectEvaluationStatus; result?: string
@@ -877,6 +881,8 @@ export interface NativeAgentSessionSummary {
 }
 export interface NativeAgentSessionView extends NativeAgentSessionSummary {
   messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]; question?: NativeAgentQuestionView
+  /** Engineer-selected purpose candidate for this evaluation folder. */
+  evaluationIntent?: string
 }
 export interface NativeAgentBackendStatusView {
   preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
@@ -941,6 +947,7 @@ export type NativeAgentQuestionView =
   | { id: string; kind: 'command-purpose'; prompt: string; choices: string[]; command: string; bootProfileId?: string; socModel?: string }
   | { id: string; kind: 'boot-profile'; prompt: string; choices: string[]; sourceIds: string[] }
   | { id: string; kind: 'console-role'; prompt: string; choices: string[]; sourceId: string; lineNumber: number; promptSignature: string; promptKind: string; command: string }
+  | { id: string; kind: 'evaluation-purpose'; prompt: string; choices: string[] }
 export interface EngineerWorkflowReviewView {
   id: string; projectId: string; sourceId: string; result: EngineerWorkflowResult
   evaluationScopeId?: string
@@ -988,11 +995,12 @@ export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'prefere
 export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
 export type EvaluationAgentPublicOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
-export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; frequencyMHz?: number; temperatureC?: number; vdd?: number; timingSkewPs?: number; testMode?: string }
+export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; writeData?: string | number; readData?: string | number; gridId?: string; frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string; timingSkewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentRestoreRequest { projectId: string; evaluationScopeId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
-export interface EvaluationAgentQuestionView { id: string; dimension: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
+export type EvaluationAgentQuestionField = keyof EvaluationAgentDimensions | 'evaluationIntent'
+export interface EvaluationAgentQuestionView { id: string; field: EvaluationAgentQuestionField; dimension?: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
 export interface EvaluationAgentSourceAssessmentView { sourceId: string; outcome: EvaluationAgentPublicOutcome; evidenceIds: string[] }
 export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[]; sourceAssessments?: EvaluationAgentSourceAssessmentView[] }
 export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string; lineNumbers: number[] }
@@ -1000,12 +1008,14 @@ export interface EvaluationAgentSessionView {
   schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number
   files: Array<{ sourceId: string; name: string; lineCount?: number; size?: number; dimensions?: Partial<EvaluationAgentDimensions> }>
   evidence: EvaluationAgentEvidenceView[]; transcript: Array<{ at: string; role: 'runtime' | 'provider' | 'user'; type: string }>
-  dimensions: Partial<EvaluationAgentDimensions>; question?: EvaluationAgentQuestionView; proposal?: EvaluationAgentProposalView; failure?: string
+  dimensions: Partial<EvaluationAgentDimensions>; evaluationIntent?: string
+  analysisPolicy?: { id: string; version: string; source: 'bundled-skill' | 'built-in' }
+  question?: EvaluationAgentQuestionView; proposal?: EvaluationAgentProposalView; failure?: string
 }
 export interface EvaluationAgentMemoryPayloadRequest { sessionId: string; projectId: string; hypothesisId: string; nodeId: string; evidenceIdPrefix: string }
 export interface EvaluationAgentMemoryPayloadView {
   hypothesis: { id: string; projectId: string; title: string; description?: string; origin: 'ai-proposed' | 'engineer-confirmed'; evaluationNodeIds?: string[] }
-  node: { id: string; projectId: string; hypothesisId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running'; evaluationScopeId?: string; interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState }
+  node: { id: string; projectId: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running'; evaluationScopeId?: string; interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState; sequenceSignature?: string; attemptNo?: number; retestOf?: string; relation?: ProjectEvaluationRelationKind; relationConfidence?: number; relationReason?: string }
   evidence: Array<{ id: string; projectId: string; evaluationNodeId: string; status: 'pass' | 'fail' | 'inconclusive' | 'running'; result?: string; dimensions?: Partial<EvaluationAgentDimensions>; sourceIds: string[]; summary?: string; origin?: 'ai-proposed' | 'engineer-confirmed' }>
 }
 

@@ -60,9 +60,9 @@ export function classifyEngineerSearchStage(query: string): EngineerEvaluationSt
 
 export function engineerStageLabel(stage: EngineerEvaluationStage): string {
   const labels: Record<EngineerEvaluationStage, string> = {
-    'power-on': 'Power on', pbl: 'PBL', xbl: 'XBL', abl: 'ABL', uefi: 'UEFI', 'exit-boot': 'Exit boot',
+    'power-on': '전원 인가', pbl: 'PBL', xbl: 'XBL', abl: 'ABL', uefi: 'UEFI', 'exit-boot': '부팅 전환',
     'post-pbl': 'Post-PBL', lk: 'LK', lk2: 'LK2', training: 'Training', os: 'OS',
-    'memory-test': 'Memory test', halt: 'Halt', reboot: 'Reboot', unknown: '기타',
+    'memory-test': '메모리 테스트', halt: '시스템 Halt', reboot: 'Reboot', unknown: '기타',
   }
   return labels[stage]
 }
@@ -134,4 +134,20 @@ export function engineerWorkflowSimilarity(
   const union = new Set([...a, ...b])
   if (!union.size) return 0
   return [...a].filter((item) => b.has(item)).length / union.size
+}
+
+const WORKFLOW_GUARD_DIMENSIONS = ['testMode', 'bootProfileId', 'socVendor'] as const satisfies readonly (keyof ProjectEvaluationDimensions)[]
+const WORKFLOW_MATCH_DIMENSIONS = ['testMode', 'bootProfileId', 'socVendor', 'socModel', 'pattern'] as const satisfies readonly (keyof ProjectEvaluationDimensions)[]
+
+/** Cross-folder procedures are candidates only when their stable test context
+ * is compatible. Temperature, VDD and frequency remain sweep variables. */
+export function engineerWorkflowContextCompatibility(
+  workflow: { dimensions?: Partial<ProjectEvaluationDimensions> },
+  dimensions: Partial<ProjectEvaluationDimensions>,
+): number | null {
+  const stored = workflow.dimensions ?? {}
+  const equal = (key: keyof ProjectEvaluationDimensions): boolean => String(stored[key]).toLowerCase() === String(dimensions[key]).toLowerCase()
+  if (WORKFLOW_GUARD_DIMENSIONS.some((key) => stored[key] !== undefined && dimensions[key] !== undefined && !equal(key))) return null
+  const score = WORKFLOW_MATCH_DIMENSIONS.filter((key) => stored[key] !== undefined && dimensions[key] !== undefined && equal(key)).length
+  return score > 0 ? score : null
 }

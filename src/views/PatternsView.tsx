@@ -1,22 +1,47 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Download, FilterX } from 'lucide-react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
+import {
+  ArrowLeftRight,
+  ChevronDown,
+  Clipboard,
+  Download,
+  FilterX,
+  GripVertical,
+  Plus,
+  Save,
+  Share2,
+  X,
+} from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
 import {
-  buildPivotGrid,
   aggregateRecordTrends,
+  buildPivotGrid,
+  EXPORT_COLUMN_DEFINITIONS,
+  exportCellValue,
   filterLogRecords,
   isPivotSelectionValid,
   RESULT_LABEL_KO,
+  serializeLogRecordsCsv,
   serializePivotGridCsv,
-  type LogResultRecord,
+  serializePivotGridTsv,
+  type AggregateTrend,
+  type LogRecordExportColumn,
   type LogRecordFilters,
+  type LogResultRecord,
   type PivotAggregation,
   type PivotDimension,
-  type AggregateTrend,
+  type PivotHeader,
 } from '../state/logRecords'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
   DEFAULT_PATTERN_LAYOUT,
+  MAX_PATTERN_AXES,
   PATTERN_LAYOUT_PRESET_ID,
   patternLayoutFromPreset,
   patternLayoutPreset,
@@ -32,76 +57,224 @@ interface PatternsViewProps {
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
-  { value: 'sample', label: 'Sample', group: '평가 조건' },
+  { value: 'sample', label: 'Sample', group: '자재' },
+  { value: 'skew', label: 'SKEW', group: '자재' },
+  { value: 'material', label: '자재명', group: '자재' },
+  { value: 'lot', label: 'Lot', group: '자재' },
+  { value: 'die', label: 'Die', group: '자재' },
   { value: 'temperature', label: '온도 (°C)', group: '평가 조건' },
-  { value: 'mode', label: 'Test Mode', group: '평가 조건' },
-  { value: 'skew', label: 'SKEW', group: '평가 조건' },
-  { value: 'frequencyMHz', label: '주파수 (MHz)', group: '평가 조건' },
+  { value: 'temperatureCorner', label: '온도 조건', group: '평가 조건' },
   { value: 'vdd', label: 'VDD (V)', group: '평가 조건' },
+  { value: 'vddCorner', label: 'VDD 조건', group: '평가 조건' },
+  { value: 'conditionCorner', label: '4-Corner', group: '평가 조건' },
+  { value: 'mode', label: 'Test Mode', group: '평가 조건' },
+  { value: 'frequencyMHz', label: '주파수 (MHz)', group: '평가 조건' },
   { value: 'pattern', label: 'Pattern', group: '평가 조건' },
-  { value: 'material', label: '자재', group: '제품' },
-  { value: 'lot', label: 'Lot', group: '제품' },
-  { value: 'die', label: 'Die', group: '제품' },
-  { value: 'socModel', label: 'SoC', group: '제품' },
-  { value: 'dq', label: 'DQ', group: 'DRAM 위치' },
-  { value: 'bl', label: 'BL', group: 'DRAM 위치' },
-  { value: 'channel', label: 'Channel', group: 'DRAM 위치' },
-  { value: 'subChannel', label: 'Sub Channel', group: 'DRAM 위치' },
-  { value: 'rank', label: 'Rank', group: 'DRAM 위치' },
-  { value: 'bankGroup', label: 'Bank Group', group: 'DRAM 위치' },
-  { value: 'bank', label: 'Bank', group: 'DRAM 위치' },
-  { value: 'row', label: 'Row', group: 'DRAM 위치' },
-  { value: 'column', label: 'Column', group: 'DRAM 위치' },
-  { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: 'DRAM 위치' },
-  { value: 'grid', label: 'Grid', group: '관리' },
-  { value: 'result', label: '결과', group: '관리' },
-  { value: 'review', label: '검토', group: '관리' },
-  { value: 'folder', label: '폴더', group: '관리' },
-  { value: 'run', label: 'Run', group: '관리' },
+  { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: '평가 조건' },
+  { value: 'socModel', label: '실장기 SoC', group: '실장기' },
+  { value: 'dq', label: 'DQ', group: 'Fail 위치' },
+  { value: 'bl', label: 'BL', group: 'Fail 위치' },
+  { value: 'channel', label: 'Channel', group: 'Fail 위치' },
+  { value: 'subChannel', label: 'Sub Channel', group: 'Fail 위치' },
+  { value: 'chipSelect', label: 'CS', group: 'Fail 위치' },
+  { value: 'rank', label: 'Rank', group: 'Fail 위치' },
+  { value: 'bankGroup', label: 'Bank Group', group: 'Fail 위치' },
+  { value: 'bank', label: 'Bank', group: 'Fail 위치' },
+  { value: 'row', label: 'Row', group: 'Fail 위치' },
+  { value: 'column', label: 'Column', group: 'Fail 위치' },
+  { value: 'writeData', label: 'WR', group: 'Fail 위치' },
+  { value: 'readData', label: 'RD', group: 'Fail 위치' },
+  { value: 'grid', label: 'Grid', group: '결과·범위' },
+  { value: 'result', label: '판정 결과', group: '결과·범위' },
+  { value: 'review', label: '검토 상태', group: '결과·범위' },
+  { value: 'folder', label: '평가 폴더', group: '결과·범위' },
+  { value: 'run', label: '반복 번호', group: '결과·범위' },
 ]
 
 const DIMENSION_LABEL = Object.fromEntries(DIMENSIONS.map((item) => [item.value, item.label])) as Record<PivotDimension, string>
+const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
+  sample: 'sample_value', temperature: 'temperature_value', mode: 'mode_value', grid: 'grid_value',
+  skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model',
+  dq: 'dq', bl: 'bl', channel: 'channel', subChannel: 'sub_channel', chipSelect: 'chip_select', rank: 'rank', bankGroup: 'bank_group', bank: 'bank', row: 'row', column: 'column', writeData: 'write_data', readData: 'read_data', timingSkewPs: 'timing_skew_ps',
+  result: 'result', review: 'review', folder: 'folder', run: 'run',
+}
 const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
-  { value: 'count', label: '로그 수' },
-  { value: 'fail_count', label: 'Fail 수' },
-  { value: 'evidence_count', label: 'Evidence 수' },
+  { value: 'count', label: '로그 파일 수' },
+  { value: 'sample_count', label: 'Sample 수' },
+  { value: 'grid_count', label: 'Grid 수' },
+  { value: 'pass_count', label: 'PASS 로그' },
+  { value: 'fail_count', label: 'FAIL 로그' },
+  { value: 'fail_rate', label: 'FAIL률' },
 ]
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
 
-function downloadPivotCsv(contents: string) {
+const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
+  fail: 'Fail 3종', reboot: 'Reboot', halt: 'Halt', majority: '다수 결과',
+}
+
+type AxisGroup = 'rows' | 'columns'
+type DraggedAxis = { group: AxisGroup; index: number }
+
+export type PivotColumnGroup = { key: string; label: string; span: number }
+
+/** Groups adjacent multi-level column labels so the table reads like an Excel cross table. */
+export function pivotColumnHeaderRows(columns: readonly PivotHeader[], depth: number): PivotColumnGroup[][] {
+  return Array.from({ length: depth }, (_, level) => {
+    const groups: PivotColumnGroup[] = []
+    for (const column of columns) {
+      const prefix = column.values.slice(0, level + 1)
+      const key = JSON.stringify(prefix)
+      const previous = groups.at(-1)
+      if (previous?.key === key) previous.span += 1
+      else groups.push({ key, label: column.values[level] ?? '미확인', span: 1 })
+    }
+    return groups
+  })
+}
+
+export function pivotRowHeaderSpan(rows: readonly PivotHeader[], rowIndex: number, level: number): number {
+  const prefix = JSON.stringify(rows[rowIndex]?.values.slice(0, level + 1) ?? [])
+  if (rowIndex > 0 && JSON.stringify(rows[rowIndex - 1]?.values.slice(0, level + 1) ?? []) === prefix) return 0
+  let span = 1
+  while (rowIndex + span < rows.length && JSON.stringify(rows[rowIndex + span].values.slice(0, level + 1)) === prefix) span += 1
+  return span
+}
+
+/** Produces a tidy, non-empty column set for Spotfire or downstream spreadsheet analysis. */
+export function analysisExportColumns(rows: readonly LogResultRecord[], axes: readonly PivotDimension[]): LogRecordExportColumn[] {
+  const required = new Set<LogRecordExportColumn>(['filename', 'folder', 'result', ...axes.map((axis) => DIMENSION_EXPORT_COLUMN[axis])])
+  const preferred: LogRecordExportColumn[] = [
+    'filename', 'folder', 'run',
+    ...axes.map((axis) => DIMENSION_EXPORT_COLUMN[axis]),
+    ...EXPORT_COLUMN_DEFINITIONS.filter((column) => column.section === 'condition').map((column) => column.key),
+    'result', 'stage_results', 'review', 'evidence_count',
+  ]
+  return [...new Set(preferred)].filter((column) => required.has(column) || rows.some((row) => exportCellValue(row, column).trim() !== ''))
+}
+
+function safeExportName(value: string): string {
+  const normalized = value.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
+  return normalized.slice(0, 80) || 'sequence-control-tower'
+}
+
+function downloadText(contents: string, fileName: string, type = 'text/csv;charset=utf-8') {
   const anchor = document.createElement('a')
-  const url = URL.createObjectURL(new Blob([contents], { type: 'text/csv;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob([contents], { type }))
   anchor.href = url
-  anchor.download = 'analysis-grid.csv'
+  anchor.download = fileName
   anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
-  fail: 'Fail 3종',
-  reboot: 'Reboot',
-  halt: 'Halt',
-  majority: '다수 결과',
+async function copyText(contents: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(contents)
+      return
+    }
+  } catch { /* Electron can deny Clipboard API when a window loses focus. */ }
+  const textarea = document.createElement('textarea')
+  textarea.value = contents
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.append(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw new Error('클립보드에 복사하지 못했습니다.')
+}
+
+function formatPivotValue(value: number, aggregation: PivotAggregation): string {
+  if (aggregation === 'fail_rate') return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
+  return value.toLocaleString('ko-KR')
+}
+
+export function evaluationMetricSummary(aggregation: PivotAggregation, rows: readonly LogResultRecord[]): string {
+  const pass = rows.filter((row) => row.result === 'PASS').length
+  const fail = rows.filter((row) => FAIL_RESULTS.has(row.result)).length
+  const decided = pass + fail
+  const samples = new Set(rows.flatMap((row) => {
+    const value = row.sample.value ?? row.dimensions?.sample
+    return value === undefined || value === null || String(value).trim() === '' ? [] : [String(value).trim()]
+  })).size
+  const gridKeys = new Set(rows.flatMap((row) => {
+    const grid = row.grid.value ?? row.dimensions?.gridId
+    const sample = row.sample.value ?? row.dimensions?.sample ?? ''
+    return grid === undefined || grid === null || String(grid).trim() === ''
+      ? []
+      : [JSON.stringify([row.folder, sample, String(grid).trim(), row.run ?? ''])]
+  }))
+  const gridUnknown = rows.filter((row) => {
+    const value = row.grid.value ?? row.dimensions?.gridId
+    return value === undefined || value === null || String(value).trim() === ''
+  }).length
+  if (aggregation === 'sample_count') return `중복을 제외한 Sample ${samples.toLocaleString()}개`
+  if (aggregation === 'grid_count') return `확인된 Grid ${gridKeys.size.toLocaleString()}개${gridUnknown ? ` · Grid 미확인 로그 ${gridUnknown.toLocaleString()}개 제외` : ''}`
+  if (aggregation === 'pass_count') return `PASS로 판정된 로그 파일 ${pass.toLocaleString()}개`
+  if (aggregation === 'fail_count') return `FAIL·Training Fail·Halt·Reboot로 판정된 로그 파일 ${fail.toLocaleString()}개`
+  if (aggregation === 'fail_rate') return `FAIL ${fail.toLocaleString()}회 / 판정 완료 ${decided.toLocaleString()}회 · 미확인 결과는 제외`
+  if (aggregation === 'evidence_count') return '판정에 사용한 marker 줄 수'
+  return `현재 범위의 로그 파일 ${rows.length.toLocaleString()}개`
+}
+
+function SelectControl({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {
+  return <label className="pattern-control"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>
+}
+
+function DimensionPicker({ selected, disabled, onPick }: { selected: readonly PivotDimension[]; disabled: boolean; onPick: (dimension: PivotDimension) => void }) {
+  const groups = [...new Set(DIMENSIONS.map((item) => item.group))]
+  return <details className="pattern-field-picker">
+    <summary aria-disabled={disabled} onClick={(event) => { if (disabled) event.preventDefault() }}><Plus size={14} />항목</summary>
+    <div className="pattern-field-menu">
+      {groups.map((group) => <section key={group}><strong>{group}</strong><div>{DIMENSIONS.filter((item) => item.group === group).map((item) => <button type="button" key={item.value} disabled={selected.includes(item.value)} onClick={(event) => { onPick(item.value); event.currentTarget.closest('details')?.removeAttribute('open') }}>{item.label}</button>)}</div></section>)}
+    </div>
+  </details>
+}
+
+function AxisWell({ group, label, axes, selected, dragged, onDrag, onDrop, onRemove, onAdd, onKeyMove }: {
+  group: AxisGroup
+  label: string
+  axes: readonly PivotDimension[]
+  selected: readonly PivotDimension[]
+  dragged: DraggedAxis | null
+  onDrag: (value: DraggedAxis | null) => void
+  onDrop: (from: DraggedAxis, toGroup: AxisGroup, toIndex: number) => void
+  onRemove: (index: number) => void
+  onAdd: (dimension: PivotDimension) => void
+  onKeyMove: (group: AxisGroup, index: number, event: ReactKeyboardEvent<HTMLDivElement>) => void
+}) {
+  const drop = (event: ReactDragEvent, index: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (dragged) onDrop(dragged, group, index)
+    onDrag(null)
+  }
+  return <div className="pattern-axis-well" role="group" aria-label={`${label} 항목`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(event, axes.length)}>
+    <span className="pattern-axis-label">{label}</span>
+    <div className="pattern-axis-fields" role="list">
+      {axes.map((axis, index) => <div
+        className="pattern-axis-chip"
+        draggable
+        role="listitem"
+        tabIndex={0}
+        title="끌어서 순서나 방향 변경 · Alt+방향키 지원"
+        aria-label={`${DIMENSION_LABEL[axis]}. 끌어서 순서나 방향 변경`}
+        key={axis}
+        onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; onDrag({ group, index }) }}
+        onDragEnd={() => onDrag(null)}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => drop(event, index)}
+        onKeyDown={(event) => onKeyMove(group, index, event)}
+      ><GripVertical size={13} aria-hidden="true" /><span>{DIMENSION_LABEL[axis]}</span><button type="button" onClick={() => onRemove(index)} aria-label={`${DIMENSION_LABEL[axis]} 제거`}><X size={13} /></button></div>)}
+      {!axes.length ? <span className="pattern-axis-empty">전체</span> : null}
+      <DimensionPicker selected={selected} disabled={axes.length >= MAX_PATTERN_AXES} onPick={onAdd} />
+    </div>
+  </div>
 }
 
 export function isProjectRevisionConflict(error: unknown): boolean {
   return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
-}
-
-function SelectControl({ label, value, onChange, children, testId }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode; testId?: string }) {
-  return <label className="pattern-control" data-testid={testId}><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>
-}
-
-function dimensionOptions(selected: readonly PivotDimension[], current: PivotDimension) {
-  return DIMENSIONS.filter((item) => item.value === current || !selected.includes(item.value))
-}
-
-function groupedDimensionOptions(selected: readonly PivotDimension[], current: PivotDimension) {
-  const options = dimensionOptions(selected, current)
-  return [...new Set(options.map((item) => item.group))].map((group) => (
-    <optgroup label={group} key={group}>{options.filter((item) => item.group === group).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</optgroup>
-  ))
 }
 
 export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify }: PatternsViewProps) {
@@ -115,6 +288,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const [savingLayout, setSavingLayout] = useState(false)
   const [selectedSourceIds, setSelectedSourceIds] = useState<ReadonlySet<string> | null>(null)
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null)
+  const [draggedAxis, setDraggedAxis] = useState<DraggedAxis | null>(null)
 
   useEffect(() => {
     const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
@@ -135,117 +309,182 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         preset: patternLayoutPreset(layout, target.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)),
       })
       let next: ProjectSnapshot
-      try {
-        next = await persist(project)
-      } catch (error) {
+      try { next = await persist(project) }
+      catch (error) {
         if (!isProjectRevisionConflict(error)) throw error
         const refreshed = await api.get({ projectId: project.id })
         if (!refreshed) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
         next = await persist(refreshed)
       }
       onProjectUpdated(next)
-      onNotify('결과 정리 구성을 저장했습니다.', 'success')
+      onNotify('표 구성을 저장했습니다.', 'success')
     } catch (error) {
-      onNotify(error instanceof Error ? `레이아웃을 저장하지 못했습니다: ${error.message}` : '레이아웃을 저장하지 못했습니다.', 'error')
+      onNotify(error instanceof Error ? `구성을 저장하지 못했습니다: ${error.message}` : '구성을 저장하지 못했습니다.', 'error')
     } finally { setSavingLayout(false) }
   }
 
   const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((a, b) => a.localeCompare(b, 'ko-KR')), [records])
   const resultChoices = useMemo(() => [...new Set(records.map((row) => row.result))], [records])
   const filters = useMemo<LogRecordFilters>(() => ({ query: '', result: resultFilter, review: 'all', folder: folderFilter }), [folderFilter, resultFilter])
-  const scopedRecords = useMemo(() => {
-    const filtered = filterLogRecords(records, filters)
-    return filtered.filter((row) => {
-      if (failOnly && !FAIL_RESULTS.has(row.result)) return false
-      if (unknownMetadataOnly && ![row.sample, row.temperature, row.mode, row.grid].some((value) => value.value === null)) return false
-      return true
-    })
-  }, [failOnly, filters, records, unknownMetadataOnly])
-  const activeDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
-  const grid = useMemo(() => buildPivotGrid(scopedRecords, {
-    rows: rowAxes.filter((axis): axis is PivotDimension => axis !== 'none'),
-    columns: columnAxes.filter((axis): axis is PivotDimension => axis !== 'none'),
-    aggregation,
-    filters: { query: '', result: 'all', review: 'all' },
-  }), [aggregation, columnAxes, rowAxes, scopedRecords])
+  const scopedRecords = useMemo(() => filterLogRecords(records, filters).filter((row) => {
+    if (failOnly && !FAIL_RESULTS.has(row.result)) return false
+    if (unknownMetadataOnly && ![row.sample, row.temperature, row.mode, row.grid].some((value) => value.value === null)) return false
+    return true
+  }), [failOnly, filters, records, unknownMetadataOnly])
+  const activeDimensions = [...rowAxes, ...columnAxes]
+  const pivotConfig = useMemo(() => ({ aggregation, filters: { query: '', result: 'all' as const, review: 'all' as const } }), [aggregation])
+  const grid = useMemo(() => buildPivotGrid(scopedRecords, { rows: rowAxes, columns: columnAxes, ...pivotConfig }), [columnAxes, pivotConfig, rowAxes, scopedRecords])
+  const rowTotals = useMemo(() => buildPivotGrid(scopedRecords, { rows: rowAxes, columns: [], ...pivotConfig }), [pivotConfig, rowAxes, scopedRecords])
+  const columnTotals = useMemo(() => buildPivotGrid(scopedRecords, { rows: [], columns: columnAxes, ...pivotConfig }), [columnAxes, pivotConfig, scopedRecords])
+  const rowTotalByKey = useMemo(() => new Map(rowTotals.rows.map((row, index) => [row.key, rowTotals.cells[index]?.[0]?.value ?? 0])), [rowTotals])
+  const columnTotalByKey = useMemo(() => new Map(columnTotals.columns.map((column, index) => [column.key, columnTotals.cells[0]?.[index]?.value ?? 0])), [columnTotals])
+  const columnHeaderRows = useMemo(() => pivotColumnHeaderRows(grid.columns, columnAxes.length), [columnAxes.length, grid.columns])
+  const maxCellValue = useMemo(() => Math.max(0, ...grid.cells.flat().map((cell) => cell.value)), [grid.cells])
+
   useEffect(() => {
     if (!isPivotSelectionValid(selectedCellKey, selectedSourceIds, grid, scopedRecords)) {
       setSelectedCellKey(null)
       setSelectedSourceIds(null)
     }
   }, [grid, scopedRecords, selectedCellKey, selectedSourceIds])
-  const visibleRows = useMemo(() => {
-    if (!selectedSourceIds) return scopedRecords
-    return scopedRecords.filter((row) => selectedSourceIds.has(row.id))
-  }, [scopedRecords, selectedSourceIds])
+
+  const visibleRows = useMemo(() => selectedSourceIds ? scopedRecords.filter((row) => selectedSourceIds.has(row.id)) : scopedRecords, [scopedRecords, selectedSourceIds])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
-  const selectedDimensions = [...rowAxes, ...columnAxes].filter((axis): axis is PivotDimension => axis !== 'none')
-  const allSelectedMetadataUnknown = selectedDimensions.some((dimension) => scopedRecords.every((row) => {
+  const allSelectedMetadataUnknown = activeDimensions.some((dimension) => scopedRecords.every((row) => {
     if (dimension === 'run') return !row.run
     if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') return !row[dimension].value
     if (dimension === 'result' || dimension === 'review' || dimension === 'folder') return false
     const value = row.dimensions?.[dimension]
     return value === undefined || value === null || value === ''
   }))
-  const clearSelection = () => {
-    setSelectedSourceIds(null)
-    setSelectedCellKey(null)
-  }
+  const clearSelection = () => { setSelectedSourceIds(null); setSelectedCellKey(null) }
 
-  const setAxis = (group: 'rows' | 'columns', index: 0 | 1, rawValue: string) => {
-    const value = rawValue as PivotDimension | 'none'
-    const nextRows: [PivotDimension, PivotDimension | 'none'] = [...rowAxes]
-    const nextColumns: [PivotDimension, PivotDimension | 'none'] = [...columnAxes]
+  const setAxes = (nextRows: PivotDimension[], nextColumns: PivotDimension[]) => {
+    setRowAxes(nextRows); setColumnAxes(nextColumns); clearSelection()
+  }
+  const removeAxis = (group: AxisGroup, index: number) => {
+    const nextRows = [...rowAxes], nextColumns = [...columnAxes]
+    ;(group === 'rows' ? nextRows : nextColumns).splice(index, 1)
+    setAxes(nextRows, nextColumns)
+  }
+  const addAxis = (group: AxisGroup, dimension: PivotDimension) => {
+    if (activeDimensions.includes(dimension)) return
+    const nextRows = [...rowAxes], nextColumns = [...columnAxes]
     const target = group === 'rows' ? nextRows : nextColumns
-    target[index] = value as never
-    const all = [...nextRows, ...nextColumns]
-    const duplicate = all.findIndex((item, itemIndex) => item !== 'none' && all.indexOf(item) !== itemIndex)
-    if (duplicate !== undefined && duplicate >= 0) {
-      const duplicateGroup = duplicate < 2 ? nextRows : nextColumns
-      const duplicateIndex = duplicate % 2 as 0 | 1
-      if (duplicateGroup[duplicateIndex] === value && duplicateIndex === 1) duplicateGroup[duplicateIndex] = 'none'
-      else if (duplicateGroup[duplicateIndex] === value) duplicateGroup[duplicateIndex] = (DIMENSIONS.find((item) => !all.includes(item.value) && item.value !== value)?.value ?? (group === 'rows' ? 'temperature' : 'sample')) as PivotDimension
+    if (target.length >= MAX_PATTERN_AXES) return
+    target.push(dimension)
+    setAxes(nextRows, nextColumns)
+  }
+  const moveAxis = (from: DraggedAxis, toGroup: AxisGroup, toIndex: number) => {
+    const nextRows = [...rowAxes], nextColumns = [...columnAxes]
+    const source = from.group === 'rows' ? nextRows : nextColumns
+    const target = toGroup === 'rows' ? nextRows : nextColumns
+    if (from.group !== toGroup && target.length >= MAX_PATTERN_AXES) return
+    const [axis] = source.splice(from.index, 1)
+    if (!axis) return
+    let insertion = Math.max(0, Math.min(toIndex, target.length))
+    if (source === target && from.index < toIndex) insertion -= 1
+    target.splice(insertion, 0, axis)
+    setAxes(nextRows, nextColumns)
+  }
+  const keyboardMoveAxis = (group: AxisGroup, index: number, event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!event.altKey) return
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault()
+      const direction = event.key === 'ArrowLeft' ? -1 : 1
+      const target = (group === 'rows' ? rowAxes : columnAxes)
+      const nextIndex = Math.max(0, Math.min(target.length - 1, index + direction))
+      if (nextIndex === index) return
+      const nextRows = [...rowAxes], nextColumns = [...columnAxes]
+      const axes = group === 'rows' ? nextRows : nextColumns
+      ;[axes[index], axes[nextIndex]] = [axes[nextIndex], axes[index]]
+      setAxes(nextRows, nextColumns)
+    } else if ((event.key === 'ArrowUp' && group === 'columns') || (event.key === 'ArrowDown' && group === 'rows')) {
+      event.preventDefault()
+      moveAxis({ group, index }, group === 'rows' ? 'columns' : 'rows', group === 'rows' ? columnAxes.length : rowAxes.length)
     }
-    setRowAxes(nextRows)
-    setColumnAxes(nextColumns)
-    clearSelection()
   }
 
   const clearAll = () => {
-    setResultFilter('all')
-    setFolderFilter('all')
-    setFailOnly(false)
-    setUnknownMetadataOnly(false)
-    setSelectedSourceIds(null)
-    setSelectedCellKey(null)
+    setResultFilter('all'); setFolderFilter('all'); setFailOnly(false); setUnknownMetadataOnly(false); clearSelection()
+  }
+  const rowLabels = rowAxes.length ? rowAxes.map((axis) => DIMENSION_LABEL[axis]) : ['전체']
+  const pivotExportOptions = {
+    rowTotals: grid.rows.map((row) => rowTotalByKey.get(row.key) ?? 0),
+    columnTotals: grid.columns.map((column) => columnTotalByKey.get(column.key) ?? 0),
+    grandTotal: grid.total,
+    formatValue: (value: number) => aggregation === 'fail_rate' ? formatPivotValue(value, aggregation) : value,
+  }
+  const projectFileName = safeExportName(project?.name ?? 'sequence-control-tower')
+  const closeShareMenu = (target: HTMLElement) => target.closest('details')?.removeAttribute('open')
+  const copyPivot = async (target: HTMLElement) => {
+    try {
+      await copyText(serializePivotGridTsv(grid, rowLabels, pivotExportOptions))
+      closeShareMenu(target)
+      onNotify('현재 표를 복사했습니다. Excel이나 메신저에 붙여넣을 수 있습니다.', 'success')
+    } catch (error) { onNotify(error instanceof Error ? error.message : '표를 복사하지 못했습니다.', 'error') }
+  }
+  const downloadPivot = (target: HTMLElement) => {
+    downloadText(serializePivotGridCsv(grid, rowLabels, pivotExportOptions), `${projectFileName}-analysis-table.csv`)
+    closeShareMenu(target)
+    onNotify('현재 표를 CSV로 저장했습니다.', 'success')
+  }
+  const downloadRaw = (target: HTMLElement) => {
+    const columns = analysisExportColumns(scopedRecords, activeDimensions)
+    downloadText(serializeLogRecordsCsv(scopedRecords, columns), `${projectFileName}-spotfire-data.csv`)
+    closeShareMenu(target)
+    onNotify(`${scopedRecords.length.toLocaleString()}개 로그를 분석용 CSV로 저장했습니다.`, 'success')
   }
 
   return <div className="data-view patterns-view">
-    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar"><button onClick={() => downloadPivotCsv(serializePivotGridCsv(grid, rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ') || '전체'))} disabled={!grid.rows.length}><Download size={16} />표 CSV</button><button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Download size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>{hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}</div></header>
+    <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar">
+      <details className="pattern-share"><summary><Share2 size={16} />공유<ChevronDown size={14} /></summary><div className="pattern-share-menu">
+        <div className="pattern-share-summary"><strong>{rowLabels.join(' · ')} × {columnAxes.length ? columnAxes.map((axis) => DIMENSION_LABEL[axis]).join(' · ') : '전체'}</strong><span>{AGGREGATIONS.find((item) => item.value === aggregation)?.label}</span></div>
+        <button type="button" onClick={(event) => void copyPivot(event.currentTarget)}><Clipboard size={16} /><span><b>표 복사</b><small>Excel·메신저에 붙여넣기</small></span></button>
+        <button type="button" onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 가로·세로 구성</small></span></button>
+        <button type="button" onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>분석용 원본 CSV</b><small>Spotfire용 · 로그 1개당 1행</small></span></button>
+      </div></details>
+      <button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Save size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>
+      {hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}
+    </div></header>
 
-    {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하면 피벗이 생성됩니다.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>현재 필터 결과가 없습니다.</strong><span>필터를 해제하거나 다른 조건을 선택하면 로그가 표시됩니다.</span></div> : <>
+    {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>조건에 맞는 로그가 없습니다.</strong><span>필터를 초기화해 보세요.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
-        <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><SelectControl label="값" value={aggregation} onChange={(value) => { setAggregation(value as PivotAggregation); clearSelection() }}>{AGGREGATIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</SelectControl></div>
-        <div className="pattern-controls" aria-label="패턴 필터">
+        <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><div className="pattern-metrics" role="radiogroup" aria-label="표에 표시할 값">{AGGREGATIONS.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => { setAggregation(item.value); clearSelection() }}>{item.label}</button>)}</div></div>
+        <p className="pattern-metric-note">{evaluationMetricSummary(aggregation, scopedRecords)}</p>
+        <div className="pattern-controls" aria-label="표 필터">
+          <SelectControl label="평가" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 평가</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
           <SelectControl label="결과" value={resultFilter} onChange={(value) => { setResultFilter(value as ResultLabel | 'all'); clearSelection() }}><option value="all">전체 결과</option>{resultChoices.map((result) => <option value={result} key={result}>{RESULT_LABEL_KO[result]}</option>)}</SelectControl>
-          <SelectControl label="폴더" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 폴더</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
           <button className={`pattern-quick-filter ${failOnly ? 'active' : ''}`} aria-pressed={failOnly} onClick={() => { setFailOnly((value) => !value); clearSelection() }}>FAIL만</button>
           <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
-        <div className="pattern-axis-controls">
-          <div><span>세로</span><SelectControl label="1" value={rowAxes[0]} onChange={(value) => setAxis('rows', 0, value)}>{groupedDimensionOptions(activeDimensions, rowAxes[0])}</SelectControl><SelectControl label="2" value={rowAxes[1]} onChange={(value) => setAxis('rows', 1, value)}><option value="none">사용 안 함</option>{groupedDimensionOptions(activeDimensions, rowAxes[1] as PivotDimension)}</SelectControl></div>
-          <div><span>가로</span><SelectControl label="1" value={columnAxes[0]} onChange={(value) => setAxis('columns', 0, value)}>{groupedDimensionOptions(activeDimensions, columnAxes[0])}</SelectControl><SelectControl label="2" value={columnAxes[1]} onChange={(value) => setAxis('columns', 1, value)}><option value="none">사용 안 함</option>{groupedDimensionOptions(activeDimensions, columnAxes[1] as PivotDimension)}</SelectControl></div>
+        <div className="pattern-axis-builder">
+          <AxisWell group="rows" label="세로" axes={rowAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('rows', index)} onAdd={(dimension) => addAxis('rows', dimension)} onKeyMove={keyboardMoveAxis} />
+          <button type="button" className="pattern-swap-axes" onClick={() => setAxes([...columnAxes], [...rowAxes])} title="가로와 세로 바꾸기"><ArrowLeftRight size={15} />축 바꾸기</button>
+          <AxisWell group="columns" label="가로" axes={columnAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('columns', index)} onAdd={(dimension) => addAxis('columns', dimension)} onKeyMove={keyboardMoveAxis} />
         </div>
-        {allSelectedMetadataUnknown ? <p className="pivot-guidance">선택한 축 값이 모두 미확인입니다. 다른 축을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
-        <div className="pivot-scroll"><table className="pivot-table"><thead><tr><th>{rowAxes.map((axis) => axis === 'none' ? null : DIMENSION_LABEL[axis]).filter(Boolean).join(' / ')}</th>{grid.columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}><th scope="row">{row.label}</th>{grid.columns.map((column, columnIndex) => { const cell = grid.cells[rowIndex][columnIndex]; const cellKey = `${row.key}-${column.key}`; const active = selectedCellKey === cellKey; const selectable = cell.sourceIds.length > 0; const noSourcesLabel = '관련 로그가 없어 선택할 수 없는 셀'; return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} disabled={!selectable} title={selectable ? undefined : noSourcesLabel} aria-label={selectable ? `${cell.value}개 로그 선택` : `${cell.value} ${noSourcesLabel}`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{cell.value}</button></td> })}</tr>)}</tbody></table></div>
+        {allSelectedMetadataUnknown ? <p className="pivot-guidance">선택한 항목의 값이 모두 미확인입니다. 다른 항목을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
+        <div className="pivot-scroll"><table className={`pivot-table metric-${aggregation}`} style={{ minWidth: Math.max(720, (rowAxes.length || 1) * 118 + grid.columns.length * 82 + 90) }}>
+          <thead>{columnHeaderRows.length ? columnHeaderRows.map((groups, level) => <tr key={level}>{level === 0 ? (rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" rowSpan={columnHeaderRows.length} key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis" rowSpan={columnHeaderRows.length}>전체</th>) : null}{groups.map((group) => <th colSpan={group.span} key={group.key}>{group.label}</th>)}{level === 0 ? <th className="pivot-total" rowSpan={columnHeaderRows.length}>합계</th> : null}</tr>) : <tr>{rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis">전체</th>}<th>전체</th><th className="pivot-total">합계</th></tr>}</thead>
+          <tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}>{rowAxes.length ? rowAxes.map((axis, level) => { const span = pivotRowHeaderSpan(grid.rows, rowIndex, level); return span ? <th className="pivot-row-value" scope="row" rowSpan={span} key={axis}>{row.values[level] ?? '미확인'}</th> : null }) : <th className="pivot-row-value" scope="row">전체</th>}{grid.columns.map((column, columnIndex) => {
+            const cell = grid.cells[rowIndex][columnIndex]
+            const cellKey = `${row.key}-${column.key}`
+            const active = selectedCellKey === cellKey
+            const selectable = cell.sourceIds.length > 0
+            const display = formatPivotValue(cell.value, aggregation)
+            const intensity = maxCellValue ? Math.max(.05, cell.value / maxCellValue) : 0
+            return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} title={selectable ? `${cell.sourceIds.length.toLocaleString()}개 로그 보기` : '관련 로그 없음'} aria-label={selectable ? `${display}, 관련 로그 ${cell.sourceIds.length}개` : `${display}, 관련 로그 없음`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{display}</button></td>
+          })}<td className="pivot-total">{formatPivotValue(rowTotalByKey.get(row.key) ?? 0, aggregation)}</td></tr>)}</tbody>
+          <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => <td className="pivot-total" key={column.key}>{formatPivotValue(columnTotalByKey.get(column.key) ?? 0, aggregation)}</td>)}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation)}</td></tr></tfoot>
+        </table></div>
       </section>
 
       <section className="pattern-section marked-rows" aria-labelledby="marked-heading">
         <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? '선택한 로그' : '원본 로그'}</h2></div>
-        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>검토</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
+        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>확인 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
       </section>
     </>}
   </div>

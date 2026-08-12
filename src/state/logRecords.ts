@@ -71,12 +71,12 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'frequencyMHz' | 'vdd' | 'pattern'
-  | 'dq' | 'bl' | 'channel' | 'subChannel' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'timingSkewPs'
+export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
+  | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs'
 export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
-export type PivotAggregation = 'count' | 'fail_count' | 'evidence_count'
+export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'fail_rate' | 'evidence_count'
 
-/** Configuration for the results pivot. Axis lists are intentionally bounded to two dimensions. */
+/** Configuration for the results pivot. Axis lists are intentionally bounded to three dimensions. */
 export interface PivotConfig {
   rows: readonly PivotDimension[]
   columns: readonly PivotDimension[]
@@ -156,19 +156,25 @@ const TREND_MIN_LIFT = 0.2
 const TREND_DIMENSIONS: readonly PivotDimension[] = [
   'sample',
   'temperature',
+  'temperatureCorner',
   'mode',
   'skew',
   'frequencyMHz',
   'vdd',
+  'vddCorner',
+  'conditionCorner',
   'pattern',
   'dq',
   'bl',
   'channel',
   'subChannel',
+  'chipSelect',
   'bankGroup',
   'bank',
   'row',
   'column',
+  'writeData',
+  'readData',
 ]
 const TREND_OUTCOMES: readonly TrendOutcome[] = ['fail', 'reboot', 'halt', 'majority']
 
@@ -255,9 +261,9 @@ export const RESULT_LABEL_KO: Record<ResultLabel, string> = {
   TRAINING_FAIL: 'Training fail',
   SYSTEM_HALT: 'System halt',
   SYSTEM_REBOOT: 'System reboot',
-  INCOMPLETE: 'Incomplete',
-  UNKNOWN: 'Unknown',
-  EXCLUDED: 'Excluded',
+  INCOMPLETE: '미완료',
+  UNKNOWN: '미확인',
+  EXCLUDED: '제외',
 }
 
 export const STAGE_LABEL_KO: Record<EvaluationStage, string> = {
@@ -614,14 +620,33 @@ function comparePivotHeaders(left: PivotHeader, right: PivotHeader): number {
   return left.label.localeCompare(right.label, 'ko-KR', { numeric: true, sensitivity: 'base' })
 }
 
-function pivotAmount(row: LogResultRecord, aggregation: PivotAggregation): number {
-  if (aggregation === 'evidence_count') return row.evidenceCount
-  if (aggregation === 'count') return 1
-  return row.result !== 'PASS' && row.result !== 'UNKNOWN' && row.result !== 'INCOMPLETE' && row.result !== 'EXCLUDED' ? 1 : 0
+function pivotFailure(row: LogResultRecord): boolean {
+  return row.result !== 'PASS' && row.result !== 'UNKNOWN' && row.result !== 'INCOMPLETE' && row.result !== 'EXCLUDED'
+}
+
+type PivotAccumulator = {
+  recordCount: number
+  definitiveCount: number
+  passCount: number
+  failCount: number
+  evidenceCount: number
+  sampleIds: Set<string>
+  gridIds: Set<string>
+  sourceIds: string[]
+}
+
+function pivotAccumulatorValue(value: PivotAccumulator, aggregation: PivotAggregation): number {
+  if (aggregation === 'evidence_count') return value.evidenceCount
+  if (aggregation === 'sample_count') return value.sampleIds.size
+  if (aggregation === 'grid_count') return value.gridIds.size
+  if (aggregation === 'pass_count') return value.passCount
+  if (aggregation === 'fail_count') return value.failCount
+  if (aggregation === 'fail_rate') return value.definitiveCount ? Math.round((value.failCount / value.definitiveCount) * 1_000) / 10 : 0
+  return value.recordCount
 }
 
 function validatePivotAxes(axis: readonly PivotDimension[], name: string): void {
-  if (axis.length > 2) throw new RangeError(`Pivot ${name} may contain at most two dimensions`)
+  if (axis.length > 3) throw new RangeError(`Pivot ${name} may contain at most three dimensions`)
   if (new Set(axis).size !== axis.length) throw new RangeError(`Pivot ${name} may not contain duplicate dimensions`)
 }
 
@@ -632,8 +657,9 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
   const filtered = filterLogRecords(rows, config.filters)
   const rowMap = new Map<string, PivotHeader>()
   const columnMap = new Map<string, PivotHeader>()
-  const values = new Map<string, { value: number; sourceIds: string[] }>()
+  const values = new Map<string, PivotAccumulator>()
   const allSourceIds: string[] = []
+  const total: PivotAccumulator = { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set(), gridIds: new Set(), sourceIds: [] }
 
   for (const row of filtered) {
     const rowValues = config.rows.map((dimension) => pivotDimensionValue(row, dimension))
@@ -643,10 +669,37 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
     rowMap.set(rowHeader.key, rowHeader)
     columnMap.set(columnHeader.key, columnHeader)
     const cellKey = `${rowHeader.key}\u0000${columnHeader.key}`
-    const cell = values.get(cellKey) ?? { value: 0, sourceIds: [] }
-    const amount = pivotAmount(row, config.aggregation)
-    cell.value += amount
-    if (amount !== 0 && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
+    const cell = values.get(cellKey) ?? { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set<string>(), gridIds: new Set<string>(), sourceIds: [] }
+    const failed = pivotFailure(row)
+    const passed = row.result === 'PASS'
+    const definitive = passed || failed
+    const sampleId = row.sample.value ?? row.dimensions?.sample
+    const gridId = row.grid.value ?? row.dimensions?.gridId
+    const gridKey = gridId === undefined || gridId === null || String(gridId).trim() === ''
+      ? undefined
+      : JSON.stringify([row.folder, sampleId ?? '', String(gridId).trim(), row.run ?? ''])
+    cell.recordCount += 1
+    cell.definitiveCount += definitive ? 1 : 0
+    cell.passCount += passed ? 1 : 0
+    cell.failCount += failed ? 1 : 0
+    cell.evidenceCount += row.evidenceCount
+    if (sampleId !== undefined && sampleId !== null && String(sampleId).trim()) cell.sampleIds.add(String(sampleId).trim())
+    if (gridKey) cell.gridIds.add(gridKey)
+    total.recordCount += 1
+    total.definitiveCount += definitive ? 1 : 0
+    total.passCount += passed ? 1 : 0
+    total.failCount += failed ? 1 : 0
+    total.evidenceCount += row.evidenceCount
+    if (sampleId !== undefined && sampleId !== null && String(sampleId).trim()) total.sampleIds.add(String(sampleId).trim())
+    if (gridKey) total.gridIds.add(gridKey)
+    const includeSource = config.aggregation === 'count'
+      || (config.aggregation === 'sample_count' && sampleId !== undefined && sampleId !== null && String(sampleId).trim() !== '')
+      || (config.aggregation === 'grid_count' && Boolean(gridKey))
+      || (config.aggregation === 'pass_count' && passed)
+      || (config.aggregation === 'fail_rate' && definitive)
+      || (config.aggregation === 'fail_count' && failed)
+      || (config.aggregation === 'evidence_count' && row.evidenceCount > 0)
+    if (includeSource && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
     values.set(cellKey, cell)
     if (!allSourceIds.includes(row.id)) allSourceIds.push(row.id)
   }
@@ -655,13 +708,13 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
   const pivotColumns = [...columnMap.values()].sort(comparePivotHeaders)
   const cells = pivotRows.map((rowHeader) => pivotColumns.map((columnHeader) => {
     const cell = values.get(`${rowHeader.key}\u0000${columnHeader.key}`)
-    return { value: cell?.value ?? 0, sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]) }
+    return { value: cell ? pivotAccumulatorValue(cell, config.aggregation) : 0, sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]) }
   }))
   return {
     rows: Object.freeze(pivotRows.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
     columns: Object.freeze(pivotColumns.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
     cells: Object.freeze(cells.map((row) => Object.freeze(row))),
-    total: filtered.reduce((sum, row) => sum + pivotAmount(row, config.aggregation), 0),
+    total: pivotAccumulatorValue(total, config.aggregation),
     sourceIds: Object.freeze(allSourceIds),
   }
 }
@@ -778,8 +831,8 @@ const BASE_EXPORT_HEADER = [
 ] as const
 
 export const ENGINEERING_EXPORT_COLUMNS = [
-  'skew', 'lot', 'material', 'die', 'soc_model', 'frequency_mhz', 'vdd', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
-  'rank', 'bank_group', 'bank', 'row', 'column', 'timing_skew_ps',
+  'skew', 'lot', 'material', 'die', 'soc_model', 'temperature_corner', 'frequency_mhz', 'vdd', 'vdd_corner', 'condition_corner', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
+  'chip_select', 'rank', 'bank_group', 'bank', 'row', 'column', 'write_data', 'read_data', 'timing_skew_ps',
 ] as const
 export const EVIDENCE_EXPORT_COLUMNS = ['evidence_count', 'selected_evidence_count'] as const
 export type LogRecordExportColumn = typeof BASE_EXPORT_HEADER[number] | typeof ENGINEERING_EXPORT_COLUMNS[number] | typeof EVIDENCE_EXPORT_COLUMNS[number]
@@ -807,19 +860,25 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'soc_model', label: 'SoC', section: 'condition' },
   { key: 'sample_value', label: 'Sample', section: 'condition' },
   { key: 'temperature_value', label: '온도 (°C)', section: 'condition' },
-  { key: 'mode_value', label: 'Test Mode', section: 'condition' },
+  { key: 'temperature_corner', label: '온도 조건', section: 'condition' },
+  { key: 'mode_value', label: 'Mode', section: 'condition' },
   { key: 'frequency_mhz', label: '주파수 (MHz)', section: 'condition' },
   { key: 'vdd', label: 'VDD (V)', section: 'condition' },
+  { key: 'vdd_corner', label: 'VDD 조건', section: 'condition' },
+  { key: 'condition_corner', label: '4-Corner', section: 'condition' },
   { key: 'pattern', label: 'Pattern', section: 'condition' },
   { key: 'dq', label: 'DQ', section: 'condition' },
   { key: 'bl', label: 'BL', section: 'condition' },
   { key: 'channel', label: 'Channel', section: 'condition' },
   { key: 'sub_channel', label: 'Sub Channel', section: 'condition' },
+  { key: 'chip_select', label: 'CS', section: 'condition' },
   { key: 'rank', label: 'Rank', section: 'condition' },
   { key: 'bank_group', label: 'Bank Group', section: 'condition' },
   { key: 'bank', label: 'Bank', section: 'condition' },
   { key: 'row', label: 'Row', section: 'condition' },
   { key: 'column', label: 'Column', section: 'condition' },
+  { key: 'write_data', label: 'WR', section: 'condition' },
+  { key: 'read_data', label: 'RD', section: 'condition' },
   { key: 'timing_skew_ps', label: 'Timing SKEW (ps)', section: 'condition' },
   { key: 'grid_value', label: 'Grid', section: 'condition' },
   { key: 'sample_state', label: 'Sample 상태', section: 'result' },
@@ -830,8 +889,8 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'result_source', label: '결과 출처', section: 'result' },
   { key: 'review', label: '검토', section: 'result' },
   { key: 'stage_results', label: '단계별 결과', section: 'result' },
-  { key: 'evidence_count', label: '근거 수', group: 'evidence', section: 'evidence' },
-  { key: 'selected_evidence_count', label: '선택 근거 수', group: 'evidence', section: 'evidence' },
+  { key: 'evidence_count', label: '자동 판정 신호 수', group: 'evidence', section: 'evidence' },
+  { key: 'selected_evidence_count', label: '직접 선택한 근거 줄 수', group: 'evidence', section: 'evidence' },
 ]
 
 export function normalizeExportColumns(columns: readonly LogRecordExportColumn[]): LogRecordExportColumn[] {
@@ -853,18 +912,24 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     material: row.dimensions?.material ?? '',
     die: row.dimensions?.die ?? '',
     soc_model: row.dimensions?.socModel ?? '',
+    temperature_corner: row.dimensions?.temperatureCorner ?? '',
     frequency_mhz: row.dimensions?.frequencyMHz ?? '',
     vdd: row.dimensions?.vdd ?? '',
+    vdd_corner: row.dimensions?.vddCorner ?? '',
+    condition_corner: row.dimensions?.conditionCorner ?? '',
     pattern: row.dimensions?.pattern ?? '',
     dq: row.dimensions?.dq ?? '',
     bl: row.dimensions?.bl ?? '',
     channel: row.dimensions?.channel ?? '',
     sub_channel: row.dimensions?.subChannel ?? '',
+    chip_select: row.dimensions?.chipSelect ?? '',
     rank: row.dimensions?.rank ?? '',
     bank_group: row.dimensions?.bankGroup ?? '',
     bank: row.dimensions?.bank ?? '',
     row: row.dimensions?.row ?? '',
     column: row.dimensions?.column ?? '',
+    write_data: row.dimensions?.writeData ?? '',
+    read_data: row.dimensions?.readData ?? '',
     timing_skew_ps: row.dimensions?.timingSkewPs ?? '',
     sample_value: row.sample.value ?? '',
     sample_state: row.sample.state,
@@ -898,13 +963,45 @@ export function normalizedExportCell(value: unknown): string {
 }
 
 /** Exports the visible n×m pivot exactly as arranged on screen. */
-export function serializePivotGridCsv(grid: PivotGrid, rowHeader = '세로 / 가로'): string {
-  const escape = (value: unknown) => `"${normalizedExportCell(value).replace(/"/g, '""')}"`
+export type PivotGridExportOptions = {
+  rowTotals?: readonly number[]
+  columnTotals?: readonly number[]
+  grandTotal?: number
+  totalLabel?: string
+  formatValue?: (value: number) => string | number
+}
+
+function pivotGridExportRows(grid: PivotGrid, rowHeader: string | readonly string[], options: PivotGridExportOptions = {}): unknown[][] {
+  const rowHeaders = typeof rowHeader === 'string' ? [rowHeader] : [...rowHeader]
+  const useSeparateRowValues = typeof rowHeader !== 'string'
+  const format = options.formatValue ?? ((value: number) => value)
+  const includeTotals = Boolean(options.rowTotals && options.columnTotals)
   const rows: unknown[][] = [
-    [rowHeader, ...grid.columns.map((column) => column.label)],
-    ...grid.rows.map((row, rowIndex) => [row.label, ...grid.cells[rowIndex].map((cell) => cell.value)]),
+    [...rowHeaders, ...grid.columns.map((column) => column.label), ...(includeTotals ? [options.totalLabel ?? '합계'] : [])],
+    ...grid.rows.map((row, rowIndex) => [
+      ...(useSeparateRowValues ? row.values : [row.label]),
+      ...grid.cells[rowIndex].map((cell) => format(cell.value)),
+      ...(includeTotals ? [format(options.rowTotals?.[rowIndex] ?? 0)] : []),
+    ]),
   ]
+  if (includeTotals) rows.push([
+    options.totalLabel ?? '합계',
+    ...Array.from({ length: Math.max(0, rowHeaders.length - 1) }, () => ''),
+    ...(options.columnTotals ?? []).map(format),
+    format(options.grandTotal ?? grid.total),
+  ])
+  return rows
+}
+
+export function serializePivotGridCsv(grid: PivotGrid, rowHeader: string | readonly string[] = '세로 / 가로', options: PivotGridExportOptions = {}): string {
+  const escape = (value: unknown) => `"${normalizedExportCell(value).replace(/"/g, '""')}"`
+  const rows = pivotGridExportRows(grid, rowHeader, options)
   return `\uFEFF${rows.map((row) => row.map(escape).join(',')).join('\r\n')}`
+}
+
+/** Copies the arranged pivot directly into Excel, Teams, or a spreadsheet editor. */
+export function serializePivotGridTsv(grid: PivotGrid, rowHeader: string | readonly string[] = '세로 / 가로', options: PivotGridExportOptions = {}): string {
+  return `\uFEFF${pivotGridExportRows(grid, rowHeader, options).map((row) => row.map(normalizedExportCell).join('\t')).join('\r\n')}`
 }
 
 /** The exact logical cell value emitted by either export serializer. */

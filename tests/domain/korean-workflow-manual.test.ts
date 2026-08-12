@@ -15,8 +15,8 @@ describe('current Korean operator manual', () => {
 
   it('documents current search scopes, shortcuts, decisions, and immutable logs', async () => {
     const manual = await readFile(resolve(root, '02-검색과-판정.md'), 'utf8')
-    for (const label of ['현재 평가 폴더', '열린 탭', '전체 로그', 'PASS', 'DIAG_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT']) expect(manual).toContain(`\`${label}\``)
-    for (const shortcut of ['Ctrl+F', '⌘F', 'Ctrl+Alt+F', '⌘⌥F', 'Ctrl+Shift+F', '⌘⇧F']) expect(manual).toContain(`\`${shortcut}\``)
+    for (const label of ['현재 평가', '열린 파일', '전체 프로젝트', 'PASS', 'DIAG_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT']) expect(manual).toContain(`\`${label}\``)
+    for (const shortcut of ['Ctrl+F', '⌘F', 'Ctrl+Alt+F', '⌘⌥F', 'Ctrl+Shift+F', '⌘⇧F', 'Ctrl+G', '⌘G', 'Alt+Z']) expect(manual).toContain(`\`${shortcut}\``)
     expect(manual).toContain('원본 파일은 수정하지 않습니다')
   })
 

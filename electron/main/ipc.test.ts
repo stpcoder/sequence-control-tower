@@ -243,11 +243,12 @@ describe('evaluation-agent IPC ownership and projection', () => {
   })
 
   it('strips raw excerpts and transcript detail from renderer responses', async () => {
-    evaluationAgentStart.mockResolvedValueOnce({ id: 'eval-safe', status: 'paused', schemaVersion: 1, depth: 0, calls: 0, searches: 0, files: [{ id: 's1', name: 'safe.log', metadata: {} }], evidence: [{ id: 'e1', kind: 'window', fileId: 's1', detail: 'lines 1-2', excerpt: '/Users/private/token=secret' }, { id: 'e2', kind: 'search', fileId: 's1', detail: 'query=@FAIL matches=2', excerpt: 'L123: @FAIL\nL991: @FAIL' }], transcript: [{ at: 'now', role: 'provider', type: 'planner-action', detail: '/Users/private/token=secret' }], context: { dimensions: {}, aggregate: '/Users/private/token=secret' } } as never)
+    evaluationAgentStart.mockResolvedValueOnce({ id: 'eval-safe', status: 'paused', schemaVersion: 1, depth: 0, calls: 0, searches: 0, files: [{ id: 's1', name: 'safe.log', metadata: {} }], evidence: [{ id: 'e1', kind: 'window', fileId: 's1', detail: 'lines 1-2', excerpt: '/Users/private/token=secret' }, { id: 'e2', kind: 'search', fileId: 's1', detail: 'query=@FAIL matches=2', excerpt: 'L123: @FAIL\nL991: @FAIL' }], transcript: [{ at: 'now', role: 'provider', type: 'planner-action', detail: '/Users/private/token=secret' }], context: { dimensions: {}, aggregate: '/Users/private/token=secret', analysisPolicy: { id: 'lpddr-failure-analysis', version: '2026-08-13', source: 'bundled-skill' } } } as never)
     const view = await invokeEvent(IPC_CHANNELS.evaluationAgentStart, trustedEvent(33), { projectId: 'p1' }) as Record<string, unknown>
     expect(JSON.stringify(view)).not.toContain('/Users/private'); expect(JSON.stringify(view)).not.toContain('token=secret')
     expect((view.transcript as Array<Record<string, unknown>>)[0].detail).toBeUndefined()
     expect((view.evidence as Array<{ id: string; lineNumbers: number[] }>).find((item) => item.id === 'e2')?.lineNumbers).toEqual([123, 991])
+    expect(view.analysisPolicy).toEqual({ id: 'lpddr-failure-analysis', version: '2026-08-13', source: 'bundled-skill' })
   })
 
   it('projects durable source IDs and a sanitized bounded evidence summary', async () => {

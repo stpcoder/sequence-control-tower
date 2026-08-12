@@ -25,6 +25,17 @@ describe('NativeAgentStore', () => {
     expect(session?.tools[0].summary).toContain('DQ9')
   })
 
+  it('keeps punctuation-only legacy sessions on disk but hides them from the conversation UI', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-native-agent-debris-'))
+    const store = new NativeAgentStore(root)
+    await store.initialize()
+    const created = await store.create('project-a', ',         .', 'opencode')
+    await store.appendMessage(created.id, { role: 'assistant', content: '분석을 시작합니다.' })
+    await store.appendMessage(created.id, { role: 'user', content: ',         .' })
+    expect(await store.list('project-a')).toEqual([])
+    expect(await store.get(created.id)).toBeNull()
+  })
+
   it('deduplicates rapid identical Ctrl-F observations', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-search-history-'))
     const store = new NativeAgentStore(root)
@@ -108,7 +119,7 @@ describe('NativeAgentStore', () => {
     expect(await store.workflowMemories('p')).toHaveLength(1)
   })
 
-  it('expands a confirmed Ctrl-F procedure within one evaluation folder but not into another folder', async () => {
+  it('reuses an exact procedure in one folder and offers it as a review candidate in another folder', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-evaluation-folder-memory-'))
     const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
     await store.initialize()
@@ -118,18 +129,27 @@ describe('NativeAgentStore', () => {
       scope: 'current', matchCount: count, activeMatchCount: count, observedAt: new Date().toISOString(),
     })
     for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('a-1', 'folder-a', query, count)
-    const learned = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-1', result: 'PASS' })
+    const compatibleContext = { testMode: 'VPERI', socVendor: 'qualcomm' as const, bootProfileId: 'qualcomm-default', pattern: 'WR' }
+    const learned = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-1', result: 'PASS', dimensions: compatibleContext })
     if (learned.kind !== 'review') throw new Error('review expected')
     await store.confirmWorkflow('p', learned.review.id, 'UEFI 이후 테스트 완료 확인')
 
     for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('a-2', 'folder-a', query, count)
-    await expect(store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-2', result: 'PASS' }))
+    await expect(store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-a', sourceId: 'a-2', result: 'PASS', dimensions: compatibleContext }))
       .resolves.toMatchObject({ kind: 'applied', memory: { evaluationScopeId: 'folder-a', appliedCount: 1 } })
 
     for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('b-1', 'folder-b', query, count)
-    const isolated = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-b', sourceId: 'b-1', result: 'PASS' })
+    const isolated = await store.completeEvaluation({ projectId: 'p', evaluationScopeId: 'folder-b', sourceId: 'b-1', result: 'PASS', dimensions: { ...compatibleContext, vdd: 1.315 } })
     expect(isolated.kind).toBe('review')
-    if (isolated.kind === 'review') expect(isolated.review.similarMemoryId).toBeUndefined()
+    if (isolated.kind === 'review') expect(isolated.review.similarMemoryId).toBeTruthy()
+
+    for (const [query, count] of [['UEFI', 1], ['@FAIL', 0], ['@PASS', 1]] as const) await search('c-1', 'folder-c', query, count)
+    const incompatible = await store.completeEvaluation({
+      projectId: 'p', evaluationScopeId: 'folder-c', sourceId: 'c-1', result: 'PASS',
+      dimensions: { testMode: 'BOOT', socVendor: 'mediatek', bootProfileId: 'mediatek-default', pattern: 'TRAIN' },
+    })
+    expect(incompatible.kind).toBe('review')
+    if (incompatible.kind === 'review') expect(incompatible.review.similarMemoryId).toBeUndefined()
   })
 
   it('stores only the engineer-selected checks in the exact confirmed order', async () => {

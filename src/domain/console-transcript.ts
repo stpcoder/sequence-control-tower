@@ -74,6 +74,7 @@ function validCommand(value: string): string | null {
   const command = value.trim().replace(/\s+/g, ' ').slice(0, MAX_COMMAND_CHARS)
   if (!command || /^[@!]?(?:PASS|FAIL)\b/i.test(command)) return null
   if (/^(?:INFO|DEBUG|WARN|ERROR|TRACE)\b/i.test(command)) return null
+  if (/^(?:SYNTHETIC(?:_[A-Z0-9]+)+|META(?:DATA)?\b|CORPUS\b|FIXTURE\b)/i.test(command)) return null
   return command
 }
 

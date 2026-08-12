@@ -23,12 +23,15 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  Hash,
   LoaderCircle,
   Play,
   Regex,
   Search,
   SearchCode,
   SlidersHorizontal,
+  Sparkles,
+  WrapText,
   WholeWord,
   X,
 } from 'lucide-react'
@@ -42,6 +45,7 @@ import type {
   ArtifactSearchResult,
   EngineerWorkflowCheckView,
   EngineerWorkflowReviewView,
+  NativeAgentCompleteEvaluationResult,
   ProjectSnapshot,
   RendererCommand,
   SequenceIntelligenceApi,
@@ -125,8 +129,10 @@ export interface WorkbenchViewProps {
   durableRules?: readonly RecipeRule[]
   durableRecipes?: readonly EvaluationRecipeRevision[]
   selectedFileId?: string
+  selectedFolderRootId?: string
   onFilesChange?: (files: WorkbenchFile[]) => void
   onSelectedFileChange?: (fileId: string | null) => void
+  onSelectedFolderChange?: (rootId: string | null) => void
   onEvidenceCountChange?: (fileId: string, count: number) => void
   onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => void | Promise<void>
   onBatchResults?: (resolution: PrecomputedBatchResolution) => void | Promise<void>
@@ -135,6 +141,7 @@ export interface WorkbenchViewProps {
   onApplyMetadataSuggestion?: (fileId: string, field: MetadataSuggestionField, value: string) => void | Promise<void>
   onImportProjectFolder?: () => Promise<{ cancelled: true } | { cancelled: false; importedCount: number; failureCount: number; skippedCount: number }>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
+  onOpenAgent?: () => void
   projectId?: string
   projectSources?: readonly ProjectSnapshot['artifacts'][number][]
 }
@@ -170,12 +177,42 @@ interface SearchOptions {
   regex: boolean
 }
 
-interface SearchHit {
+export interface SearchHit {
   fileId: string
   line: number
   start: number
   end: number
   excerpt: string
+}
+
+export interface WorkspaceSearchHitGroup {
+  fileId: string
+  matches: Array<{ hit: SearchHit; index: number }>
+}
+
+/** Preserve global result order while showing the filename once per group. */
+export function groupWorkspaceSearchHits(hits: readonly SearchHit[], limit = 80): WorkspaceSearchHitGroup[] {
+  const groups = new Map<string, WorkspaceSearchHitGroup>()
+  hits.slice(0, Math.max(0, limit)).forEach((hit, index) => {
+    const group = groups.get(hit.fileId) ?? { fileId: hit.fileId, matches: [] }
+    group.matches.push({ hit, index })
+    groups.set(hit.fileId, group)
+  })
+  return [...groups.values()]
+}
+
+/** Most-recent-first Ctrl-F terms for the active log. Searches are deliberately
+ * kept per log here; cross-folder reuse only happens after the engineer saves a
+ * compatible search procedure. */
+export function recentSearchQueries(observations: readonly SearchObservation[]): string[] {
+  const seen = new Set<string>()
+  return [...observations].reverse().flatMap((observation) => {
+    const query = observation.query.trim()
+    const key = query.toLocaleLowerCase('ko-KR')
+    if (!query || seen.has(key)) return []
+    seen.add(key)
+    return [query]
+  })
 }
 
 interface LoadedLineWindow {
@@ -284,7 +321,7 @@ export function saveWorkbenchPaneWidths(storage: Storage | undefined, key: strin
 }
 
 export function patternReviewFailureMessage(): string {
-  return 'AI 패턴 검토를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  return 'AI 로그 검토를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
 }
 
 export function lineWindowEdgeRequestKey(fileId: string, edge: LineWindowEdge, boundary: number): string {
@@ -573,9 +610,9 @@ const DECISIONS: Array<{ value: ResultLabel; label: string; tone: string }> = [
   { value: 'TRAINING_FAIL', label: 'Training fail', tone: 'training' },
   { value: 'SYSTEM_HALT', label: 'System halt', tone: 'halt' },
   { value: 'SYSTEM_REBOOT', label: 'System reboot', tone: 'reboot' },
-  { value: 'INCOMPLETE', label: 'Incomplete', tone: 'incomplete' },
-  { value: 'UNKNOWN', label: 'Unknown', tone: 'unknown' },
-  { value: 'EXCLUDED', label: 'Excluded', tone: 'excluded' },
+  { value: 'INCOMPLETE', label: '미완료', tone: 'incomplete' },
+  { value: 'UNKNOWN', label: '미확인', tone: 'unknown' },
+  { value: 'EXCLUDED', label: '제외', tone: 'excluded' },
 ]
 
 const DEFAULT_OPTIONS: SearchOptions = {
@@ -648,6 +685,13 @@ export interface WorkbenchFileGroup {
   key: string
   label: string
   files: WorkbenchFile[]
+}
+
+/** Folder selection is an analysis-scope change, not only a tree toggle. When
+ * the editor still shows another folder, open the first log from the newly
+ * selected evaluation so Ctrl-F memory and Agent scope cannot diverge. */
+export function folderSelectionTargetId(group: WorkbenchFileGroup, activeFileId?: string | null): string | null {
+  return group.files.some((file) => file.id === activeFileId) ? null : group.files[0]?.id ?? null
 }
 
 function workbenchFolderLabel(file: WorkbenchFile): string {
@@ -1008,8 +1052,10 @@ export function WorkbenchView({
   durableRules,
   durableRecipes,
   selectedFileId,
+  selectedFolderRootId,
   onFilesChange,
   onSelectedFileChange,
+  onSelectedFolderChange,
   onEvidenceCountChange,
   onDecision,
   onBatchResults,
@@ -1018,6 +1064,7 @@ export function WorkbenchView({
   onApplyMetadataSuggestion,
   onImportProjectFolder,
   onNotify,
+  onOpenAgent,
   projectId = 'log-workbench',
   projectSources = [],
 }: WorkbenchViewProps) {
@@ -1033,6 +1080,10 @@ export function WorkbenchView({
   const [currentHit, setCurrentHit] = useState(0)
   const [searchNavigationVersion, setSearchNavigationVersion] = useState(0)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [goToLineOpen, setGoToLineOpen] = useState(false)
+  const [goToLineValue, setGoToLineValue] = useState('')
+  const [wordWrap, setWordWrap] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('sequence-control-tower:word-wrap') === 'true')
+  const [searchHistoryIndex, setSearchHistoryIndex] = useState(-1)
   const [replaceMode, setReplaceMode] = useState(false)
   const [replacement, setReplacement] = useState('')
   const [logDraft, setLogDraft] = useState<LogDraft>(() => createLogDraft(files.flatMap((file) => file.text === undefined ? [] : [{ id: file.id, text: file.text }])))
@@ -1081,6 +1132,8 @@ export function WorkbenchView({
     `sequence-control-tower:workbench-widths:${projectId}`,
   ))
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const goToLineInputRef = useRef<HTMLInputElement>(null)
+  const searchHistoryDraftRef = useRef('')
   const editorRef = useRef<HTMLDivElement>(null)
   const workbenchRef = useRef<HTMLDivElement>(null)
   const splitterDragRef = useRef<{ pane: keyof WorkbenchPaneWidths; startX: number; startWidth: number } | null>(null)
@@ -1270,6 +1323,8 @@ export function WorkbenchView({
   }, [activeFileHits])
   const evidenceLines = evidenceByFile[activeFile?.id ?? ''] ?? []
   const decision = candidateDecisions[activeFile?.id ?? ''] ?? decisions[activeFile?.id ?? ''] ?? activeFile?.decision
+  const activeSearchQueries = useMemo(() => recentSearchQueries(searchHistory[activeFile?.id ?? ''] ?? []), [activeFile?.id, searchHistory])
+  const activeTotalLines = activeFile?.artifactId ? activeWindow?.totalLines : activeSourceLines.length
 
   useEffect(() => {
     setWorkflowReviews({})
@@ -1497,7 +1552,7 @@ export function WorkbenchView({
     setRecipeSaved(false)
     setRecipeVisible(true)
     setRecipeManagerOpen(false)
-    onNotify?.(`${recipe.name} r${recipe.revision}을 현재 파일의 편집 초안으로 불러왔습니다.`, 'info')
+    onNotify?.(`${recipe.name} r${recipe.revision}을 불러왔습니다. 검색 조건을 조정한 뒤 현재 폴더에서 미리 확인하세요.`, 'info')
   }
 
   const archiveRecipe = async (recipeId: string) => {
@@ -1864,13 +1919,42 @@ export function WorkbenchView({
   }, [hits.length, navigateToSearchHit])
 
   const openSearch = useCallback((scope: SearchScope, nextReplaceMode = replaceMode) => {
+    setGoToLineOpen(false)
     setSearchScope(scope)
     setSearchOpen(true)
     setReplaceMode(nextReplaceMode)
+    setSearchHistoryIndex(-1)
+    searchHistoryDraftRef.current = query
     setSideMode(scope === 'file' ? 'files' : 'search')
     resetSearchNavigation()
     scheduleAnimationFrame(() => searchInputRef.current?.select())
-  }, [replaceMode, resetSearchNavigation, scheduleAnimationFrame])
+  }, [query, replaceMode, resetSearchNavigation, scheduleAnimationFrame])
+
+  const openGoToLine = useCallback(() => {
+    if (!activeFile) return
+    setSearchOpen(false)
+    setReplaceMode(false)
+    setSearchOptionsOpen(false)
+    setGoToLineValue(String(revealedLine?.fileId === activeFile.id ? revealedLine.lineNumber : activeWindow?.startLine ?? 1))
+    setGoToLineOpen(true)
+    scheduleAnimationFrame(() => goToLineInputRef.current?.select())
+  }, [activeFile, activeWindow?.startLine, revealedLine, scheduleAnimationFrame])
+
+  const submitGoToLine = useCallback(() => {
+    if (!activeFile) return
+    const requested = Math.trunc(Number(goToLineValue))
+    if (!Number.isFinite(requested) || requested < 1) {
+      goToLineInputRef.current?.select()
+      return
+    }
+    const lineNumber = activeTotalLines && activeTotalLines > 0 ? Math.min(requested, activeTotalLines) : requested
+    setGoToLineOpen(false)
+    void revealLine(activeFile, lineNumber)
+  }, [activeFile, activeTotalLines, goToLineValue, revealLine])
+
+  useEffect(() => {
+    try { window.localStorage.setItem('sequence-control-tower:word-wrap', String(wordWrap)) } catch { /* visual preference remains available for this session */ }
+  }, [wordWrap])
 
   const replaceCurrent = useCallback(() => {
     setDraftError('')
@@ -2246,6 +2330,16 @@ export function WorkbenchView({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const command = event.ctrlKey || event.metaKey
+      if (command && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'g') {
+        event.preventDefault()
+        openGoToLine()
+        return
+      }
+      if (!command && event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        setWordWrap((current) => !current)
+        return
+      }
       if (command && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
         openSearch('workspace')
@@ -2264,6 +2358,13 @@ export function WorkbenchView({
       if (command && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'h') {
         event.preventDefault()
         openSearch(searchOpen ? searchScope : 'file', true)
+        return
+      }
+      if (event.key === 'Escape' && goToLineOpen) {
+        event.preventDefault()
+        setGoToLineOpen(false)
+        goToLineInputRef.current?.blur()
+        editorRef.current?.focus()
         return
       }
       if (event.key === 'Escape' && searchOpen) {
@@ -2291,7 +2392,7 @@ export function WorkbenchView({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [moveToHit, openSearch, replaceMode, scheduleAnimationFrame, searchOpen, searchScope])
+  }, [goToLineOpen, moveToHit, openGoToLine, openSearch, replaceMode, scheduleAnimationFrame, searchOpen, searchScope])
 
   useEffect(() => {
     setRequireMarkerOrder(false)
@@ -2374,6 +2475,34 @@ export function WorkbenchView({
     return () => window.removeEventListener('sequence-control-tower:command', handleAppCommand)
   }, [importFolder, openSearch])
 
+  const applyCompletedEvaluation = (
+    completed: NativeAgentCompleteEvaluationResult,
+    sourceId: string,
+  ) => {
+    if (completed.attempt?.relation === 'retest') {
+      onNotify?.(`RT 연결됨 · 동일 Sample/Sequence의 이전 FAIL 평가 #${completed.attempt.attemptNo - 1}`, 'success')
+    } else if (completed.attempt?.relation === 'unresolved-retest') {
+      onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
+    }
+    if (completed.kind === 'review') {
+      setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
+      setWorkflowCheckDrafts((current) => ({ ...current, [completed.review.id]: completed.review.checks }))
+      setWorkflowPurposes((current) => ({
+        ...current,
+        [completed.review.id]: current[completed.review.id]
+          ?? completed.review.suggestions.find((item) => item !== '직접 입력')
+          ?? '',
+      }))
+    } else if (completed.kind === 'applied') {
+      setWorkflowReviews((current) => {
+        const next = { ...current }
+        delete next[sourceId]
+        return next
+      })
+      onNotify?.(`저장된 분석 절차 적용 · ${completed.memory.purpose}`, 'success')
+    }
+  }
+
   const commitEngineerDecision = async (nextDecision: WorkbenchDecision): Promise<boolean> => {
     if (!activeFile) return false
     try {
@@ -2405,23 +2534,7 @@ export function WorkbenchView({
             mode: observation.matcherKind,
             caseSensitive: observation.caseSensitive,
           })) } : {}),
-        }).then((completed) => {
-          if (completed.attempt?.relation === 'retest') onNotify?.(`RT 연결됨 · 동일 Sample/Sequence의 이전 FAIL 평가 #${completed.attempt.attemptNo - 1}`, 'success')
-          else if (completed.attempt?.relation === 'unresolved-retest') onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
-          if (completed.kind === 'review') {
-            setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
-            setWorkflowCheckDrafts((current) => ({ ...current, [completed.review.id]: completed.review.checks }))
-            setWorkflowPurposes((current) => ({
-              ...current,
-              [completed.review.id]: current[completed.review.id] ?? completed.review.suggestions.find((item) => item !== '직접 입력') ?? '',
-            }))
-          } else if (completed.kind === 'applied') {
-            setWorkflowReviews((current) => {
-              const next = { ...current }; delete next[source.sourceId]; return next
-            })
-            onNotify?.(`저장된 분석 절차 적용 · ${completed.memory.purpose}`, 'success')
-          }
-        }).catch(() => undefined)
+        }).then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
       }
       return true
     } catch (error) {
@@ -2449,6 +2562,7 @@ export function WorkbenchView({
       setWorkflowCheckDrafts((current) => {
         const next = { ...current }; delete next[workflowReview.id]; return next
       })
+      setRecipeVisible(false)
       onNotify?.(`분석 절차 저장 · ${memory.purpose}`, 'success')
     } catch (error) {
       onNotify?.(error instanceof Error ? error.message : '분석 절차를 저장하지 못했습니다.', 'error')
@@ -2470,6 +2584,7 @@ export function WorkbenchView({
     setWorkflowCheckDrafts((current) => {
       const next = { ...current }; delete next[reviewId]; return next
     })
+    setRecipeVisible(false)
     if (api?.nativeAgent) void api.nativeAgent.dismissWorkflow({ projectId, reviewId }).catch(() => undefined)
   }
 
@@ -2589,8 +2704,9 @@ export function WorkbenchView({
       const stored = loadLogWorkbenchState(window.localStorage, projectId).state
       const localRecipeId = editingRecipeId ?? rule.id
       const existingRecipe = savedRecipes.find((item) => item.metadata.id === localRecipeId)
+      const recipeName = `${workbenchFolderLabel(activeFile)} · ${decision} 판정`
       const recipe: LogWorkbenchRecipe = {
-        metadata: { id: localRecipeId, name: `${decision} 판정 규칙`, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
+        metadata: { id: localRecipeId, name: recipeName, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
         rules: [rule],
       }
       const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
@@ -2619,6 +2735,27 @@ export function WorkbenchView({
       onNotify?.(existingDecision && existingDecision !== decision
         ? `분석 규칙을 저장했습니다. 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
         : '분석 규칙을 저장했습니다.', 'success')
+
+      // A rule is the deterministic automation, while a workflow is the
+      // engineer's reusable search order and purpose. Creating the review at
+      // save time keeps the two together even when the result was already
+      // inferred before the engineer opened the rule editor.
+      const api = electronApi()
+      const source = resolveProjectSource({ artifacts: projectSources }, activeFile)
+      if (api?.nativeAgent && source && projectId !== 'log-workbench' && selectedRecipeObservations.length >= 2) {
+        void api.nativeAgent.completeEvaluation({
+          projectId,
+          sourceId: source.sourceId,
+          result: (existingDecision ?? decision) as WorkbenchDecision,
+          evidenceLines,
+          ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
+          workflowSelection: selectedRecipeObservations.map((observation) => ({
+            query: observation.query,
+            mode: observation.matcherKind,
+            caseSensitive: observation.caseSensitive,
+          })),
+        }).then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
+      }
     } catch (error) {
       onNotify?.(error instanceof Error ? `분석 규칙을 저장하지 못했습니다: ${error.message}` : '분석 규칙을 저장하지 못했습니다.', 'error')
     }
@@ -2643,14 +2780,14 @@ export function WorkbenchView({
       const selectedIds = selectedRecipeObservations.map((item) => item.id)
       const candidate = buildWorkbenchRule(activeFile.id, decision)
       if (!candidate) throw new Error('미리 적용할 검색 근거가 없습니다.')
-      const ruleMap = new Map<string, RecipeRule>()
-      const availableRules = durableRecipes ? activeDurableRules : (durableRules ?? savedRecipes.flatMap((recipe) => recipe.rules))
-      availableRules.forEach((rule) => ruleMap.set(rule.id, rule))
-      ruleMap.set(candidate.id, candidate)
-      const rules = [...ruleMap.values()]
+      // One folder is one evaluation. Preview only the rule currently being
+      // edited and only against that evaluation folder; project-level recipes
+      // must never spill into a different experiment implicitly.
+      const rules = [candidate]
+      const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])
 
       const precomputed = new Map<string, PrecomputedDocumentEvidence>()
-      const artifactRows = files.filter((file): file is WorkbenchFile & { artifactId: string } => Boolean(file.artifactId))
+      const artifactRows = batchFiles.filter((file): file is WorkbenchFile & { artifactId: string } => Boolean(file.artifactId))
       if (artifactRows.length) {
         if (!api?.artifacts.inspectEvidence) throw new Error('데스크톱 로컬 검사 서비스를 사용할 수 없습니다.')
         const plan = buildRecipeEvidencePlan(rules)
@@ -2668,7 +2805,7 @@ export function WorkbenchView({
           precomputed.set(source.sourceId, precomputedEvidenceFromInspection(source, rules, plan))
         })
       }
-      files.filter((file) => !file.artifactId).forEach((file) => {
+      batchFiles.filter((file) => !file.artifactId).forEach((file) => {
         precomputed.set(file.id, precomputeDocumentEvidence({
           id: file.id,
           text: file.text ?? '',
@@ -2676,13 +2813,13 @@ export function WorkbenchView({
           path: file.relativePath,
         }, rules))
       })
-      const resolved = resolvePrecomputedBatch(files, rules, precomputed, { ...decisions, ...savedDecisions })
+      const resolved = resolvePrecomputedBatch(batchFiles, rules, precomputed, { ...decisions, ...savedDecisions })
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return
       await onBatchResults?.(resolved)
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return
       setBatchPreview({ status: 'done', ...resolved })
       setRecipeVisible(false)
-      onNotify?.(`${resolved.matched}개 로그를 로컬 규칙으로 분류했습니다. 예외 ${resolved.exceptions}개${resolved.conflicts ? ` · 기존 판정 충돌 ${resolved.conflicts}개` : ''}`, 'info')
+      onNotify?.(`현재 평가 폴더 ${resolved.matched}개 로그를 로컬 규칙으로 분류했습니다. 예외 ${resolved.exceptions}개${resolved.conflicts ? ` · 기존 판정 충돌 ${resolved.conflicts}개` : ''}`, 'info')
     } catch (error) {
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return
       const message = error instanceof Error ? error.message : '일괄 미리 적용에 실패했습니다.'
@@ -2736,6 +2873,23 @@ export function WorkbenchView({
 
   const searchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     const command = event.ctrlKey || event.metaKey
+    if (event.currentTarget === searchInputRef.current && !command && !event.altKey && event.key === 'ArrowUp' && activeSearchQueries.length) {
+      event.preventDefault()
+      if (searchHistoryIndex < 0) searchHistoryDraftRef.current = query
+      const nextIndex = Math.min(searchHistoryIndex + 1, activeSearchQueries.length - 1)
+      setSearchHistoryIndex(nextIndex)
+      resetSearchNavigation()
+      setQuery(activeSearchQueries[nextIndex])
+      return
+    }
+    if (event.currentTarget === searchInputRef.current && !command && !event.altKey && event.key === 'ArrowDown' && searchHistoryIndex >= 0) {
+      event.preventDefault()
+      const nextIndex = searchHistoryIndex - 1
+      setSearchHistoryIndex(nextIndex)
+      resetSearchNavigation()
+      setQuery(nextIndex < 0 ? searchHistoryDraftRef.current : activeSearchQueries[nextIndex])
+      return
+    }
     if (replaceMode && command && event.altKey && event.key === 'Enter') {
       event.preventDefault()
       replaceAll()
@@ -2791,18 +2945,30 @@ export function WorkbenchView({
               <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
                 {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span>
               </button>
-              <button className="search-log-row" type="button" onClick={() => openSearch('workspace')} aria-label="모든 로그 검색" title="모든 로그 검색"><Search size={18} /></button>
+              <button className="search-log-row" type="button" onClick={() => openSearch('workspace')} aria-label="프로젝트 전체 찾기" title="프로젝트 전체 찾기"><Search size={18} /></button>
             </div>
             {groupedFiles.map((group) => {
               const expanded = expandedOrigins.has(group.key)
+              // Workbench files carry the artifact-store root, while the Agent
+              // scope is the project's connected-folder root. Resolve that
+              // boundary explicitly so an old open tab cannot override the
+              // folder the engineer just selected.
+              const groupRootId = group.files.map((file) => resolveProjectSource({ artifacts: projectSources }, file)?.rootId).find(Boolean)
               return (
                 <section className="folder-group" key={group.key}>
-                  <button className="folder-heading" onClick={() => setExpandedOrigins((current) => {
-                    const next = new Set(current)
-                    if (next.has(group.key)) next.delete(group.key)
-                    else next.add(group.key)
-                    return next
-                  })} aria-expanded={expanded}>
+                  <button className={`folder-heading ${groupRootId === selectedFolderRootId ? 'selected' : ''}`} onClick={() => {
+                    const selectingDifferentFolder = groupRootId !== selectedFolderRootId
+                    onSelectedFolderChange?.(groupRootId ?? null)
+                    const targetFileId = folderSelectionTargetId(group, activeFile?.id)
+                    if (targetFileId) selectFile(targetFileId)
+                    setExpandedOrigins((current) => {
+                      const next = new Set(current)
+                      if (selectingDifferentFolder) next.add(group.key)
+                      else if (next.has(group.key)) next.delete(group.key)
+                      else next.add(group.key)
+                      return next
+                    })
+                  }} aria-expanded={expanded}>
                     {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
                     <span title={group.label}>{group.label}</span><small>{group.files.length}</small>
@@ -2820,14 +2986,14 @@ export function WorkbenchView({
         ) : (
           <div className="workspace-search-results">
             {searchError ? <div className="search-error"><AlertTriangle size={13} />{searchError}</div> : null}
-            {query && hits.length ? <>{hits.slice(0, 80).map((hit, index) => {
-              const file = files.find((item) => item.id === hit.fileId)
-              return (
-                <button className={`search-result ${index === currentHit ? 'active' : ''}`} key={`${hit.fileId}-${hit.line}-${hit.start}`} onClick={() => navigateToSearchHit(index)}>
-                  <span className="search-result-file"><FileText size={12} />{file?.name}</span>
+            {query && hits.length ? <>{groupWorkspaceSearchHits(hits).map((group) => {
+              const file = files.find((item) => item.id === group.fileId)
+              return <section className="workspace-search-group" key={group.fileId}>
+                <div className="search-result-file"><FileText size={12} /><span title={file?.name}>{file?.name}</span><small>{group.matches.length}</small></div>
+                {group.matches.map(({ hit, index }) => <button className={`search-result ${index === currentHit ? 'active' : ''}`} key={`${hit.fileId}-${hit.line}-${hit.start}`} onClick={() => navigateToSearchHit(index)}>
                   <code className="search-result-line"><b>Ln {hit.line}</b>{hit.excerpt}</code>
-                </button>
-              )
+                </button>)}
+              </section>
             })}{searchTotal > Math.min(hits.length, 80) ? <div className="search-result-limit">현재 {searchPosition.toLocaleString()}번째 부근 · 전체 {searchTotal.toLocaleString()}개</div> : null}</> : searching ? (
               <div className="empty-search"><LoaderCircle className="wb-spin" size={18} /><span>검색 중…</span></div>
             ) : (
@@ -2879,16 +3045,26 @@ export function WorkbenchView({
           </span> : null}
         </div>
 
+        {goToLineOpen ? (
+          <form className="go-to-line-widget" aria-label="줄 번호로 이동" onSubmit={(event) => { event.preventDefault(); submitGoToLine() }}>
+            <Hash size={17} />
+            <input ref={goToLineInputRef} type="number" min={1} max={activeTotalLines || undefined} step={1} value={goToLineValue} onChange={(event) => setGoToLineValue(event.target.value)} placeholder="줄 번호" aria-label="이동할 줄 번호" />
+            {activeTotalLines ? <span>/ {activeTotalLines.toLocaleString('ko-KR')}</span> : null}
+            <button type="submit" disabled={!goToLineValue || Number(goToLineValue) < 1}>이동</button>
+            <button type="button" onClick={() => setGoToLineOpen(false)} aria-label="줄 이동 닫기" title="닫기 (Escape)"><X size={17} /></button>
+          </form>
+        ) : null}
+
         {searchOpen ? (
           <div className={`find-widget ${replaceMode ? 'is-replace-mode' : ''}`} role="search" aria-label="로그 검색">
             <Search size={18} />
             <select className="find-scope-select" value={searchScope} onChange={(event) => openSearch(event.target.value as SearchScope)} aria-label="검색 범위" title="검색 범위">
-              <option value="file">현재 로그</option>
-              <option value="folder">현재 평가 폴더</option>
-              <option value="open">열린 탭</option>
-              <option value="workspace">전체 로그</option>
+              <option value="file">현재 파일</option>
+              <option value="folder">현재 평가</option>
+              <option value="open">열린 파일</option>
+              <option value="workspace">전체 프로젝트</option>
             </select>
-            <input ref={searchInputRef} value={query} onChange={(event) => { resetSearchNavigation(); setQuery(event.target.value) }} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-invalid={invalidPattern} />
+            <input ref={searchInputRef} value={query} onChange={(event) => { setSearchHistoryIndex(-1); searchHistoryDraftRef.current = event.target.value; resetSearchNavigation(); setQuery(event.target.value) }} onKeyDown={searchKeyDown} placeholder="검색어 입력" aria-label="검색어 · 위아래 방향키로 이전 검색 불러오기" aria-invalid={invalidPattern} />
             <button className={searchOptionsOpen || Object.values(options).some(Boolean) ? 'active' : ''} aria-expanded={searchOptionsOpen} onClick={() => setSearchOptionsOpen((current) => !current)} aria-label="검색 옵션" title="검색 옵션"><SlidersHorizontal size={17} /></button>
             <span className={`find-match-count ${invalidPattern || searchError ? 'invalid' : ''}`} aria-live="polite">{searching ? '검색 중…' : invalidPattern ? '식 오류' : searchError ? '검색 실패' : query ? `${searchPosition}/${searchTotal}` : '0 / 0'}</span>
             <button onClick={() => moveToHit(-1)} disabled={!hits.length} aria-label="이전 검색 결과" title="이전 결과 (Shift+Enter)"><ChevronsUp size={18} /></button>
@@ -2910,7 +3086,7 @@ export function WorkbenchView({
           </div>
         ) : null}
 
-        <div className="log-editor" ref={editorRef} onScroll={handleEditorScroll} tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
+        <div className={`log-editor ${wordWrap ? 'is-wrapped' : ''}`} ref={editorRef} onScroll={handleEditorScroll} tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
           {activeFile && activeLines.length ? activeLines.map((line) => {
             const lineNumber = line.lineNumber
             const isEvidence = evidenceLines.includes(lineNumber)
@@ -2928,9 +3104,12 @@ export function WorkbenchView({
 
         <footer className="editor-statusbar">
           <span className="status-spacer" />
-          <button onClick={() => openSearch('file')}><Search size={14} />현재 로그 찾기 <kbd>Ctrl F</kbd></button>
-          <button onClick={() => openSearch('open')}><Search size={14} />열린 탭 찾기 <kbd>Ctrl Alt F</kbd></button>
-          <button onClick={() => openSearch('workspace')}><SearchCode size={14} />전체 로그 찾기 <kbd>Ctrl Shift F</kbd></button>
+          {onOpenAgent ? <button onClick={onOpenAgent}><Sparkles size={14} />Agent</button> : null}
+          <button className={wordWrap ? 'active' : ''} aria-pressed={wordWrap} onClick={() => setWordWrap((current) => !current)}><WrapText size={14} />줄 바꿈 <kbd>Alt Z</kbd></button>
+          <button onClick={openGoToLine}><Hash size={14} />줄 이동 <kbd>Ctrl G</kbd></button>
+          <button onClick={() => openSearch('file')} title="현재 파일에서 찾기"><Search size={14} />찾기 <kbd>Ctrl F</kbd></button>
+          <button onClick={() => openSearch('open')} title="열린 파일에서 찾기"><Search size={14} />열린 파일 <kbd>Ctrl Alt F</kbd></button>
+          <button onClick={() => openSearch('workspace')} title="프로젝트 전체에서 찾기"><SearchCode size={14} />전체 프로젝트 <kbd>Ctrl Shift F</kbd></button>
         </footer>
       </main>
 
@@ -2969,48 +3148,48 @@ export function WorkbenchView({
               </section>
 
               {workflowReview ? (
-                <section className="workflow-confirmation" aria-label="이번 분석 목적 확인">
-                  <div><strong>이번 분석</strong><span>{workflowStages.map(engineerStageLabel).join(' → ') || '검색 선택 필요'}</span></div>
-                  <div className="workflow-checks" aria-label="기억할 검색 순서">
-                    <span>기억할 검색 · 위에서 아래 순서</span>
+                <section className="workflow-confirmation" aria-label="검색 절차 저장">
+                  <div><strong>검색 절차 저장</strong><span>{workflowStages.map(engineerStageLabel).join(' → ') || '검색 선택 필요'}</span></div>
+                  <div className="workflow-checks" aria-label="판정에 사용할 검색 순서">
+                    <span>판정에 사용할 검색 순서</span>
                     {workflowReview.checks.map((check) => {
                       const key = engineerWorkflowCheckKey(check)
                       const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
                       const selected = selectedIndex >= 0
                       return <div className={selected ? 'selected' : ''} key={key}>
                         <button type="button" aria-pressed={selected} onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))}><i aria-hidden="true">{selected ? <Check size={11} /> : null}</i><code>{check.query}</code><small>{check.matchCount > 0 ? `${check.matchCount}회` : '없음'}</small></button>
-                        {selected ? <span><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}>↑</button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}>↓</button></span> : null}
+                        {selected ? <span><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}><ArrowUp size={13} /></button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}><ArrowDown size={13} /></button></span> : null}
                       </div>
                     })}
                   </div>
-                  <p>어떤 목적이었나요?</p>
+                  <p>평가 목적</p>
                   <div className="workflow-purpose-options">
                     {workflowReview.suggestions.filter((item) => item !== '직접 입력').map((item) => (
                       <button type="button" className={workflowPurpose === item ? 'active' : ''} aria-pressed={workflowPurpose === item} onClick={() => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: item }))} key={item}><i aria-hidden="true" />{item}</button>
                     ))}
                   </div>
                   <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
-                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
+                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}절차 저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>저장하지 않음</button></div>
                 </section>
               ) : null}
 
-              <section className="pattern-review" aria-label="AI 패턴 검토">
+              <section className="pattern-review" aria-label="AI 로그 검토">
                 <div className="pattern-review-heading">
-                  <div><strong>AI 패턴 검토</strong></div>
+                  <div><strong>AI 로그 검토</strong></div>
                   <SearchCode size={15} />
                 </div>
                 <textarea
                   value={patternReviewComment}
                   onChange={(event) => setPatternReviewComment(event.target.value.slice(0, 160))}
-                  placeholder="검토 메모 (선택)"
+                  placeholder="확인할 내용 (선택)"
                   maxLength={160}
                   rows={2}
                   disabled={patternReviewBusy}
-                  aria-label="AI 패턴 검토 코멘트"
+                  aria-label="AI 로그 검토 요청"
                 />
                 <div className="pattern-review-actions">
                   <button className="pattern-review-start" onClick={() => void startPatternReview()} disabled={!patternReviewAvailable || patternReviewBusy}>
-                    <SearchCode size={13} /> 검토 실행
+                    <SearchCode size={13} /> AI로 검토
                   </button>
                   {patternReviewBusy && patternReview.jobId ? <button className="pattern-review-cancel" onClick={() => void cancelPatternReview()} disabled={patternReview.status === 'cancelling'}>취소</button> : null}
                 </div>
@@ -3069,13 +3248,13 @@ export function WorkbenchView({
                 <div className="evidence-hint"><span>줄 왼쪽을 눌러 다시 볼 원문을 표시하세요.</span></div>
               )}
 
-              {!recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
-                <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><strong>분석 규칙 저장</strong></button>
+              {!workflowReview && !recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
+                <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><strong>판정 규칙 만들기</strong></button>
               ) : null}
 
-              {recipeVisible && draft ? (
+              {!workflowReview && recipeVisible && draft ? (
                 <section className="recipe-suggestion">
-                  <div className="recipe-title"><div><strong>분석 규칙</strong><span>판정에 사용할 검색을 선택하세요</span></div><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
+                  <div className="recipe-title"><div><strong>판정 규칙</strong><span>판정에 사용할 검색을 선택하세요</span></div><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
                     {recipeObservations.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
@@ -3103,7 +3282,7 @@ export function WorkbenchView({
                   </div>
                   <div className="recipe-actions">
                     <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Braces size={14} />}{recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장됨' : '규칙 저장'}</button>
-                    <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : recipeEvidenceBusy ? '파일 검사 중' : '전체에 미리 적용'}</button>
+                    <button onClick={() => void applyBatch()} disabled={batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' ? <LoaderCircle className="wb-spin" size={13} /> : <Play size={13} />}{batchPreview.status === 'running' ? '로컬 계산 중' : recipeEvidenceBusy ? '파일 검사 중' : '현재 폴더에 미리 적용'}</button>
                   </div>
                 </section>
               ) : null}
@@ -3139,7 +3318,7 @@ export function WorkbenchView({
                     <div className="recipe-manager-item-top"><div><strong>{recipe.name}</strong><span>r{recipe.revision} · {recipe.rules.length}개 결과 규칙</span></div><button type="button" className="recipe-archive" onClick={() => void archiveRecipe(recipe.recipeId)}>보관</button></div>
                     {recipe.rules.map((rule) => <div className="recipe-manager-rule" key={rule.id}>
                       <div><b>{rule.label}</b><span>{rule.clauses.map((clause) => clause.matcher.pattern).join(' · ') || '조건 없음'}</span></div>
-                      <button type="button" onClick={() => loadRecipeIntoDraft(recipe, rule as RecipeRule)}>현재 파일에 불러오기</button>
+                      <button type="button" onClick={() => loadRecipeIntoDraft(recipe, rule as RecipeRule)}>불러와서 수정</button>
                     </div>)}
                   </section>
                 )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
