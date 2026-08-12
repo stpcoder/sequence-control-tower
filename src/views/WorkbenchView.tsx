@@ -68,6 +68,7 @@ import {
   recalculateClauseOrder,
 } from '../domain/workbench'
 import type { MetadataSuggestionField } from '../../electron/shared/contracts'
+import { searchAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
 import {
   loadLogWorkbenchState,
   logWorkbenchStorageKey,
@@ -142,6 +143,7 @@ export interface WorkbenchViewProps {
   onImportProjectFolder?: () => Promise<{ cancelled: true } | { cancelled: false; importedCount: number; failureCount: number; skippedCount: number }>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   onOpenAgent?: () => void
+  onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
   projectId?: string
   projectSources?: readonly ProjectSnapshot['artifacts'][number][]
 }
@@ -1065,6 +1067,7 @@ export function WorkbenchView({
   onImportProjectFolder,
   onNotify,
   onOpenAgent,
+  onAnalyzeContext,
   projectId = 'log-workbench',
   projectSources = [],
 }: WorkbenchViewProps) {
@@ -1334,6 +1337,12 @@ export function WorkbenchView({
   const searchPosition = hits.length
     ? currentHit + 1 + (backendDetailOffset > 0 ? memoryHits.length + backendDetailOffset : 0)
     : 0
+  const searchAgentFileIds = useMemo(() => searchFiles.flatMap((file) => {
+    const matched = file.artifactId
+      ? (backendCounts[file.id] ?? 0) > 0
+      : memoryHits.some((hit) => hit.fileId === file.id)
+    return matched ? [file.id] : []
+  }), [backendCounts, memoryHits, searchFiles])
   const activeBatchEvaluation = batchPreview.evaluations?.[activeFile?.id ?? '']
   const activeBatchConflict = batchPreview.conflictIds?.includes(activeFile?.id ?? '') ?? false
   const patternReviewBusy = patternReview.status === 'starting'
@@ -2929,14 +2938,27 @@ export function WorkbenchView({
       <aside className="workbench-sidebar">
         <header>
           <div><strong>{sideMode === 'search' ? '검색 결과' : showBatchExceptions ? '예외 로그' : '로그'}</strong></div>
-          {sideMode === 'search' || showBatchExceptions ? <button
+          {sideMode === 'search' || showBatchExceptions ? <div className="workbench-sidebar-actions">{sideMode === 'search' && query && searchTotal > 0 && onAnalyzeContext ? <button
+            className="search-agent-action"
+            onClick={() => onAnalyzeContext(searchAgentContext({
+              query,
+              scopeLabel: searchScope === 'file' ? '현재 파일' : searchScope === 'folder' ? '현재 평가' : searchScope === 'open' ? '열린 파일' : '전체 프로젝트',
+              matchCount: searchTotal,
+              fileIds: searchAgentFileIds,
+              regex: options.regex,
+              caseSensitive: options.caseSensitive,
+              wholeWord: options.wholeWord,
+            }))}
+            aria-label="검색 결과를 Agent로 분석"
+            title="검색 결과를 Agent로 분석"
+          ><Sparkles size={14} /><span>AI</span></button> : null}<button
             onClick={() => {
               if (sideMode === 'search') setSideMode('files')
               else setShowBatchExceptions(false)
             }}
             aria-label="로그 목록으로 돌아가기"
             title="로그 목록으로 돌아가기"
-          ><X size={18} /></button> : null}
+          ><X size={18} /></button></div> : null}
         </header>
 
         {sideMode === 'files' ? (

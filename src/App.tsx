@@ -13,7 +13,8 @@ import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
 import { SettingsView } from './views/SettingsView'
 import { ProjectControl } from './components/ProjectControl'
-import { AgentPanel, type EvaluationAgentLaunchRequest } from './components/AgentPanel'
+import { AgentPanel, type EvaluationAgentLaunchRequest, type NativeAgentLaunchRequest } from './components/AgentPanel'
+import type { AgentAnalysisContextRequest } from './domain/analysis-context'
 import {
   artifactFiles,
   DEMO_LOGS,
@@ -324,6 +325,7 @@ export default function App() {
   const [selectedEvaluationRootId, setSelectedEvaluationRootId] = useState<string | undefined>()
   const [agentOpen, setAgentOpen] = useState(false)
   const [evaluationAgentLaunch, setEvaluationAgentLaunch] = useState<EvaluationAgentLaunchRequest | null>(null)
+  const [nativeAgentLaunch, setNativeAgentLaunch] = useState<NativeAgentLaunchRequest | null>(null)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -764,6 +766,47 @@ export default function App() {
     navigate('workbench')
   }, [navigate])
 
+  const launchAgentContext = useCallback((request: AgentAnalysisContextRequest) => {
+    const currentProject = projectRef.current
+    if (!currentProject) {
+      notify('Agent 분석을 시작할 프로젝트를 먼저 선택하세요.', 'info')
+      return
+    }
+    const resolved = request.fileIds.flatMap((fileId) => {
+      const file = filesRef.current.find((item) => item.id === fileId)
+      const source = file ? resolveProjectSource(currentProject, file) : null
+      return source ? [source] : []
+    })
+    const unique = [...new Map(resolved.map((source) => [source.sourceId, source])).values()]
+    if (!unique.length) {
+      notify('Agent에게 전달할 프로젝트 로그를 찾지 못했습니다.', 'error')
+      return
+    }
+    const selected = unique.slice(0, 100)
+    const roots = [...new Set(selected.map((source) => source.rootId))]
+    const evaluationScopeId = roots.length === 1 ? roots[0] : undefined
+    setSelectedEvaluationRootId(evaluationScopeId)
+    setNativeAgentLaunch({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: request.title,
+      prompt: unique.length > selected.length ? `${request.prompt}\n\n전체 ${unique.length.toLocaleString('ko-KR')}개 중 Agent 한도에 맞춰 앞 ${selected.length}개 로그를 확인합니다.` : request.prompt,
+      sourceIds: selected.map((source) => source.sourceId),
+      ...(evaluationScopeId ? { evaluationScopeId } : {}),
+    })
+    setAgentOpen(true)
+  }, [notify])
+
+  const openProjectSource = useCallback((sourceId: string) => {
+    const currentProject = projectRef.current
+    const source = currentProject?.artifacts.find((item) => item.sourceId === sourceId)
+    const file = source ? filesRef.current.find((item) => matchesProjectSource(item, source)) : undefined
+    if (!file) {
+      notify('근거 로그를 현재 프로젝트에서 찾지 못했습니다.', 'error')
+      return
+    }
+    openFile(file.id)
+  }, [notify, openFile])
+
   const memorySaveQueue = useRef<ReturnType<typeof createLatestProjectSaveQueue<ProjectSnapshot, EvaluationMemory>> | null>(null)
   if (!memorySaveQueue.current) {
     memorySaveQueue.current = createLatestProjectSaveQueue(
@@ -838,13 +881,14 @@ export default function App() {
       onImportProjectFolder={project ? importProjectFolder : undefined}
       onNotify={notify}
       onOpenAgent={() => setAgentOpen(true)}
+      onAnalyzeContext={launchAgentContext}
       projectId={project?.id ?? PROJECT_ID}
       projectSources={project?.artifacts ?? []}
     />
   ) : activePage === 'results' ? (
-    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} />
+    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} onAnalyzeContext={launchAgentContext} />
   ) : activePage === 'patterns' ? (
-    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} />
+    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} />
   ) : activePage === 'history' ? (
     <EvaluationMemoryView
       memory={memory}
@@ -887,6 +931,8 @@ export default function App() {
         onSnapshotSaved={(snapshot) => acceptEvaluationSnapshot(snapshot)}
         onProjectUpdated={projectUpdated}
         evaluationLaunchRequest={evaluationAgentLaunch}
+        nativeLaunchRequest={nativeAgentLaunch}
+        onOpenSource={openProjectSource}
       /> : null}
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

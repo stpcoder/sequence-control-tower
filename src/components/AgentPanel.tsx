@@ -31,6 +31,8 @@ interface AgentPanelProps {
   onSnapshotSaved: (snapshot: EvaluationProjectSnapshot) => void
   onProjectUpdated: (project: ProjectSnapshot) => void
   evaluationLaunchRequest?: EvaluationAgentLaunchRequest | null
+  nativeLaunchRequest?: NativeAgentLaunchRequest | null
+  onOpenSource?: (sourceId: string) => void
 }
 
 export interface EvaluationAgentLaunchRequest {
@@ -39,6 +41,14 @@ export interface EvaluationAgentLaunchRequest {
   title: string
   sourceIds: string[]
   intent?: string
+}
+
+export interface NativeAgentLaunchRequest {
+  id: string
+  title: string
+  prompt: string
+  sourceIds: string[]
+  evaluationScopeId?: string
 }
 
 export function mergeEvaluationAgentMemory(project: ProjectSnapshot, payload: EvaluationAgentMemoryPayloadView): ProjectSnapshot {
@@ -389,7 +399,7 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [evaluationRunScopeId, setEvaluationRunScopeId] = useState<string | undefined>()
@@ -402,6 +412,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
   const [input, setInput] = useState('')
   const [evaluationAnswer, setEvaluationAnswer] = useState('')
   const [mentionedSourceIds, setMentionedSourceIds] = useState<string[]>([])
+  const [nativeContextSourceIds, setNativeContextSourceIds] = useState<string[]>([])
+  const [pendingNativeLaunch, setPendingNativeLaunch] = useState<{ sessionId: string; prompt: string; sourceIds: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [savedMessage, setSavedMessage] = useState('')
@@ -412,6 +424,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
   const threadRef = useRef<HTMLDivElement>(null)
   const followLatestRef = useRef(true)
   const handledEvaluationLaunch = useRef<string | null>(null)
+  const handledNativeLaunch = useRef<string | null>(null)
   const restoredEvaluationScope = useRef('')
   const activeRunId = useRef<string | null>(null)
   const projectRef = useRef<ProjectSnapshot | null>(project)
@@ -461,6 +474,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setRelationChoice('suggested')
     setRelationEditorOpen(false)
     setMentionedSourceIds([])
+    setNativeContextSourceIds([])
+    setPendingNativeLaunch(null)
     restoredEvaluationScope.current = ''
   }, [projectKey])
 
@@ -482,6 +497,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setRelationChoice('suggested')
     setRelationEditorOpen(false)
     setMentionedSourceIds((current) => current.filter((sourceId) => project?.artifacts.some((source) => source.sourceId === sourceId)))
+    setNativeContextSourceIds([])
+    setPendingNativeLaunch(null)
     restoredEvaluationScope.current = ''
   }, [projectScopeKey])
 
@@ -636,20 +653,26 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     } catch (reason) { setBusy(false); setError(boundedError(reason)) }
   }
 
-  const createNativeSession = async () => {
+  const createNativeSession = async (request?: Pick<NativeAgentLaunchRequest, 'title' | 'sourceIds' | 'evaluationScopeId'>) => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return null
     const startedScope = projectScopeKey
+    const requestedScopeId = request ? request.evaluationScopeId : evaluationScopeId
+    const requestedSourceIds = request?.sourceIds?.length
+      ? [...new Set(request.sourceIds)].slice(0, 100)
+      : evaluationSources.slice(0, 100).map((source) => source.sourceId)
     followLatestRef.current = true
     setBusy(true); setError(''); setSavedMessage(''); setNativeHistoryOpen(false)
     try {
       const next = await api.create({
         projectId: project.id,
-        ...(evaluationScopeId ? { evaluationScopeId } : {}),
-        sourceIds: evaluationSources.slice(0, 100).map((source) => source.sourceId),
+        ...(request?.title ? { title: request.title } : {}),
+        ...(requestedScopeId ? { evaluationScopeId: requestedScopeId } : {}),
+        sourceIds: requestedSourceIds,
       })
       if (projectScopeKeyRef.current !== startedScope) return null
       setNativeSession(next)
+      setNativeContextSourceIds(request ? requestedSourceIds : [])
       setNativeSessions((current) => [{ ...next }, ...current.filter((item) => item.id !== next.id)])
       return next
     } catch (reason) { setError(boundedError(reason)); return null }
@@ -664,24 +687,30 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     const startedScope = projectScopeKey
     try {
       const next = await api.get({ sessionId })
-      if (next && projectScopeKeyRef.current === startedScope) setNativeSession(next)
+      if (next && projectScopeKeyRef.current === startedScope) { setNativeSession(next); setNativeContextSourceIds([]) }
     }
     catch (reason) { setError(boundedError(reason)) }
     finally { setBusy(false) }
   }
 
-  const sendNativeText = async (content: string) => {
+  const sendNativeText = async (content: string, targetSession?: NativeAgentSessionView, sourceOverride?: readonly string[]) => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return
     if (!hasMeaningfulAgentMessage(content)) { setError('질문이나 확인할 로그 조건을 입력해 주세요.'); return }
     const startedScope = projectScopeKey
-    let target = nativeSession
+    let target = targetSession ?? nativeSession
     if (!target) target = await createNativeSession()
     if (!target) return
     followLatestRef.current = true
     setBusy(true); setError(''); setInput(''); setNativeHistoryOpen(false)
     try {
-      const sourceIds = mentionedSourceIds.length ? mentionedSourceIds : evaluationSources.slice(0, 100).map((source) => source.sourceId)
+      const sourceIds = sourceOverride?.length
+        ? [...new Set(sourceOverride)].slice(0, 100)
+        : mentionedSourceIds.length
+          ? mentionedSourceIds
+          : nativeContextSourceIds.length
+            ? nativeContextSourceIds
+            : evaluationSources.slice(0, 100).map((source) => source.sourceId)
       const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: sourceIds.length ? sourceIds : undefined })
       if (projectScopeKeyRef.current === startedScope) {
         setNativeSession(next)
@@ -736,6 +765,29 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     handledEvaluationLaunch.current = evaluationLaunchRequest.id
     void startProjectTrend(evaluationLaunchRequest.sourceIds, evaluationLaunchRequest.evaluationScopeId, evaluationLaunchRequest.intent)
   }, [busy, evaluationLaunchRequest?.id, open, project?.id])
+
+  useEffect(() => {
+    if (!open || !nativeLaunchRequest || !project || busy || handledNativeLaunch.current === nativeLaunchRequest.id) return
+    handledNativeLaunch.current = nativeLaunchRequest.id
+    setEvaluationRun(null)
+    setEvaluationRunScopeId(undefined)
+    void (async () => {
+      const target = await createNativeSession(nativeLaunchRequest)
+      if (!target) return
+      if (target.question) {
+        setPendingNativeLaunch({ sessionId: target.id, prompt: nativeLaunchRequest.prompt, sourceIds: nativeLaunchRequest.sourceIds })
+        return
+      }
+      await sendNativeText(nativeLaunchRequest.prompt, target, nativeLaunchRequest.sourceIds)
+    })()
+  }, [busy, nativeLaunchRequest?.id, open, project?.id])
+
+  useEffect(() => {
+    if (!pendingNativeLaunch || !nativeSession || nativeSession.id !== pendingNativeLaunch.sessionId || nativeSession.question || nativeSession.status !== 'idle' || busy) return
+    const pending = pendingNativeLaunch
+    setPendingNativeLaunch(null)
+    void sendNativeText(pending.prompt, nativeSession, pending.sourceIds)
+  }, [busy, nativeSession?.id, nativeSession?.question?.id, nativeSession?.status, pendingNativeLaunch?.sessionId])
 
   const resumeProjectTrend = async (input: { answer?: string; confirm?: 'accept' | 'reject' }) => {
     if (!evaluationRun || busy || !window.sequenceIntelligence?.evaluationAgent) return
@@ -872,13 +924,16 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
 
   const projectPending = evaluationRun?.status === 'running' || evaluationRun?.status === 'paused'
   const projectCanStart = Boolean(project && evaluationSources.length && window.sequenceIntelligence?.evaluationAgent)
-  const folderScopeRequired = Boolean(project?.artifacts.length && !evaluationScopeId)
+  const folderScopeRequired = Boolean(project?.artifacts.length && !evaluationScopeId && !nativeContextSourceIds.length)
   const currentNativeTools = nativeSession ? toolsForCurrentAgentRun(nativeSession) : []
   const evaluationReviewActive = Boolean(evaluationStarting || evaluationRun)
   const evaluationProposalSaved = isEvaluationProposalSaved(evaluationRun, savedEvaluationRunId)
   const scope = project ? 'project' as const : 'current' as const
   const slashMatch = /(^|\s)\/([^\s/]*)$/.exec(input)
-  const fileMentions = slashMatch && project ? evaluationSources.filter((artifact) => {
+  const composerSources = nativeContextSourceIds.length && project
+    ? project.artifacts.filter((artifact) => nativeContextSourceIds.includes(artifact.sourceId))
+    : evaluationSources
+  const fileMentions = slashMatch && project ? composerSources.filter((artifact) => {
     const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath
     return name.toLocaleLowerCase().includes(slashMatch[2].toLocaleLowerCase())
   }).slice(0, 6) : []
@@ -916,9 +971,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
           return <div key={message.id} className="native-agent-turn">
             {message.role === 'assistant' && evidenceTools.length ? <details className="native-agent-tools"><summary><Wrench size={12} />확인 과정</summary>{evidenceTools.map((tool) => <div key={tool.id} className={tool.state}><span>{tool.label}</span><small>{tool.state === 'running' ? '확인 중' : tool.summary ?? tool.state}</small></div>)}</details> : null}
             <div className={`native-agent-message ${message.role}`} aria-label={message.role === 'user' ? '내 메시지' : message.role === 'assistant' ? 'Agent 응답' : '기록'}>{message.role === 'assistant' ? <AgentMarkdown>{message.content}</AgentMarkdown> : <p>{message.content}</p>}</div>
+            {message.role === 'assistant' && onOpenSource && message.evidenceSourceIds?.length ? <div className="native-agent-evidence-links" aria-label="응답 근거 로그">{[...new Set(message.evidenceSourceIds)].slice(0, 3).map((sourceId) => { const source = project?.artifacts.find((item) => item.sourceId === sourceId); const name = source?.relativePath.split(/[\\/]/).at(-1) ?? '근거 로그'; return <button type="button" key={sourceId} title={source?.relativePath ?? name} onClick={() => onOpenSource(sourceId)}><FileText size={12} />{name}</button> })}{message.evidenceSourceIds.length > 3 ? <span>+{message.evidenceSourceIds.length - 3}</span> : null}</div> : null}
           </div>
         })}
-        {nativeSession.question ? <div className="native-agent-question"><AgentMarkdown>{nativeSession.question.prompt}</AgentMarkdown><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div></div> : null}
+        {nativeSession.question ? <div className="native-agent-question"><AgentMarkdown>{nativeSession.question.prompt}</AgentMarkdown><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div>{pendingNativeLaunch?.sessionId === nativeSession.id ? <small className="agent-pending-context">답변 후 선택한 범위를 분석합니다.</small> : null}</div> : null}
         {nativeSession.status === 'running' && currentNativeTools.length ? <div className="native-agent-running-tools" role="status" aria-label="Agent 근거 확인 상태">{currentNativeTools.map((tool) => <div key={tool.id}><Check size={12} /><span>{tool.label}</span>{tool.summary ? <small>{tool.summary}</small> : null}</div>)}</div> : null}
         {shouldShowNativeAgentSuggestions(nativeSession) ? <div className="native-agent-suggestions"><button onClick={() => void startProjectTrend()} disabled={!projectCanStart || busy}>결과와 평가 이력 정리</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')} disabled={busy}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')} disabled={busy}>과거 사례와 다음 평가</button></div> : null}
       </> : null}
@@ -939,7 +995,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
       <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>
     </form> : evaluationReviewActive ? null : <form className="agent-composer native" onSubmit={(event) => { event.preventDefault(); void sendNativeText(input) }}>
       {fileMentions.length ? <div className="agent-file-mentions" role="listbox" aria-label="파일 지정">{fileMentions.map((artifact) => { const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath; return <button type="button" role="option" key={artifact.sourceId} onClick={() => chooseFileMention(artifact.sourceId)}><span>{name}</span><small>{artifact.relativePath}</small></button> })}</div> : null}
-      {mentionedSourceIds.length ? <div className="agent-selected-files" aria-label="지정한 파일">{mentionedSourceIds.flatMap((sourceId) => { const artifact = evaluationSources.find((item) => item.sourceId === sourceId); if (!artifact) return []; const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath; return [<span key={sourceId} title={artifact.relativePath}><FileText size={12} /><b>{name}</b><button type="button" onClick={() => setMentionedSourceIds((current) => current.filter((item) => item !== sourceId))} aria-label={`${name} 지정 해제`}><X size={12} /></button></span>] })}</div> : null}
+      {mentionedSourceIds.length ? <div className="agent-selected-files" aria-label="지정한 파일">{mentionedSourceIds.flatMap((sourceId) => { const artifact = composerSources.find((item) => item.sourceId === sourceId); if (!artifact) return []; const name = artifact.relativePath.split(/[\\/]/).at(-1) ?? artifact.relativePath; return [<span key={sourceId} title={artifact.relativePath}><FileText size={12} /><b>{name}</b><button type="button" onClick={() => setMentionedSourceIds((current) => current.filter((item) => item !== sourceId))} aria-label={`${name} 지정 해제`}><X size={12} /></button></span>] })}</div> : null}
       <textarea ref={composerRef} value={input} onChange={(event) => { setInput(event.target.value); if (error && hasMeaningfulAgentMessage(event.target.value)) setError('') }} placeholder={folderScopeRequired ? '분석할 폴더의 로그를 선택하세요' : '질문 입력 · / 로 파일 지정'} rows={2} disabled={!project || folderScopeRequired || nativeSessionsLoading || busy || nativeSession?.status === 'queued' || nativeSession?.status === 'running'} />
       <div className="agent-composer-footer"><span className="native-agent-controls"><button type="button" onClick={() => setNativeHistoryOpen((value) => !value)} aria-expanded={nativeHistoryOpen} aria-label="대화 기록" title="대화 기록" disabled={nativeSessionsLoading}><History size={17} /></button><i className={`native-agent-backend ${nativeSession?.backend ?? nativeBackend?.active ?? 'internal'}`} title={(nativeSession?.backend ?? nativeBackend?.active) === 'opencode' ? 'OpenCode' : '내장'} /><button type="button" onClick={() => void createNativeSession()} disabled={!project || nativeSessionsLoading || busy || folderScopeRequired} aria-label="새 대화" title="새 대화"><Plus size={17} /></button></span><button type="submit" aria-label="Agent에 메시지 보내기" disabled={!project || folderScopeRequired || nativeSessionsLoading || busy || !hasMeaningfulAgentMessage(input)}><ArrowUp size={18} /></button></div>
       {nativeHistoryOpen ? <div className="native-agent-history">{nativeSessions.map((item) => <button type="button" key={item.id} className={item.id === nativeSession?.id ? 'active' : ''} onClick={() => void openNativeSession(item.id)} disabled={busy}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></button>)}{!nativeSessions.length ? <p>저장된 대화가 없습니다.</p> : null}</div> : null}

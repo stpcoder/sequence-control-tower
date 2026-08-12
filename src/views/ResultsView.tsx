@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
@@ -36,6 +36,7 @@ import {
   resultExportLayoutFromPreset,
   resultExportLayoutPreset,
 } from '../state/resultExportLayout'
+import { resultRowsAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
 
 interface ResultsViewProps {
   records: readonly LogResultRecord[]
@@ -46,6 +47,7 @@ interface ResultsViewProps {
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   project: ProjectSnapshot | null
   onProjectUpdated: (project: ProjectSnapshot) => void
+  onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
 }
 
 const PAGE_SIZE = 200
@@ -91,7 +93,7 @@ function candidateLabel(field: CandidateValue, suffix = '', onOpen?: () => void)
   return <button className={`candidate-value candidate-action ${field.state}`} title="값 검토" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
 }
 
-export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMetadata, onResetMetadata, onNotify, project, onProjectUpdated }: ResultsViewProps) {
+export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMetadata, onResetMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext }: ResultsViewProps) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<ResultLabel | 'all'>('all')
   const [review, setReview] = useState<ReviewState | 'all'>('all')
@@ -346,7 +348,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
       </div>
 
       <footer className="data-pagination">
-        <span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>
+        <div className="data-pagination-status"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>{selectedRows.length && onAnalyzeContext ? <button className="data-agent-action" type="button" onClick={() => onAnalyzeContext(resultRowsAgentContext(selectedRows))}><Sparkles size={15} />Agent로 비교</button> : null}</div>
         <div><button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>이전</button><span>{currentPage} / {pageCount}</span><button onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={currentPage === pageCount}>다음</button></div>
       </footer>
       {editingCell && editingRow ? <MetadataReviewDialog

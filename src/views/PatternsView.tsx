@@ -16,6 +16,7 @@ import {
   Plus,
   Save,
   Share2,
+  Sparkles,
   X,
 } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
@@ -47,6 +48,7 @@ import {
   patternLayoutPreset,
   type PatternLayout,
 } from '../state/patternLayout'
+import { pivotSelectionAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
 
 interface PatternsViewProps {
   records: readonly LogResultRecord[]
@@ -54,6 +56,7 @@ interface PatternsViewProps {
   project: ProjectSnapshot | null
   onProjectUpdated: (project: ProjectSnapshot) => void
   onNotify: (message: string, tone?: 'success' | 'error' | 'info') => void
+  onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
@@ -277,7 +280,7 @@ export function isProjectRevisionConflict(error: unknown): boolean {
   return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
 }
 
-export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify }: PatternsViewProps) {
+export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify, onAnalyzeContext }: PatternsViewProps) {
   const [rowAxes, setRowAxes] = useState<PatternLayout['rowAxes']>(DEFAULT_PATTERN_LAYOUT.rowAxes)
   const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
   const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
@@ -349,6 +352,16 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }, [grid, scopedRecords, selectedCellKey, selectedSourceIds])
 
   const visibleRows = useMemo(() => selectedSourceIds ? scopedRecords.filter((row) => selectedSourceIds.has(row.id)) : scopedRecords, [scopedRecords, selectedSourceIds])
+  const selectedCell = useMemo(() => {
+    if (!selectedCellKey) return null
+    for (let rowIndex = 0; rowIndex < grid.rows.length; rowIndex += 1) {
+      for (let columnIndex = 0; columnIndex < grid.columns.length; columnIndex += 1) {
+        const row = grid.rows[rowIndex], column = grid.columns[columnIndex]
+        if (`${row.key}-${column.key}` === selectedCellKey) return { row, column, cell: grid.cells[rowIndex][columnIndex] }
+      }
+    }
+    return null
+  }, [grid, selectedCellKey])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = selectedCellKey !== null
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
@@ -437,6 +450,24 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     closeShareMenu(target)
     onNotify(`${scopedRecords.length.toLocaleString()}개 로그를 분석용 CSV로 저장했습니다.`, 'success')
   }
+  const downloadSelected = (target: HTMLElement) => {
+    const columns = analysisExportColumns(visibleRows, activeDimensions)
+    downloadText(serializeLogRecordsCsv(visibleRows, columns), `${projectFileName}-selected-data.csv`)
+    closeShareMenu(target)
+    onNotify(`${visibleRows.length.toLocaleString()}개 선택 로그를 CSV로 저장했습니다.`, 'success')
+  }
+  const analyzeSelection = () => {
+    if (!onAnalyzeContext || !selectedCell) return
+    onAnalyzeContext(pivotSelectionAgentContext({
+      rows: visibleRows,
+      rowAxes,
+      columnAxes,
+      rowValues: selectedCell.row.values,
+      columnValues: selectedCell.column.values,
+      aggregation,
+      displayValue: formatPivotValue(selectedCell.cell.value, aggregation),
+    }))
+  }
 
   return <div className="data-view patterns-view">
     <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar">
@@ -444,6 +475,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         <div className="pattern-share-summary"><strong>{rowLabels.join(' · ')} × {columnAxes.length ? columnAxes.map((axis) => DIMENSION_LABEL[axis]).join(' · ') : '전체'}</strong><span>{AGGREGATIONS.find((item) => item.value === aggregation)?.label}</span></div>
         <button type="button" onClick={(event) => void copyPivot(event.currentTarget)}><Clipboard size={16} /><span><b>표 복사</b><small>Excel·메신저에 붙여넣기</small></span></button>
         <button type="button" onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 가로·세로 구성</small></span></button>
+        {hasSelection ? <button type="button" onClick={(event) => downloadSelected(event.currentTarget)}><Download size={16} /><span><b>선택 로그 CSV</b><small>선택한 셀의 원본 행</small></span></button> : null}
         <button type="button" onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>분석용 원본 CSV</b><small>Spotfire용 · 로그 1개당 1행</small></span></button>
       </div></details>
       <button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Save size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>
@@ -483,7 +515,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       </section>
 
       <section className="pattern-section marked-rows" aria-labelledby="marked-heading">
-        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? '선택한 로그' : '원본 로그'}</h2></div>
+        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? `선택한 로그 ${visibleRows.length.toLocaleString()}개` : '원본 로그'}</h2>{hasSelection ? <div className="pattern-selection-actions">{onAnalyzeContext ? <button type="button" onClick={analyzeSelection}><Sparkles size={15} />Agent로 해석</button> : null}<button type="button" onClick={clearSelection}><X size={15} />선택 해제</button></div> : null}</div>
         <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>확인 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
       </section>
     </>}
