@@ -828,6 +828,49 @@
 .pattern-metrics button:hover { color: #fff; }
 .pattern-metrics button.active { color: #f5f7fb; background: #303744; }
 
+.pattern-metric-more { position: relative; }
+
+.pattern-metric-more > summary {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--data-muted);
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pattern-metric-more > summary::-webkit-details-marker { display: none; }
+.pattern-metric-more > summary:hover,
+.pattern-metric-more > summary.active,
+.pattern-metric-more[open] > summary { color: #f5f7fb; background: #303744; }
+.pattern-metric-more[open] > summary svg { transform: rotate(180deg); }
+
+.pattern-metric-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 154px;
+  padding: 5px;
+  border: 1px solid var(--sct-line-strong);
+  border-radius: 8px;
+  background: #1b1f26;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .34);
+}
+
+.pattern-metric-menu button {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  text-align: left;
+}
+
 .pattern-metric-note {
   margin: 2px 0 0;
   color: #8f98a5;

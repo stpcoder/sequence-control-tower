@@ -17,7 +17,7 @@ export type PatternLayout = {
 }
 
 export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
-  rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'fail_rate',
+  rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'pass_fail',
   resultFilter: 'all', folderFilter: 'all', failOnly: false, unknownMetadataOnly: false,
 }
 

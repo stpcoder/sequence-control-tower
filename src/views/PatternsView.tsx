@@ -102,14 +102,17 @@ const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
   result: 'result', review: 'review', folder: 'folder', run: 'run',
 }
 const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
-  { value: 'count', label: '로그 파일 수' },
+  { value: 'pass_fail', label: 'PASS / FAIL' },
+  { value: 'fail_rate', label: 'FAIL률' },
+  { value: 'count', label: '로그 수' },
   { value: 'sample_count', label: 'Sample 수' },
   { value: 'grid_count', label: 'Grid 수' },
   { value: 'pass_count', label: 'PASS 로그' },
   { value: 'fail_count', label: 'FAIL 로그' },
-  { value: 'pass_fail', label: 'PASS / FAIL' },
-  { value: 'fail_rate', label: 'FAIL률' },
 ]
+const PRIMARY_AGGREGATIONS = new Set<PivotAggregation>(['pass_fail', 'fail_rate', 'count'])
+const primaryAggregations = AGGREGATIONS.filter((item) => PRIMARY_AGGREGATIONS.has(item.value))
+const secondaryAggregations = AGGREGATIONS.filter((item) => !PRIMARY_AGGREGATIONS.has(item.value))
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
 
@@ -444,6 +447,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     setResultFilter('all'); setFolderFilter('all'); setFailOnly(false); setUnknownMetadataOnly(false); clearSelection()
   }
   const rowLabels = rowAxes.length ? rowAxes.map((axis) => DIMENSION_LABEL[axis]) : ['전체']
+  const secondaryAggregation = secondaryAggregations.find((item) => item.value === aggregation)
   const pivotExportOptions = aggregation === 'pass_fail' ? {
     rowTotals: grid.rows.map((row) => { const cell = rowTotalByKey.get(row.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
     columnTotals: grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
@@ -512,7 +516,12 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>조건에 맞는 로그가 없습니다.</strong><span>필터를 초기화해 보세요.</span></div> : <>
       {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
-        <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><div className="pattern-metrics" role="radiogroup" aria-label="표에 표시할 값">{AGGREGATIONS.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => { setAggregation(item.value); clearSelection() }}>{item.label}</button>)}</div></div>
+        <div className="pattern-section-heading"><h2 id="pivot-heading">분석 표</h2><div className="pattern-metrics" aria-label="표에 표시할 값">
+          {primaryAggregations.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => { setAggregation(item.value); clearSelection() }}>{item.label}</button>)}
+          <details className="pattern-metric-more"><summary className={secondaryAggregation ? 'active' : ''}>{secondaryAggregation?.label ?? '기타'}<ChevronDown size={13} /></summary><div className="pattern-metric-menu" role="radiogroup" aria-label="다른 집계 방식">
+            {secondaryAggregations.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={(event) => { setAggregation(item.value); clearSelection(); event.currentTarget.closest('details')?.removeAttribute('open') }}>{item.label}</button>)}
+          </div></details>
+        </div></div>
         <p className="pattern-metric-note">{evaluationMetricSummary(aggregation, scopedRecords)}</p>
         <div className="pattern-controls" aria-label="표 필터">
           <SelectControl label="평가" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 평가</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
