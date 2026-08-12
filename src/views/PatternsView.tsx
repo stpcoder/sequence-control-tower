@@ -26,7 +26,6 @@ import {
   EXPORT_COLUMN_DEFINITIONS,
   exportCellValue,
   filterLogRecords,
-  isPivotSelectionValid,
   RESULT_LABEL_KO,
   serializeLogRecordsCsv,
   serializePivotGridCsv,
@@ -48,7 +47,7 @@ import {
   patternLayoutPreset,
   type PatternLayout,
 } from '../state/patternLayout'
-import { pivotSelectionAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
+import { pivotSelectionsAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
 
 interface PatternsViewProps {
   records: readonly LogResultRecord[]
@@ -118,6 +117,13 @@ const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
 
 type AxisGroup = 'rows' | 'columns'
 type DraggedAxis = { group: AxisGroup; index: number }
+type MarkedPivotCell = {
+  key: string
+  row: PivotHeader
+  column: PivotHeader
+  value: number
+  sourceIds: readonly string[]
+}
 
 export type PivotColumnGroup = { key: string; label: string; span: number }
 
@@ -142,6 +148,15 @@ export function pivotRowHeaderSpan(rows: readonly PivotHeader[], rowIndex: numbe
   let span = 1
   while (rowIndex + span < rows.length && JSON.stringify(rows[rowIndex + span].values.slice(0, level + 1)) === prefix) span += 1
   return span
+}
+
+/** A plain click replaces the marking; Ctrl/Cmd/Shift click adds or removes one cell. */
+export function nextPivotMarking(current: ReadonlySet<string>, key: string, additive: boolean): Set<string> {
+  if (!additive) return current.size === 1 && current.has(key) ? new Set() : new Set([key])
+  const next = new Set(current)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
 }
 
 /** Produces a tidy, non-empty column set for Spotfire or downstream spreadsheet analysis. */
@@ -289,15 +304,14 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const [failOnly, setFailOnly] = useState(DEFAULT_PATTERN_LAYOUT.failOnly)
   const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(DEFAULT_PATTERN_LAYOUT.unknownMetadataOnly)
   const [savingLayout, setSavingLayout] = useState(false)
-  const [selectedSourceIds, setSelectedSourceIds] = useState<ReadonlySet<string> | null>(null)
-  const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null)
+  const [markedCellKeys, setMarkedCellKeys] = useState<ReadonlySet<string>>(() => new Set())
   const [draggedAxis, setDraggedAxis] = useState<DraggedAxis | null>(null)
 
   useEffect(() => {
     const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
     setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation)
     setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
-    setSelectedSourceIds(null); setSelectedCellKey(null)
+    setMarkedCellKeys(new Set())
   }, [project?.id])
 
   const saveLayout = async () => {
@@ -344,26 +358,26 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const columnHeaderRows = useMemo(() => pivotColumnHeaderRows(grid.columns, columnAxes.length), [columnAxes.length, grid.columns])
   const maxCellValue = useMemo(() => Math.max(0, ...grid.cells.flat().map((cell) => cell.value)), [grid.cells])
 
+  const pivotCells = useMemo<MarkedPivotCell[]>(() => grid.rows.flatMap((row, rowIndex) => grid.columns.map((column, columnIndex) => ({
+    key: `${row.key}-${column.key}`,
+    row,
+    column,
+    value: grid.cells[rowIndex][columnIndex].value,
+    sourceIds: grid.cells[rowIndex][columnIndex].sourceIds,
+  }))), [grid])
+  const markedCells = useMemo(() => pivotCells.filter((cell) => markedCellKeys.has(cell.key) && cell.sourceIds.length), [markedCellKeys, pivotCells])
+  const markedSourceIds = useMemo(() => new Set(markedCells.flatMap((cell) => cell.sourceIds)), [markedCells])
   useEffect(() => {
-    if (!isPivotSelectionValid(selectedCellKey, selectedSourceIds, grid, scopedRecords)) {
-      setSelectedCellKey(null)
-      setSelectedSourceIds(null)
-    }
-  }, [grid, scopedRecords, selectedCellKey, selectedSourceIds])
+    const available = new Set(pivotCells.filter((cell) => cell.sourceIds.length).map((cell) => cell.key))
+    setMarkedCellKeys((current) => {
+      const next = new Set([...current].filter((key) => available.has(key)))
+      return next.size === current.size ? current : next
+    })
+  }, [pivotCells])
 
-  const visibleRows = useMemo(() => selectedSourceIds ? scopedRecords.filter((row) => selectedSourceIds.has(row.id)) : scopedRecords, [scopedRecords, selectedSourceIds])
-  const selectedCell = useMemo(() => {
-    if (!selectedCellKey) return null
-    for (let rowIndex = 0; rowIndex < grid.rows.length; rowIndex += 1) {
-      for (let columnIndex = 0; columnIndex < grid.columns.length; columnIndex += 1) {
-        const row = grid.rows[rowIndex], column = grid.columns[columnIndex]
-        if (`${row.key}-${column.key}` === selectedCellKey) return { row, column, cell: grid.cells[rowIndex][columnIndex] }
-      }
-    }
-    return null
-  }, [grid, selectedCellKey])
+  const visibleRows = useMemo(() => markedCells.length ? scopedRecords.filter((row) => markedSourceIds.has(row.id)) : scopedRecords, [markedCells.length, markedSourceIds, scopedRecords])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
-  const hasSelection = selectedCellKey !== null
+  const hasSelection = markedCells.length > 0
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
   const allSelectedMetadataUnknown = activeDimensions.some((dimension) => scopedRecords.every((row) => {
     if (dimension === 'run') return !row.run
@@ -372,7 +386,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     const value = row.dimensions?.[dimension]
     return value === undefined || value === null || value === ''
   }))
-  const clearSelection = () => { setSelectedSourceIds(null); setSelectedCellKey(null) }
+  const clearSelection = () => setMarkedCellKeys(new Set())
 
   const setAxes = (nextRows: PivotDimension[], nextColumns: PivotDimension[]) => {
     setRowAxes(nextRows); setColumnAxes(nextColumns); clearSelection()
@@ -457,15 +471,17 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     onNotify(`${visibleRows.length.toLocaleString()}개 선택 로그를 CSV로 저장했습니다.`, 'success')
   }
   const analyzeSelection = () => {
-    if (!onAnalyzeContext || !selectedCell) return
-    onAnalyzeContext(pivotSelectionAgentContext({
+    if (!onAnalyzeContext || !markedCells.length) return
+    onAnalyzeContext(pivotSelectionsAgentContext({
       rows: visibleRows,
       rowAxes,
       columnAxes,
-      rowValues: selectedCell.row.values,
-      columnValues: selectedCell.column.values,
       aggregation,
-      displayValue: formatPivotValue(selectedCell.cell.value, aggregation),
+      selections: markedCells.map((cell) => ({
+        rowValues: cell.row.values,
+        columnValues: cell.column.values,
+        displayValue: formatPivotValue(cell.value, aggregation),
+      })),
     }))
   }
 
@@ -504,18 +520,18 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}>{rowAxes.length ? rowAxes.map((axis, level) => { const span = pivotRowHeaderSpan(grid.rows, rowIndex, level); return span ? <th className="pivot-row-value" scope="row" rowSpan={span} key={axis}>{row.values[level] ?? '미확인'}</th> : null }) : <th className="pivot-row-value" scope="row">전체</th>}{grid.columns.map((column, columnIndex) => {
             const cell = grid.cells[rowIndex][columnIndex]
             const cellKey = `${row.key}-${column.key}`
-            const active = selectedCellKey === cellKey
+            const active = markedCellKeys.has(cellKey)
             const selectable = cell.sourceIds.length > 0
             const display = formatPivotValue(cell.value, aggregation)
             const intensity = maxCellValue ? Math.max(.05, cell.value / maxCellValue) : 0
-            return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} title={selectable ? `${cell.sourceIds.length.toLocaleString()}개 로그 보기` : '관련 로그 없음'} aria-label={selectable ? `${display}, 관련 로그 ${cell.sourceIds.length}개` : `${display}, 관련 로그 없음`} onClick={() => { setSelectedCellKey(active ? null : cellKey); setSelectedSourceIds(active ? null : new Set(cell.sourceIds)) }}>{display}</button></td>
+            return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} aria-pressed={active} title={selectable ? `${cell.sourceIds.length.toLocaleString()}개 로그 · Ctrl/⌘ 클릭으로 조건 추가` : '관련 로그 없음'} aria-label={selectable ? `${display}, 관련 로그 ${cell.sourceIds.length}개${active ? ', 선택됨' : ''}` : `${display}, 관련 로그 없음`} onClick={(event) => setMarkedCellKeys((current) => nextPivotMarking(current, cellKey, event.ctrlKey || event.metaKey || event.shiftKey))}>{display}</button></td>
           })}<td className="pivot-total">{formatPivotValue(rowTotalByKey.get(row.key) ?? 0, aggregation)}</td></tr>)}</tbody>
           <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => <td className="pivot-total" key={column.key}>{formatPivotValue(columnTotalByKey.get(column.key) ?? 0, aggregation)}</td>)}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation)}</td></tr></tfoot>
         </table></div>
       </section>
 
       <section className="pattern-section marked-rows" aria-labelledby="marked-heading">
-        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? `선택한 로그 ${visibleRows.length.toLocaleString()}개` : '원본 로그'}</h2>{hasSelection ? <div className="pattern-selection-actions">{onAnalyzeContext ? <button type="button" onClick={analyzeSelection}><Sparkles size={15} />Agent로 해석</button> : null}<button type="button" onClick={clearSelection}><X size={15} />선택 해제</button></div> : null}</div>
+        <div className="pattern-section-heading"><h2 id="marked-heading">{hasSelection ? markedCells.length > 1 ? `선택한 조건 ${markedCells.length.toLocaleString()}개 · 로그 ${visibleRows.length.toLocaleString()}개` : `선택한 로그 ${visibleRows.length.toLocaleString()}개` : '원본 로그'}</h2>{hasSelection ? <div className="pattern-selection-actions">{onAnalyzeContext ? <button type="button" onClick={analyzeSelection}><Sparkles size={15} />{markedCells.length > 1 ? 'Agent로 비교' : 'Agent로 해석'}</button> : null}<button type="button" onClick={clearSelection}><X size={15} />선택 해제</button></div> : null}</div>
         <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>확인 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
       </section>
     </>}

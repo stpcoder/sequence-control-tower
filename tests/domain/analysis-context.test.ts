@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pivotSelectionAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
+import { pivotSelectionAgentContext, pivotSelectionsAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
 import type { LogResultRecord } from '../../src/state/logRecords'
 
 function row(id: string, folder: string, result: LogResultRecord['result']): LogResultRecord {
@@ -43,5 +43,21 @@ describe('analysis selections handed to the native Agent', () => {
     expect(request.prompt).toContain('온도=85')
     expect(request.prompt).toContain('FAIL률 100%')
     expect(request.prompt).toContain('인과관계는 확정하지 말고')
+  })
+
+  it('compares multiple marked pivot cells without merging evaluation folders', () => {
+    const request = pivotSelectionsAgentContext({
+      rows: [row('a', 'screen', 'TEST_FAIL'), row('b', 'improve', 'PASS')],
+      rowAxes: ['skew'], columnAxes: ['vdd'], aggregation: 'fail_rate',
+      selections: [
+        { rowValues: ['SS'], columnValues: ['1.295'], displayValue: '100%' },
+        { rowValues: ['SS'], columnValues: ['1.315'], displayValue: '0%' },
+      ],
+    })
+    expect(request.title).toBe('표 조건 2개 비교')
+    expect(request.prompt).toContain('선택한 조건 2개')
+    expect(request.prompt).toContain('VDD=1.295 · FAIL률 100%')
+    expect(request.prompt).toContain('VDD=1.315 · FAIL률 0%')
+    expect(request.prompt).toContain('서로 다른 평가 폴더는 합치지 말고')
   })
 })

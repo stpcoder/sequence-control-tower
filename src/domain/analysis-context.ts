@@ -16,6 +16,12 @@ export interface SearchAnalysisContextInput {
   wholeWord: boolean
 }
 
+export interface PivotAnalysisSelection {
+  rowValues: readonly string[]
+  columnValues: readonly string[]
+  displayValue: string
+}
+
 const resultCounts = (rows: readonly LogResultRecord[]): string => {
   const counts = new Map<string, number>()
   rows.forEach((row) => counts.set(row.result, (counts.get(row.result) ?? 0) + 1))
@@ -58,13 +64,48 @@ export function pivotSelectionAgentContext(input: {
   aggregation: PivotAggregation
   displayValue: string
 }): AgentAnalysisContextRequest {
+  return pivotSelectionsAgentContext({
+    rows: input.rows,
+    rowAxes: input.rowAxes,
+    columnAxes: input.columnAxes,
+    aggregation: input.aggregation,
+    selections: [{ rowValues: input.rowValues, columnValues: input.columnValues, displayValue: input.displayValue }],
+  })
+}
+
+const pivotConditionText = (
+  rowAxes: readonly PivotDimension[],
+  columnAxes: readonly PivotDimension[],
+  selection: PivotAnalysisSelection,
+): string => {
+  const rowCondition = rowAxes.map((axis, index) => `${dimensionLabel(axis)}=${selection.rowValues[index] ?? '미확인'}`)
+  const columnCondition = columnAxes.map((axis, index) => `${dimensionLabel(axis)}=${selection.columnValues[index] ?? '미확인'}`)
+  return [...rowCondition, ...columnCondition].join(', ') || '전체 범위'
+}
+
+/** Builds one evidence-bounded comparison from Spotfire-style marked pivot cells. */
+export function pivotSelectionsAgentContext(input: {
+  rows: readonly LogResultRecord[]
+  rowAxes: readonly PivotDimension[]
+  columnAxes: readonly PivotDimension[]
+  aggregation: PivotAggregation
+  selections: readonly PivotAnalysisSelection[]
+}): AgentAnalysisContextRequest {
   const rows = [...input.rows]
-  const rowCondition = input.rowAxes.map((axis, index) => `${dimensionLabel(axis)}=${input.rowValues[index] ?? '미확인'}`)
-  const columnCondition = input.columnAxes.map((axis, index) => `${dimensionLabel(axis)}=${input.columnValues[index] ?? '미확인'}`)
-  const conditions = [...rowCondition, ...columnCondition].join(', ') || '전체 범위'
+  const selections = input.selections.slice(0, 12)
+  const summaries = selections.map((selection, index) => {
+    const condition = pivotConditionText(input.rowAxes, input.columnAxes, selection)
+    return `${index + 1}. ${condition} · ${aggregationLabel(input.aggregation)} ${selection.displayValue}`
+  })
+  const firstCondition = selections[0]
+    ? pivotConditionText(input.rowAxes, input.columnAxes, selections[0])
+    : '선택 조건 없음'
+  const selectionText = selections.length > 1
+    ? `선택한 조건 ${selections.length.toLocaleString('ko-KR')}개를 비교해 주세요.\n${summaries.join('\n')}`
+    : `“${firstCondition}” 셀을 선택했습니다. 표시 값은 ${aggregationLabel(input.aggregation)} ${selections[0]?.displayValue ?? '미확인'}입니다.`
   return {
-    title: `표 선택 해석 · ${conditions.slice(0, 42)}`,
+    title: selections.length > 1 ? `표 조건 ${selections.length}개 비교` : `표 선택 해석 · ${firstCondition.slice(0, 42)}`,
     fileIds: [...new Set(rows.map((row) => row.id))].slice(0, 100),
-    prompt: `결과 정리 표에서 “${conditions}” 셀을 선택했습니다. 표시 값은 ${aggregationLabel(input.aggregation)} ${input.displayValue}, 연결 로그는 ${rows.length.toLocaleString('ko-KR')}개이며 판정은 ${resultCounts(rows)}입니다. 선택 셀의 불량 집중 여부를 분모와 함께 검토하고, 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 중 실제 근거가 있는 차원만 설명해 주세요. 인과관계는 확정하지 말고 비교가 필요한 대조 조건과 다음 평가를 제안해 주세요.`,
+    prompt: `결과 정리 표에서 ${selectionText} 연결 로그는 중복을 제외해 ${rows.length.toLocaleString('ko-KR')}개이며 판정은 ${resultCounts(rows)}입니다. 선택 조건 사이의 차이와 불량 집중 여부를 분모와 함께 검토하고, 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 중 실제 근거가 있는 차원만 설명해 주세요. 서로 다른 평가 폴더는 합치지 말고, 인과관계는 확정하지 말고 비교가 필요한 대조 조건과 다음 평가를 제안해 주세요.`,
   }
 }

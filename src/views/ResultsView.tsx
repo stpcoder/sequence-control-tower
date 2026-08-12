@@ -62,7 +62,7 @@ const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'stageResults', label: '진행 단계' },
   { key: 'result', label: '결과' },
   { key: 'review', label: '확인 상태' },
-  { key: 'evidenceCount', label: '판정 신호 수' },
+  { key: 'evidenceCount', label: '판정 근거 줄' },
 ]
 
 const DEFAULT_UI_EXPORT_COLUMNS = EXPORT_COLUMN_DEFINITIONS

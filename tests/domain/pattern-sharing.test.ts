@@ -9,6 +9,7 @@ import {
 } from '../../src/state/logRecords'
 import {
   analysisExportColumns,
+  nextPivotMarking,
   pivotColumnHeaderRows,
   pivotRowHeaderSpan,
 } from '../../src/views/PatternsView'
@@ -16,6 +17,13 @@ import {
 const corpus = resolve(process.cwd(), 'tests/fixtures/long-soc')
 
 describe('long SoC result sharing', () => {
+  it('supports Spotfire-style replace and additive cell marking', () => {
+    expect([...nextPivotMarking(new Set(['a']), 'b', false)]).toEqual(['b'])
+    expect([...nextPivotMarking(new Set(['a']), 'b', true)]).toEqual(['a', 'b'])
+    expect([...nextPivotMarking(new Set(['a', 'b']), 'a', true)]).toEqual(['b'])
+    expect(nextPivotMarking(new Set(['a']), 'a', false).size).toBe(0)
+  })
+
   it('turns long logs into a three-level DRAM cross table and tidy Spotfire rows', async () => {
     const names = (await readdir(corpus)).filter((name) => name.endsWith('.log')).sort()
     const files = await Promise.all(names.map(async (name) => ({ id: name, name, text: await readFile(resolve(corpus, name), 'utf8') })))
