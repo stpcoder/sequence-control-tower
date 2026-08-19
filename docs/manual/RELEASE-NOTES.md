@@ -1,4 +1,13 @@
-# Sequence Control Tower 0.11.0
+# Sequence Control Tower 0.12.0
+
+- 같은 평가 폴더에서는 로그 검색, 결과, 결과 정리 화면을 이동해도 하나의 Agent 대화를 이어갑니다.
+- 다른 평가 폴더는 별도 분석 맥락으로 분리하고, 여러 폴더 선택은 프로젝트 비교로 처리합니다.
+- Agent가 현재 결과 정리 기준에 맞는 축, 집계, 시각화를 제안하며 적용 전 미리보기와 되돌리기를 제공합니다.
+- DQ, BL, Channel, Sub Channel, Bank Group, Bank 등 실제 Fail address event를 조건별 결과와 분리해 분석합니다.
+- QC·MTK 부팅, RT, 4-Corner, Frequency, SKEW·Sample Screening, TM Side Effect, 장문 Halt 페르소나를 검증했습니다.
+- GitHub Actions 중복 실행을 제거하고 설치본 Release는 명시적인 수동 실행 또는 로컬 직접 업로드로 제한했습니다.
+
+## 0.11.0
 
 - 결과 정리를 교차표, Heatmap, 세로·가로 막대, PASS/FAIL 구성·비율, 조건 변화, 건수와 비율로 전환할 수 있습니다.
 - 조건별 결과, 불량 집중 위치, TM 개선 비교, 주파수 경향, 4-Corner 비교를 시작점으로 제공하며 축과 계산 기준은 계속 수정할 수 있습니다.
