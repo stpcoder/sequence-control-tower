@@ -31,7 +31,6 @@ import {
 } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
 import {
-  aggregateRecordTrends,
   buildPivotGrid,
   EXPORT_COLUMN_DEFINITIONS,
   exportCellValue,
@@ -43,7 +42,6 @@ import {
   serializePivotGridTsv,
   summarizeFailureAddressEvents,
   isFailureAddressAggregation,
-  type AggregateTrend,
   type LogRecordExportColumn,
   type LogRecordFilters,
   type LogResultRecord,
@@ -145,10 +143,6 @@ const EVALUATION_PRIMARY = new Set<PivotAggregation>(['pass_fail', 'fail_count',
 const ADDRESS_PRIMARY = new Set<PivotAggregation>(['fail_event_count', 'fail_source_count', 'fail_event_share'])
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
-
-const TREND_OUTCOME_LABEL: Record<AggregateTrend['outcome'], string> = {
-  fail: 'Fail 3종', reboot: 'Reboot', halt: 'Halt', majority: '다수 결과',
-}
 
 type AxisGroup = 'rows' | 'columns'
 type DraggedAxis = { group: AxisGroup; index: number }
@@ -266,39 +260,6 @@ function formatPivotValue(value: number, aggregation: PivotAggregation, breakdow
   if (aggregation === 'fail_source_count') return `${value.toLocaleString('ko-KR')}개 로그`
   if (aggregation === 'fail_event_share') return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
   return value.toLocaleString('ko-KR')
-}
-
-export function evaluationMetricSummary(aggregation: PivotAggregation, rows: readonly LogResultRecord[]): string {
-  const pass = rows.filter((row) => row.result === 'PASS').length
-  const fail = rows.filter((row) => FAIL_RESULTS.has(row.result)).length
-  const decided = pass + fail
-  const samples = new Set(rows.flatMap((row) => {
-    const value = row.sample.value ?? row.dimensions?.sample
-    return value === undefined || value === null || String(value).trim() === '' ? [] : [String(value).trim()]
-  })).size
-  const gridKeys = new Set(rows.flatMap((row) => {
-    const grid = row.grid.value ?? row.dimensions?.gridId
-    const sample = row.sample.value ?? row.dimensions?.sample ?? ''
-    return grid === undefined || grid === null || String(grid).trim() === ''
-      ? []
-      : [JSON.stringify([row.folder, sample, String(grid).trim(), row.run ?? ''])]
-  }))
-  const gridUnknown = rows.filter((row) => {
-    const value = row.grid.value ?? row.dimensions?.gridId
-    return value === undefined || value === null || String(value).trim() === ''
-  }).length
-  if (aggregation === 'sample_count') return `중복을 제외한 Sample ${samples.toLocaleString()}개`
-  if (aggregation === 'grid_count') return `확인된 Grid ${gridKeys.size.toLocaleString()}개${gridUnknown ? ` · Grid 미확인 로그 ${gridUnknown.toLocaleString()}개 제외` : ''}`
-  if (aggregation === 'pass_count') return `PASS 판정 ${pass.toLocaleString()}회`
-  if (aggregation === 'fail_count') return `FAIL·Training Fail·Halt·Reboot 판정 ${fail.toLocaleString()}회`
-  if (aggregation === 'pass_fail') return `PASS ${pass.toLocaleString()} · FAIL ${fail.toLocaleString()} · 판정 완료 ${decided.toLocaleString()}`
-  if (aggregation === 'fail_rate') return `FAIL ${fail.toLocaleString()}/${decided.toLocaleString()} · 불량률 ${decided ? (fail / decided * 100).toLocaleString('ko-KR', { maximumFractionDigits: 1 }) : 0}% · 미확인 제외`
-  const address = summarizeFailureAddressEvents(rows)
-  if (aggregation === 'fail_event_count') return `Fail 주소 ${address.eventCount.toLocaleString()}회 · ${address.sourceCount.toLocaleString()}개 로그${address.truncated ? ' · 일부 로그는 표시 한도 초과' : ''}`
-  if (aggregation === 'fail_source_count') return `Fail 주소가 확인된 로그 ${address.sourceCount.toLocaleString()}개 · 이벤트 ${address.eventCount.toLocaleString()}회`
-  if (aggregation === 'fail_event_share') return `전체 Fail 주소 이벤트 ${address.eventCount.toLocaleString()}회를 기준으로 계산`
-  if (aggregation === 'evidence_count') return '판정에 사용한 marker 줄 수'
-  return `수집한 로그 파일 ${rows.length.toLocaleString()}개 · 평가 횟수나 Grid 수와 다를 수 있음`
 }
 
 function SelectControl({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {
@@ -475,7 +436,6 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const visibleFailureAddresses = useMemo(() => summarizeFailureAddressEvents(visibleRows), [visibleRows])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = markedCells.length > 0
-  const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
   const unknownActiveDimensions = activeDimensions.filter((dimension) => scopedRecords.every((row) => {
     if (dimension === 'run') return !row.run
     if (dataBasis === 'failure_address' && FAILURE_ADDRESS_DIMENSIONS.has(dimension)) {
@@ -676,7 +636,6 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     </div></header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>조건에 맞는 로그가 없습니다.</strong><span>필터를 초기화해 보세요.</span></div> : <>
-      {dataBasis === 'evaluation' && trendSummary.trends.length ? <section className="trend-summary" aria-label="조건 경향 후보"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <h2 id="pivot-heading" className="sr-only">분석 보기</h2>
         {agentPreview ? <div className="analysis-agent-preview" role="status"><Sparkles size={14} /><span>Agent 추천 보기</span>{agentPreview.proposal.rationale ? <small>{agentPreview.proposal.rationale}</small> : null}<button type="button" onClick={undoAgentPreview}>되돌리기</button></div> : null}
@@ -690,7 +649,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <details className="analysis-visualization-picker"><summary><VisualizationIcon size={16} /><b>{ANALYSIS_VISUALIZATION_LABELS[visualization]}</b><ChevronDown size={14} /></summary><div className="analysis-visualization-menu" role="radiogroup" aria-label="시각화 선택">
             {availableVisualizations.map((item) => { const Icon = VISUALIZATION_ICONS[item]; return <button type="button" role="radio" aria-checked={visualization === item} className={visualization === item ? 'active' : ''} key={item} onClick={(event) => { changeVisualization(item); closeShareMenu(event.currentTarget) }}><Icon size={17} /><span>{ANALYSIS_VISUALIZATION_LABELS[item]}</span></button> })}
           </div></details>
-          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />{hasSelection ? '선택 분석' : 'Agent 분석'}</button> : null}
+          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />Agent에게 묻기</button> : null}
           <div className="pattern-metrics" aria-label="표시할 값">
           {primaryAggregations.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => changeAggregation(item.value)}>{item.label}</button>)}
           <details className="pattern-metric-more"><summary className={secondaryAggregation ? 'active' : ''}>{secondaryAggregation?.label ?? '기타'}<ChevronDown size={13} /></summary><div className="pattern-metric-menu" role="radiogroup" aria-label="다른 집계 방식">
@@ -698,7 +657,6 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           </div></details>
           </div>
         </div>
-        <p className="pattern-metric-note">{evaluationMetricSummary(aggregation, scopedRecords)}</p>
         <div className="pattern-controls" aria-label="표 필터">
           <SelectControl label="평가" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 평가</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
           <SelectControl label="결과" value={resultFilter} onChange={(value) => { setResultFilter(value as ResultLabel | 'all'); clearSelection() }}><option value="all">전체 결과</option>{resultChoices.map((result) => <option value={result} key={result}>{RESULT_LABEL_KO[result]}</option>)}</SelectControl>
@@ -740,7 +698,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         {hasSelection ? <section className="pattern-selection-inspector" aria-label="선택 상세">
           <div><strong>선택한 조건 {markedCells.length.toLocaleString()}개</strong><span>PASS {visibleRows.filter((row) => row.result === 'PASS').length.toLocaleString()} · FAIL {visibleRows.filter((row) => FAIL_RESULTS.has(row.result)).length.toLocaleString()}</span></div>
           {visibleFailureAddresses.eventCount ? <div className="pattern-address-summary"><span>Fail 주소 {visibleFailureAddresses.eventCount.toLocaleString()}회 · {visibleFailureAddresses.sourceCount.toLocaleString()}개 로그</span>{visibleFailureAddresses.distribution.slice(0, 3).map((item) => <b key={`${item.dimension}-${item.value}`}>{DIMENSION_LABEL[item.dimension as PivotDimension] ?? item.dimension} {item.value} · {item.eventCount.toLocaleString()}회</b>)}</div> : <span className="pattern-selection-muted">선택 범위에 Fail 주소 이벤트가 없습니다.</span>}
-          <div className="pattern-selection-tools"><button type="button" onClick={clearSelection}><X size={14} />선택 해제</button><button type="button" onClick={(event) => dataBasis === 'failure_address' ? downloadFailureAddresses(event.currentTarget) : downloadSelected(event.currentTarget)}><Download size={14} />선택 CSV</button>{onAnalyzeContext ? <button type="button" onClick={analyzeView}><Sparkles size={14} />Agent 분석</button> : null}</div>
+          <div className="pattern-selection-tools"><button type="button" onClick={clearSelection}><X size={14} />선택 해제</button><button type="button" onClick={(event) => dataBasis === 'failure_address' ? downloadFailureAddresses(event.currentTarget) : downloadSelected(event.currentTarget)}><Download size={14} />선택 CSV</button></div>
         </section> : null}
       </section>
 

@@ -58,6 +58,8 @@ export interface EvaluationFolderBranch {
   label: string
   items: EvaluationFolderFlowItem[]
   parentGroupId?: string
+  hypothesisId?: string
+  track: 'main' | 'side-effect' | 'queue'
   kind: 'issue' | 'queue'
 }
 
@@ -184,26 +186,42 @@ export function evaluationFolderFlow(memory: EvaluationMemory, groups: readonly 
   return ordered
 }
 
-/** Groups folder-level evaluation nodes by failure issue. Purpose changes stay
- * in one issue lane; folders without a confirmed issue share one review queue. */
+/** Groups one folder as one evaluation. Re-tests, condition comparisons and
+ * improvements stay on the issue's main line. A side effect starts a child
+ * line, while every unclassified folder remains an independent review row. */
 export function evaluationFolderBranches(memory: EvaluationMemory, flow: readonly EvaluationFolderFlowItem[]): EvaluationFolderBranch[] {
   const branches = new Map<string, EvaluationFolderBranch>()
   const hypothesisById = new Map(memory.hypotheses.map((hypothesis) => [hypothesis.id, hypothesis]))
-  const branchByGroup = new Map(flow.map((item) => [item.group.id, item.node?.hypothesisId?.trim() || 'classification-queue']))
+  const branchIdentity = (item: EvaluationFolderFlowItem): { id: string; hypothesisId?: string; track: EvaluationFolderBranch['track'] } => {
+    const hypothesisId = item.node?.hypothesisId?.trim()
+    if (!hypothesisId) return { id: `classification-queue:${item.group.id}`, track: 'queue' as const }
+    if (item.node?.relation === 'side-effect') return { id: `${hypothesisId}:side-effect:${item.node.branchId?.trim() || item.node.id}`, hypothesisId, track: 'side-effect' as const }
+    return { id: `${hypothesisId}:main`, hypothesisId, track: 'main' as const }
+  }
+  const branchByGroup = new Map(flow.map((item) => [item.group.id, branchIdentity(item).id]))
   flow.forEach((item) => {
-    const branchId = branchByGroup.get(item.group.id)!
-    const hypothesis = hypothesisById.get(branchId)
+    const identity = branchIdentity(item)
+    const hypothesis = identity.hypothesisId ? hypothesisById.get(identity.hypothesisId) : undefined
     const kind = hypothesis ? 'issue' as const : 'queue' as const
-    const current = branches.get(branchId) ?? { id: branchId, label: hypothesis?.title ?? '분류 대기', items: [], kind }
+    const label = hypothesis
+      ? `${hypothesis.title}${identity.track === 'side-effect' ? ' · Side effect' : ''}`
+      : '분류 대기'
+    const current = branches.get(identity.id) ?? { id: identity.id, label, items: [], kind, track: identity.track, hypothesisId: identity.hypothesisId }
     current.items.push(item)
-    branches.set(branchId, current)
+    branches.set(identity.id, current)
   })
   return [...branches.values()].map((branch) => {
     const parentGroupId = branch.items
       .map((item) => item.parentGroupId)
       .find((groupId) => groupId && branchByGroup.get(groupId) !== branch.id)
     return { ...branch, ...(parentGroupId ? { parentGroupId } : {}) }
-  }).sort((left, right) => Number(left.kind === 'queue') - Number(right.kind === 'queue'))
+  }).sort((left, right) => {
+    const queueOrder = Number(left.kind === 'queue') - Number(right.kind === 'queue')
+    if (queueOrder) return queueOrder
+    const issueOrder = flow.findIndex((item) => item.node?.hypothesisId === left.hypothesisId) - flow.findIndex((item) => item.node?.hypothesisId === right.hypothesisId)
+    if (issueOrder) return issueOrder
+    return Number(left.track === 'side-effect') - Number(right.track === 'side-effect')
+  })
 }
 
 export function evaluationBranchSummary(branch: EvaluationFolderBranch): string {
@@ -388,10 +406,10 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
     <header className="data-view-header evaluation-memory-view__header"><div><h1>평가 이력</h1></div><div className="data-actions evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}><Download size={16} />CSV</button></div></header>
     <details className="evaluation-memory-view__project-context"><summary>프로젝트 조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void save(withProjectConditions(memory, projectDraft))}>저장</button></div></details>
     <section className="evaluation-memory-view__flow" aria-label="불량 이슈별 평가 이력">
-      <header><strong>불량 이슈별 평가 이력</strong><span>{branches.filter((branch) => branch.kind === 'issue').length}개 이슈{branches.some((branch) => branch.kind === 'queue') ? ' · 분류 대기 있음' : ''}</span></header>
+      <header><strong>불량 이슈별 평가 이력</strong><span>{new Set(branches.filter((branch) => branch.kind === 'issue').map((branch) => branch.hypothesisId)).size}개 이슈{branches.some((branch) => branch.kind === 'queue') ? ' · 분류 대기 있음' : ''}</span></header>
       <div className="evaluation-memory-view__flow-branches">{branches.length ? branches.map((branch) => {
         const parent = flow.find((item) => item.group.id === branch.parentGroupId)
-        return <div className={`evaluation-memory-view__flow-branch ${branch.kind === 'queue' ? 'is-unclassified' : ''}`} key={branch.id}>
+        return <div className={`evaluation-memory-view__flow-branch ${branch.kind === 'queue' ? 'is-unclassified' : ''} ${branch.track === 'side-effect' ? 'is-side-effect' : ''}`} key={branch.id}>
           <div className="evaluation-memory-view__flow-label"><strong>{branch.label}</strong><small>{parent ? `${parent.group.label}에서 분리 · ${evaluationBranchSummary(branch)}` : evaluationBranchSummary(branch)}</small></div>
           <div className="evaluation-memory-view__flow-line">{branch.items.map((item) => {
             const state = folderStatus(item.group)

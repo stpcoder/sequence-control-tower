@@ -986,6 +986,7 @@ export default function App() {
         open={agentOpen}
         onOpen={() => setAgentOpen(true)}
         onClose={() => setAgentOpen(false)}
+        showLauncher={activePage !== 'patterns'}
         project={project}
         selectedFile={selectedFile}
         selectedEvaluationRootId={selectedEvaluationRootId}

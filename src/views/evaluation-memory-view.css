@@ -56,6 +56,8 @@
 .evaluation-memory-view__flow-branches > p { margin: 12px 24px; color: var(--em-dim); font-size: 12px; }
 .evaluation-memory-view__flow-branch { display: grid; width: max-content; min-width: 100%; grid-template-columns: 240px max-content; align-items: center; padding: 11px 24px; }
 .evaluation-memory-view__flow-label { position: sticky; left: 24px; z-index: 2; display: grid; min-width: 0; gap: 3px; padding-right: 16px; background: var(--em-editor); }
+.evaluation-memory-view__flow-branch.is-side-effect .evaluation-memory-view__flow-label { padding-left: 18px; }
+.evaluation-memory-view__flow-branch.is-side-effect .evaluation-memory-view__flow-label::before { position: absolute; top: 5px; left: 1px; width: 9px; height: 14px; border-bottom: 1px solid #596474; border-left: 1px solid #596474; content: ''; }
 .evaluation-memory-view__flow-label strong,
 .evaluation-memory-view__flow-label small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evaluation-memory-view__flow-label strong { color: #dde2e9; font-size: 14px; font-weight: 650; letter-spacing: -.015em; }

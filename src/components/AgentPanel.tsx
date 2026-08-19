@@ -28,6 +28,7 @@ interface AgentPanelProps {
   open: boolean
   onClose: () => void
   onOpen: () => void
+  showLauncher?: boolean
   project: ProjectSnapshot | null
   selectedFile?: WorkbenchFile
   selectedEvaluationRootId?: string
@@ -427,7 +428,7 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource, onApplyAnalysisViewProposal }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, showLauncher = true, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource, onApplyAnalysisViewProposal }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [evaluationRunScopeId, setEvaluationRunScopeId] = useState<string | undefined>()
@@ -990,7 +991,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setMentionedSourceIds((current) => [...new Set([...current, sourceId])])
     window.setTimeout(() => composerRef.current?.focus(), 0)
   }
-  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={17} /><span>Agent에게 묻기</span></button>
+  if (!open) return showLauncher ? <button className="agent-fab" onClick={onOpen}><Sparkles size={17} /><span>Agent에게 묻기</span></button> : null
 
   return <aside className="agent-panel" aria-label="Agent">
     <div className="agent-panel-head">

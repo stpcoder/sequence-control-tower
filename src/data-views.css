@@ -749,40 +749,6 @@
 .pattern-share-menu > button b { color: inherit; font-size: 12.5px; font-weight: 620; }
 .pattern-share-menu > button small { color: var(--data-dim); font-size: 11px; }
 
-.trend-summary {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 14px;
-  padding: 7px 22px;
-  border-bottom: 1px solid var(--data-line-soft);
-  color: var(--data-muted);
-  background: #111419;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.trend-summary ul {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.trend-summary li::before {
-  margin-right: 6px;
-  color: #75a7ff;
-  content: '·';
-}
-
-.trend-summary b {
-  color: #dce5f4;
-  font-weight: 650;
-}
-
 .pivot-guidance { margin: 10px 0 0; color: #e2b674; font-size: 12px; }
 .pivot-guidance.is-preview { color: #8fb7ff; }
 
@@ -1022,13 +988,6 @@
   min-height: 34px;
   padding: 0 9px;
   text-align: left;
-}
-
-.pattern-metric-note {
-  margin: 2px 0 0;
-  color: #8f98a5;
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .pattern-section-heading > span {

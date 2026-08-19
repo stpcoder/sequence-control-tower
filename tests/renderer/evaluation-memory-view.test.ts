@@ -43,30 +43,34 @@ describe('evaluation memory workflow helpers', () => {
     const scoped: EvaluationMemory = {
       ...memory,
       hypotheses: [
-        { id: 'h-vperi', projectId: 'p', title: 'VPERI DQ9 반복 불량', origin: 'engineer-confirmed', evaluationNodeIds: ['n-fail', 'n-pass'] },
+        { id: 'h-vperi', projectId: 'p', title: 'VPERI DQ9 반복 불량', origin: 'engineer-confirmed', evaluationNodeIds: ['n-fail', 'n-pass', 'n-side'] },
         { id: 'h-retention', projectId: 'p', title: 'Retention DQ4 불량', origin: 'ai-proposed', evaluationNodeIds: ['n-unknown'] },
       ],
       nodes: [
         { id: 'n-fail', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'root-fail', branchId: 'screen', relation: 'baseline', name: 'screen', purpose: 'screening', dimensions: {}, status: 'fail' },
         { id: 'n-pass', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'root-pass', parentId: 'n-fail', branchId: 'improve', relation: 'improvement', name: 'improve', purpose: 'improvement', dimensions: {}, status: 'pass' },
+        { id: 'n-side', projectId: 'p', hypothesisId: 'h-vperi', evaluationScopeId: 'root-side', parentId: 'n-fail', branchId: 'side-dq5', relation: 'side-effect', name: 'side effect', purpose: 'characterization', dimensions: {}, status: 'fail' },
         { id: 'n-unknown', projectId: 'p', hypothesisId: 'h-retention', evaluationScopeId: 'root-unknown', parentId: 'n-fail', branchId: 'pending', relation: 'baseline', name: 'retention', purpose: 'characterization', dimensions: {}, status: 'inconclusive' },
       ], evidence: [],
     }
     const groups = groupEvaluationFolders(scoped, [
       { id: 'f', rootId: 'root-fail', folderName: 'FAIL 평가', name: 'fail.log' },
       { id: 'p', rootId: 'root-pass', folderName: 'PASS 평가', name: 'pass.log' },
+      { id: 's', rootId: 'root-side', folderName: 'Side effect 평가', name: 'side.log' },
       { id: 'u', rootId: 'root-unknown', folderName: '미정 평가', name: 'unknown.log' },
       { id: 'n', rootId: 'root-new', folderName: '분석 전 평가', name: 'new.log' },
       { id: 'n2', rootId: 'root-new-2', folderName: '추가 분석 평가', name: 'new-2.log' },
     ])
     const branches = evaluationFolderBranches(scoped, evaluationFolderFlow(scoped, groups))
     expect(branches.map((branch) => ({ id: branch.id, label: branch.label, kind: branch.kind, parent: branch.parentGroupId, groups: branch.items.map((item) => item.group.id) }))).toEqual([
-      { id: 'h-vperi', label: 'VPERI DQ9 반복 불량', kind: 'issue', parent: undefined, groups: ['root-fail', 'root-pass'] },
-      { id: 'h-retention', label: 'Retention DQ4 불량', kind: 'issue', parent: undefined, groups: ['root-unknown'] },
-      { id: 'classification-queue', label: '분류 대기', kind: 'queue', parent: undefined, groups: ['root-new', 'root-new-2'] },
+      { id: 'h-vperi:main', label: 'VPERI DQ9 반복 불량', kind: 'issue', parent: undefined, groups: ['root-fail', 'root-pass'] },
+      { id: 'h-vperi:side-effect:side-dq5', label: 'VPERI DQ9 반복 불량 · Side effect', kind: 'issue', parent: 'root-fail', groups: ['root-side'] },
+      { id: 'h-retention:main', label: 'Retention DQ4 불량', kind: 'issue', parent: undefined, groups: ['root-unknown'] },
+      { id: 'classification-queue:root-new', label: '분류 대기', kind: 'queue', parent: undefined, groups: ['root-new'] },
+      { id: 'classification-queue:root-new-2', label: '분류 대기', kind: 'queue', parent: undefined, groups: ['root-new-2'] },
     ])
     expect(evaluationBranchSummary(branches[0])).toBe('2개 평가 · FAIL → PASS')
-    expect(evaluationBranchSummary(branches[2])).toBe('2개 평가 · 확인 필요')
+    expect(evaluationBranchSummary(branches[3])).toBe('1개 평가 · 확인 필요')
   })
   it('opens a bounded purpose question only for an unreviewed folder and preserves confirmed intent', () => {
     const unreviewed = { id: 'root-new', label: '05-boot-training', logs: [{ id: 's-new', openId: 'open-new', name: 'run.log' }], nodes: [], evidence: [] }
