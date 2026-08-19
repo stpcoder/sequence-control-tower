@@ -9,6 +9,8 @@ import type {
   EvaluationAgentMemoryPayloadView,
   EvaluationAgentSessionView,
   NativeAgentBackendStatusView,
+  NativeAgentContextKind,
+  NativeAgentAnalysisViewProposal,
   NativeAgentSessionSummary,
   NativeAgentSessionView,
   ProjectSnapshot,
@@ -19,6 +21,8 @@ import { projectSnapshotToEvaluationMemory } from '../state/evaluationMemory'
 import { evaluationRelationLabel, relationForEvaluationPurpose, suggestEvaluationRelation, type EvaluationRelationSuggestion } from '../domain/evaluation-relation'
 import { AgentMarkdown } from './AgentMarkdown'
 import { hasMeaningfulAgentMessage } from '../domain/agent-message'
+import { analysisContextLabel } from '../domain/agent-analysis-view'
+import { ANALYSIS_DATA_BASIS_LABELS, ANALYSIS_VISUALIZATION_LABELS } from '../domain/analysis-view'
 
 interface AgentPanelProps {
   open: boolean
@@ -33,6 +37,7 @@ interface AgentPanelProps {
   evaluationLaunchRequest?: EvaluationAgentLaunchRequest | null
   nativeLaunchRequest?: NativeAgentLaunchRequest | null
   onOpenSource?: (sourceId: string) => void
+  onApplyAnalysisViewProposal?: (proposal: NativeAgentAnalysisViewProposal) => void
 }
 
 export interface EvaluationAgentLaunchRequest {
@@ -49,6 +54,7 @@ export interface NativeAgentLaunchRequest {
   prompt: string
   sourceIds: string[]
   evaluationScopeId?: string
+  contextKind: NativeAgentContextKind
 }
 
 export function mergeEvaluationAgentMemory(project: ProjectSnapshot, payload: EvaluationAgentMemoryPayloadView): ProjectSnapshot {
@@ -317,6 +323,28 @@ export function toolsForCurrentAgentRun(session: NativeAgentSessionView): Native
   }).slice(-6)
 }
 
+export function reusableNativeLaunchSessionId(
+  current: NativeAgentSessionView | null,
+  sessions: readonly NativeAgentSessionSummary[],
+  request: Pick<NativeAgentLaunchRequest, 'evaluationScopeId'>,
+): string | null {
+  const sameScope = (session: NativeAgentSessionSummary) => (
+    (session.evaluationScopeId ?? '') === (request.evaluationScopeId ?? '')
+    && session.status !== 'queued'
+    && session.status !== 'running'
+  )
+  if (current && sameScope(current)) return current.id
+  return sessions.find(sameScope)?.id ?? null
+}
+
+const ANALYSIS_DIMENSION_LABELS: Partial<Record<NativeAgentAnalysisViewProposal['rowAxes'][number], string>> = {
+  sample: 'Sample', skew: 'SKEW', temperature: '온도', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건',
+  conditionCorner: '4-Corner', frequencyMHz: '주파수', mode: 'Test Mode', pattern: 'Pattern', dq: 'DQ', bl: 'BL',
+  channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank',
+  row: 'Row', column: 'Column', grid: 'Grid', run: '반복 번호', folder: '평가 폴더', result: '판정 결과',
+}
+const analysisProposalAxes = (axes: readonly NativeAgentAnalysisViewProposal['rowAxes'][number][]): string => axes.map((axis) => ANALYSIS_DIMENSION_LABELS[axis] ?? axis).join(' → ') || '전체'
+
 export function buildAgentDecisionInput(
   project: ProjectSnapshot | null,
   file: WorkbenchFile | undefined,
@@ -399,7 +427,7 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource, onApplyAnalysisViewProposal }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [evaluationRunScopeId, setEvaluationRunScopeId] = useState<string | undefined>()
@@ -413,7 +441,8 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
   const [evaluationAnswer, setEvaluationAnswer] = useState('')
   const [mentionedSourceIds, setMentionedSourceIds] = useState<string[]>([])
   const [nativeContextSourceIds, setNativeContextSourceIds] = useState<string[]>([])
-  const [pendingNativeLaunch, setPendingNativeLaunch] = useState<{ sessionId: string; prompt: string; sourceIds: string[] } | null>(null)
+  const [pendingNativeLaunch, setPendingNativeLaunch] = useState<{ sessionId: string; prompt: string; sourceIds: string[]; contextKind: NativeAgentContextKind } | null>(null)
+  const [appliedAnalysisViewId, setAppliedAnalysisViewId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [savedMessage, setSavedMessage] = useState('')
@@ -476,6 +505,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setMentionedSourceIds([])
     setNativeContextSourceIds([])
     setPendingNativeLaunch(null)
+    setAppliedAnalysisViewId('')
     restoredEvaluationScope.current = ''
   }, [projectKey])
 
@@ -499,6 +529,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setMentionedSourceIds((current) => current.filter((sourceId) => project?.artifacts.some((source) => source.sourceId === sourceId)))
     setNativeContextSourceIds([])
     setPendingNativeLaunch(null)
+    setAppliedAnalysisViewId('')
     restoredEvaluationScope.current = ''
   }, [projectScopeKey])
 
@@ -506,6 +537,10 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setRelationChoice('suggested')
     setRelationEditorOpen(false)
   }, [evaluationRun?.id])
+
+  useEffect(() => {
+    if (nativeSession?.analysisViewProposal?.id !== appliedAnalysisViewId) setAppliedAnalysisViewId('')
+  }, [nativeSession?.analysisViewProposal?.id])
 
   useEffect(() => {
     if (relationSuggestion?.classification === 'pending') setRelationEditorOpen(true)
@@ -693,7 +728,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     finally { setBusy(false) }
   }
 
-  const sendNativeText = async (content: string, targetSession?: NativeAgentSessionView, sourceOverride?: readonly string[]) => {
+  const sendNativeText = async (content: string, targetSession?: NativeAgentSessionView, sourceOverride?: readonly string[], turnContextKind: NativeAgentContextKind = 'free_chat') => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return
     if (!hasMeaningfulAgentMessage(content)) { setError('질문이나 확인할 로그 조건을 입력해 주세요.'); return }
@@ -711,7 +746,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
           : nativeContextSourceIds.length
             ? nativeContextSourceIds
             : evaluationSources.slice(0, 100).map((source) => source.sourceId)
-      const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: sourceIds.length ? sourceIds : undefined })
+      const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: sourceIds.length ? sourceIds : undefined, contextKind: turnContextKind })
       if (projectScopeKeyRef.current === startedScope) {
         setNativeSession(next)
         setMentionedSourceIds([])
@@ -772,13 +807,25 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     setEvaluationRun(null)
     setEvaluationRunScopeId(undefined)
     void (async () => {
-      const target = await createNativeSession(nativeLaunchRequest)
+      const api = window.sequenceIntelligence?.nativeAgent
+      if (!api) return
+      let target: NativeAgentSessionView | null = null
+      const currentId = reusableNativeLaunchSessionId(nativeSession, nativeSessions, nativeLaunchRequest)
+      if (currentId) target = currentId === nativeSession?.id ? nativeSession : await api.get({ sessionId: currentId })
+      if (!target) {
+        const listed = await api.list({ projectId: project.id, ...(nativeLaunchRequest.evaluationScopeId ? { evaluationScopeId: nativeLaunchRequest.evaluationScopeId } : {}) })
+        const reusableId = reusableNativeLaunchSessionId(null, listed, nativeLaunchRequest)
+        if (reusableId) target = await api.get({ sessionId: reusableId })
+      }
+      if (!target) target = await createNativeSession(nativeLaunchRequest)
       if (!target) return
+      setNativeSession(target)
+      setNativeContextSourceIds(nativeLaunchRequest.sourceIds)
       if (target.question) {
-        setPendingNativeLaunch({ sessionId: target.id, prompt: nativeLaunchRequest.prompt, sourceIds: nativeLaunchRequest.sourceIds })
+        setPendingNativeLaunch({ sessionId: target.id, prompt: nativeLaunchRequest.prompt, sourceIds: nativeLaunchRequest.sourceIds, contextKind: nativeLaunchRequest.contextKind })
         return
       }
-      await sendNativeText(nativeLaunchRequest.prompt, target, nativeLaunchRequest.sourceIds)
+      await sendNativeText(nativeLaunchRequest.prompt, target, nativeLaunchRequest.sourceIds, nativeLaunchRequest.contextKind)
     })()
   }, [busy, nativeLaunchRequest?.id, open, project?.id])
 
@@ -786,7 +833,7 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
     if (!pendingNativeLaunch || !nativeSession || nativeSession.id !== pendingNativeLaunch.sessionId || nativeSession.question || nativeSession.status !== 'idle' || busy) return
     const pending = pendingNativeLaunch
     setPendingNativeLaunch(null)
-    void sendNativeText(pending.prompt, nativeSession, pending.sourceIds)
+    void sendNativeText(pending.prompt, nativeSession, pending.sourceIds, pending.contextKind)
   }, [busy, nativeSession?.id, nativeSession?.question?.id, nativeSession?.status, pendingNativeLaunch?.sessionId])
 
   const resumeProjectTrend = async (input: { answer?: string; confirm?: 'accept' | 'reject' }) => {
@@ -970,10 +1017,16 @@ export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selec
           const evidenceTools = toolsForAssistantMessage(message, nativeSession.messages, nativeSession.tools)
           return <div key={message.id} className="native-agent-turn">
             {message.role === 'assistant' && evidenceTools.length ? <details className="native-agent-tools"><summary><Wrench size={12} />확인 과정</summary>{evidenceTools.map((tool) => <div key={tool.id} className={tool.state}><span>{tool.label}</span><small>{tool.state === 'running' ? '확인 중' : tool.summary ?? tool.state}</small></div>)}</details> : null}
-            <div className={`native-agent-message ${message.role}`} aria-label={message.role === 'user' ? '내 메시지' : message.role === 'assistant' ? 'Agent 응답' : '기록'}>{message.role === 'assistant' ? <AgentMarkdown>{message.content}</AgentMarkdown> : <p>{message.content}</p>}</div>
+            <div className={`native-agent-message ${message.role}`} aria-label={message.role === 'user' ? '내 메시지' : message.role === 'assistant' ? 'Agent 응답' : '기록'}>{message.role === 'user' && message.contextKind && message.contextKind !== 'free_chat' ? <small className="native-agent-context-label">{analysisContextLabel(message.contextKind)}</small> : null}{message.role === 'assistant' ? <AgentMarkdown>{message.content}</AgentMarkdown> : <p>{message.content}</p>}</div>
             {message.role === 'assistant' && onOpenSource && message.evidenceSourceIds?.length ? <div className="native-agent-evidence-links" aria-label="응답 근거 로그">{[...new Set(message.evidenceSourceIds)].slice(0, 3).map((sourceId) => { const source = project?.artifacts.find((item) => item.sourceId === sourceId); const name = source?.relativePath.split(/[\\/]/).at(-1) ?? '근거 로그'; return <button type="button" key={sourceId} title={source?.relativePath ?? name} onClick={() => onOpenSource(sourceId)}><FileText size={12} />{name}</button> })}{message.evidenceSourceIds.length > 3 ? <span>+{message.evidenceSourceIds.length - 3}</span> : null}</div> : null}
           </div>
         })}
+        {nativeSession.analysisViewProposal ? <section className="native-analysis-proposal" aria-label="Agent 추천 보기">
+          <div><strong>추천 보기</strong><span>{ANALYSIS_DATA_BASIS_LABELS[nativeSession.analysisViewProposal.dataBasis]} · {ANALYSIS_VISUALIZATION_LABELS[nativeSession.analysisViewProposal.visualization]}</span></div>
+          <p>왼쪽 {analysisProposalAxes(nativeSession.analysisViewProposal.rowAxes)} · 상단 {analysisProposalAxes(nativeSession.analysisViewProposal.columnAxes)}</p>
+          {nativeSession.analysisViewProposal.rationale ? <small>{nativeSession.analysisViewProposal.rationale}</small> : null}
+          <button type="button" disabled={!onApplyAnalysisViewProposal || appliedAnalysisViewId === nativeSession.analysisViewProposal.id} onClick={() => { onApplyAnalysisViewProposal?.(nativeSession.analysisViewProposal!); setAppliedAnalysisViewId(nativeSession.analysisViewProposal!.id) }}>{appliedAnalysisViewId === nativeSession.analysisViewProposal.id ? '적용됨' : '보기에 적용'}</button>
+        </section> : null}
         {nativeSession.question ? <div className="native-agent-question"><AgentMarkdown>{nativeSession.question.prompt}</AgentMarkdown><div className="quick-answers">{nativeSession.question.choices.map((choice) => <button key={choice} onClick={() => { if (choice === '직접 입력') composerRef.current?.focus(); else void sendNativeText(choice) }} disabled={busy}><i aria-hidden="true" />{choice}</button>)}</div>{pendingNativeLaunch?.sessionId === nativeSession.id ? <small className="agent-pending-context">답변 후 선택한 범위를 분석합니다.</small> : null}</div> : null}
         {nativeSession.status === 'running' && currentNativeTools.length ? <div className="native-agent-running-tools" role="status" aria-label="Agent 근거 확인 상태">{currentNativeTools.map((tool) => <div key={tool.id}><Check size={12} /><span>{tool.label}</span>{tool.summary ? <small>{tool.summary}</small> : null}</div>)}</div> : null}
         {shouldShowNativeAgentSuggestions(nativeSession) ? <div className="native-agent-suggestions"><button onClick={() => void startProjectTrend()} disabled={!projectCanStart || busy}>결과와 평가 이력 정리</button><button onClick={() => void sendNativeText('온도와 VDD, DQ별 불량률과 집중 경향을 분모와 함께 비교해줘.')} disabled={busy}>조건별 불량 경향</button><button onClick={() => void sendNativeText('과거 LPDDR5와 LPDDR6 유사 불량을 찾아서 다음 평가를 제안해줘.')} disabled={busy}>과거 사례와 다음 평가</button></div> : null}

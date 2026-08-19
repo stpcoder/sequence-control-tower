@@ -14,11 +14,13 @@ import {
   selectedLogRecords,
   serializeLogRecordsCsv,
   serializeLogRecordsTsv,
+  serializeFailureAddressEventsCsv,
   serializePivotGridCsv,
   serializePivotGridTsv,
   previewLogRecordExport,
   sortLogRecords,
   toggleLogRecordSelection,
+  summarizeFailureAddressEvents,
 } from '../../src/state/logRecords'
 import type { LogResultRecord } from '../../src/state/logRecords'
 import type { WorkbenchFile } from '../../src/views/WorkbenchView'
@@ -278,8 +280,8 @@ describe('renderer log result projection', () => {
     })
 
     expect(grid.rows.map((row) => row.label)).toEqual(['85', '105'])
-    expect(grid.cells[0][0]).toEqual({ value: 50, sourceIds: ['pass', 'halt'] })
-    expect(grid.cells[1][0]).toEqual({ value: 100, sourceIds: ['training'] })
+    expect(grid.cells[0][0]).toMatchObject({ value: 50, sourceIds: ['pass', 'halt'], breakdown: { passCount: 1, failCount: 1, definitiveCount: 2 } })
+    expect(grid.cells[1][0]).toMatchObject({ value: 100, sourceIds: ['training'], breakdown: { passCount: 0, failCount: 1, definitiveCount: 1 } })
     expect(grid.total).toBe(66.7)
   })
 
@@ -639,5 +641,33 @@ describe('renderer log result projection', () => {
     expect(tsv).not.toContain('/Users/private')
     expect(tsv).not.toContain('C:/Users/private')
     expect(tsv).not.toContain('..')
+  })
+
+  it('keeps log-body fail-address events separate from filename metadata pivots and export', () => {
+    const addressFiles: WorkbenchFile[] = [
+      { id: 'fail-a', name: 'run_DQ99_BL99.log', origin: 'screen', relativePath: 'screen/run_DQ99_BL99.log', decision: 'DIAG_FAIL' },
+      { id: 'fail-b', name: 'run_DQ88_BL88.log', origin: 'screen', relativePath: 'screen/run_DQ88_BL88.log', decision: 'TEST_FAIL' },
+    ]
+    const rows = projectLogRecords(addressFiles, {}, {}, {}, {
+      'fail-a': { truncated: false, events: [
+        { lineNumber: 101, fields: { dq: '0', bl: '0', bankGroup: '1', bank: '2' } },
+        { lineNumber: 105, fields: { dq: '4', bl: '8', bankGroup: '1', bank: '2' } },
+      ] },
+      'fail-b': { truncated: false, events: [{ lineNumber: 88, fields: { dq: '0', bl: '0', bankGroup: '2', bank: '3' } }] },
+    })
+    const eventGrid = buildPivotGrid(rows, { rows: ['dq'], columns: ['bl'], aggregation: 'fail_event_count', filters: { query: '', result: 'all', review: 'all' } })
+    const dq0 = eventGrid.rows.findIndex((row) => row.values[0] === '0')
+    const bl0 = eventGrid.columns.findIndex((column) => column.values[0] === '0')
+    expect(eventGrid.total).toBe(3)
+    expect(eventGrid.cells[dq0][bl0]).toMatchObject({ value: 2, failureAddress: { eventCount: 2, sourceCount: 2, totalEventCount: 3, topSignature: 'DQ 0 · BL 0' } })
+    expect(eventGrid.rows.map((row) => row.values[0])).not.toContain('99')
+
+    const summary = summarizeFailureAddressEvents(rows)
+    expect(summary).toMatchObject({ eventCount: 3, sourceCount: 2, truncated: false })
+    expect(summary.distribution).toContainEqual(expect.objectContaining({ dimension: 'dq', value: '0', eventCount: 2, sourceCount: 2 }))
+    const csv = serializeFailureAddressEventsCsv(rows)
+    expect(csv).toContain('"line_number"')
+    expect(csv).toContain('"101"')
+    expect(csv).toContain('"0"')
   })
 })

@@ -8,6 +8,7 @@ import {
   type MetadataApprovalsBySource,
   type PatternAxis,
   type StageResultsBySource,
+  type FailureAddressEventsBySource,
 } from './state/logRecords'
 import { PatternsView } from './views/PatternsView'
 import { ResultsView } from './views/ResultsView'
@@ -39,6 +40,8 @@ import type {
   ProjectSnapshot,
   RendererCommand,
   ArtifactStageScanInput,
+  ArtifactFailureAddressScanInput,
+  NativeAgentAnalysisViewProposal,
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
@@ -256,6 +259,23 @@ function initialFiles(): WorkbenchFile[] {
   return window.sequenceIntelligence ? [] : DEMO_LOGS
 }
 
+function initialFailureAddressEvents(): FailureAddressEventsBySource {
+  if (window.sequenceIntelligence) return {}
+  return {
+    'demo-halt-03': {
+      truncated: false,
+      events: [
+        { lineNumber: 9, fields: { channel: '0', subChannel: '0', chipSelect: '0', rank: '0', bankGroup: '1', bank: '3', row: '0x002A', column: '0x014', writeData: '0x55', readData: '0x15', dq: '9', bl: '16' } },
+        { lineNumber: 10, fields: { channel: '0', subChannel: '0', chipSelect: '0', rank: '0', bankGroup: '1', bank: '3', row: '0x002B', column: '0x018', writeData: '0xAA', readData: '0xA8', dq: '9', bl: '16' } },
+      ],
+    },
+    'demo-training-07': {
+      truncated: false,
+      events: [{ lineNumber: 9, fields: { channel: '1', subChannel: '0', chipSelect: '0', rank: '0', bankGroup: '0', bank: '1', dq: '20', bl: '32' } }],
+    },
+  }
+}
+
 function previewEvaluationMemory(): EvaluationMemory {
   return {
     project: { id: PROJECT_ID, name: 'LPDDR6 Sample 분석' },
@@ -326,6 +346,7 @@ export default function App() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [evaluationAgentLaunch, setEvaluationAgentLaunch] = useState<EvaluationAgentLaunchRequest | null>(null)
   const [nativeAgentLaunch, setNativeAgentLaunch] = useState<NativeAgentLaunchRequest | null>(null)
+  const [agentAnalysisViewRequest, setAgentAnalysisViewRequest] = useState<NativeAgentAnalysisViewProposal | null>(null)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -334,11 +355,13 @@ export default function App() {
   const projectGeneration = useRef(0)
   const [previewMetadataApprovals, setPreviewMetadataApprovals] = useState<MetadataApprovalsBySource>({})
   const [stageResultsBySource, setStageResultsBySource] = useState<StageResultsBySource>({})
+  const [failureAddressEventsBySource, setFailureAddressEventsBySource] = useState<FailureAddressEventsBySource>(initialFailureAddressEvents)
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
   const evaluationSnapshotRef = useRef<EvaluationProjectSnapshot | null>(null)
   const evaluationQueue = useRef<Promise<void>>(Promise.resolve())
   const shownStorageNotice = useRef('')
   const stageInspectionCache = useRef(new Map<string, StageResultsBySource>())
+  const failureAddressInspectionCache = useRef(new Map<string, FailureAddressEventsBySource>())
   const lifecycleRef = useRef<AppLifecycle>({ mounted: false, generation: 0 })
   const filesRef = useRef(files)
   const projectRef = useRef<ProjectSnapshot | null>(project)
@@ -569,9 +592,47 @@ export default function App() {
     return () => { active = false }
   }, [activePage, notify, stageInspectionPlan])
 
+  useEffect(() => {
+    if (activePage !== 'patterns') return undefined
+    const api = window.sequenceIntelligence
+    if (!api?.artifacts.inspectFailureAddresses || !stageInspectionPlan.sources.length) {
+      setFailureAddressEventsBySource(api ? {} : initialFailureAddressEvents())
+      return undefined
+    }
+    const cached = failureAddressInspectionCache.current.get(stageInspectionPlan.key)
+    if (cached) {
+      setFailureAddressEventsBySource(cached)
+      return undefined
+    }
+    let active = true
+    setFailureAddressEventsBySource({})
+    const input: ArtifactFailureAddressScanInput = { sources: stageInspectionPlan.sources }
+    void api.artifacts.inspectFailureAddresses(input).then((result) => {
+      if (!active) return
+      const next: FailureAddressEventsBySource = {}
+      for (const source of result.sources) {
+        const fileId = stageInspectionPlan.fileIds.get(source.sourceId)
+        if (!fileId || source.error) continue
+        next[fileId] = { events: source.events, truncated: source.truncated }
+      }
+      failureAddressInspectionCache.current.set(stageInspectionPlan.key, next)
+      while (failureAddressInspectionCache.current.size > 8) {
+        const oldest = failureAddressInspectionCache.current.keys().next().value as string | undefined
+        if (!oldest) break
+        failureAddressInspectionCache.current.delete(oldest)
+      }
+      setFailureAddressEventsBySource(next)
+    }).catch((error) => {
+      if (active && !(error instanceof Error && error.name === 'AbortError')) {
+        notify(error instanceof Error ? `Fail 주소를 확인하지 못했습니다: ${error.message}` : 'Fail 주소를 확인하지 못했습니다.', 'error')
+      }
+    })
+    return () => { active = false }
+  }, [activePage, notify, stageInspectionPlan])
+
   const records = useMemo(
-    () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals, stageResultsBySource),
-    [evidenceCounts, files, metadataApprovals, persistedEvidenceCounts, stageResultsBySource],
+    () => projectLogRecords(files, { ...evidenceCounts, ...persistedEvidenceCounts }, metadataApprovals, stageResultsBySource, failureAddressEventsBySource),
+    [evidenceCounts, failureAddressEventsBySource, files, metadataApprovals, persistedEvidenceCounts, stageResultsBySource],
   )
 
   const memory = useMemo(() => project ? projectSnapshotToEvaluationMemory(project) : previewMemory, [previewMemory, project])
@@ -791,6 +852,7 @@ export default function App() {
       title: request.title,
       prompt: unique.length > selected.length ? `${request.prompt}\n\n전체 ${unique.length.toLocaleString('ko-KR')}개 중 Agent 한도에 맞춰 앞 ${selected.length}개 로그를 확인합니다.` : request.prompt,
       sourceIds: selected.map((source) => source.sourceId),
+      contextKind: roots.length > 1 ? 'project_compare' : request.contextKind,
       ...(evaluationScopeId ? { evaluationScopeId } : {}),
     })
     setAgentOpen(true)
@@ -888,7 +950,7 @@ export default function App() {
   ) : activePage === 'results' ? (
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} onAnalyzeContext={launchAgentContext} />
   ) : activePage === 'patterns' ? (
-    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} />
+    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} agentViewRequest={agentAnalysisViewRequest} onAgentViewRequestConsumed={() => setAgentAnalysisViewRequest(null)} />
   ) : activePage === 'history' ? (
     <EvaluationMemoryView
       memory={memory}
@@ -933,6 +995,10 @@ export default function App() {
         evaluationLaunchRequest={evaluationAgentLaunch}
         nativeLaunchRequest={nativeAgentLaunch}
         onOpenSource={openProjectSource}
+        onApplyAnalysisViewProposal={(proposal) => {
+          setAgentAnalysisViewRequest(proposal)
+          navigate('patterns')
+        }}
       /> : null}
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

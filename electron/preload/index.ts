@@ -8,6 +8,7 @@ import type {
   AgentStartInput,
   AgentConfirmResult,
   ArtifactEvidenceInput,
+  ArtifactFailureAddressScanInput,
   ArtifactImportOptions,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
@@ -70,6 +71,8 @@ const api: SequenceIntelligenceApi = {
       ipcRenderer.invoke(IPC_CHANNELS.artifactInspectEvidence, input),
     inspectStages: (input: ArtifactStageScanInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactInspectStages, input),
+    inspectFailureAddresses: (input: ArtifactFailureAddressScanInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.artifactInspectFailureAddresses, input),
     getLineWindow: (input: ArtifactLineWindowInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.artifactLineWindow, input),
     findSimilar: (artifactId: string, limit?: number) =>

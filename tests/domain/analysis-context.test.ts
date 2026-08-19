@@ -19,6 +19,7 @@ describe('analysis selections handed to the native Agent', () => {
       regex: false, caseSensitive: true, wholeWord: false,
     })
     expect(request.fileIds).toEqual(['a', 'b'])
+    expect(request.contextKind).toBe('log_search')
     expect(request.prompt).toContain('현재 평가')
     expect(request.prompt).toContain('12회 일치')
     expect(request.prompt).toContain('검색 순서로 확정할지 제안')
@@ -28,6 +29,7 @@ describe('analysis selections handed to the native Agent', () => {
   it('keeps selected result folders separate and asks for denominators', () => {
     const request = resultRowsAgentContext([row('a', 'screen', 'TEST_FAIL'), row('b', 'improve', 'PASS')])
     expect(request.fileIds).toEqual(['a', 'b'])
+    expect(request.contextKind).toBe('project_compare')
     expect(request.prompt).toContain('평가 폴더 2개')
     expect(request.prompt).toContain('TEST_FAIL 1, PASS 1')
     expect(request.prompt).toContain('하나의 평가로 합치지 말고')
@@ -41,7 +43,7 @@ describe('analysis selections handed to the native Agent', () => {
     })
     expect(request.prompt).toContain('SKEW=SS')
     expect(request.prompt).toContain('온도=85')
-    expect(request.prompt).toContain('FAIL률 100%')
+    expect(request.prompt).toContain('불량률 100%')
     expect(request.prompt).toContain('인과관계는 확정하지 말고')
   })
 
@@ -56,8 +58,8 @@ describe('analysis selections handed to the native Agent', () => {
     })
     expect(request.title).toBe('표 조건 2개 비교')
     expect(request.prompt).toContain('선택한 조건 2개')
-    expect(request.prompt).toContain('VDD=1.295 · FAIL률 100%')
-    expect(request.prompt).toContain('VDD=1.315 · FAIL률 0%')
+    expect(request.prompt).toContain('VDD=1.295 · 불량률 100%')
+    expect(request.prompt).toContain('VDD=1.315 · 불량률 0%')
     expect(request.prompt).toContain('서로 다른 평가 폴더는 합치지 말고')
   })
 
@@ -65,9 +67,9 @@ describe('analysis selections handed to the native Agent', () => {
     const request = pivotSelectionAgentContext({
       rows: [row('a', 'screen', 'PASS'), row('b', 'screen', 'TEST_FAIL')],
       rowAxes: ['skew'], columnAxes: ['vdd'], rowValues: ['SS'], columnValues: ['1.295'],
-      aggregation: 'pass_fail', displayValue: 'P 1 · F 1',
+      aggregation: 'pass_fail', displayValue: 'PASS 1 · FAIL 1',
     })
-    expect(request.prompt).toContain('PASS / FAIL P 1 · F 1')
+    expect(request.prompt).toContain('판정 결과 PASS 1 · FAIL 1')
     expect(request.prompt).toContain('PASS 1, TEST_FAIL 1')
   })
 
@@ -75,9 +77,12 @@ describe('analysis selections handed to the native Agent', () => {
     const request = analysisViewAgentContext({
       rows: [row('a', 'screen', 'TEST_FAIL')], rowAxes: ['bank'], columnAxes: ['dq'],
       aggregation: 'fail_count', visualization: 'heatmap',
+      dataBasis: 'evaluation',
       selected: [{ rowValues: ['5'], columnValues: ['9'], displayValue: '3' }],
     })
     expect(request.title).toBe('선택 조건 1개 분석')
+    expect(request.contextKind).toBe('analysis_view')
+    expect(request.prompt).toContain('[SCT_ANALYSIS_VIEW_CONTEXT]')
     expect(request.prompt).toContain('Heatmap')
     expect(request.prompt).toContain('Bank=5')
     expect(request.prompt).toContain('DQ=9')

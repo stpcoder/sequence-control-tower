@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, shouldRestoreEvaluationReview, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
+import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, reusableNativeLaunchSessionId, shouldRestoreEvaluationReview, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
 import type { EvaluationAgentMemoryPayloadView, EvaluationAgentSessionView, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
@@ -109,6 +109,18 @@ describe('mergeEvaluationAgentMemory', () => {
       artifacts: [{ sourceId: 's1', rootId: 'r1', artifactId: 'a1', relativePath: 'one.log' }],
     })).toBe(false)
     expect(shouldRetainAgentSession(project, { ...project, id: 'other' })).toBe(false)
+  })
+
+  it('continues one conversation across menus in the same evaluation folder', () => {
+    const folderSession: NativeAgentSessionView = {
+      id: 'folder-chat', projectId: 'p1', title: 'VPERI 평가', backend: 'opencode', status: 'idle', evaluationScopeId: 'folder-a',
+      createdAt: '', updatedAt: '', messages: [], tools: [],
+    }
+    const summaries = [folderSession, { ...folderSession, id: 'other-folder', evaluationScopeId: 'folder-b' }]
+    expect(reusableNativeLaunchSessionId(folderSession, summaries, { evaluationScopeId: 'folder-a' })).toBe('folder-chat')
+    expect(reusableNativeLaunchSessionId(folderSession, summaries, { evaluationScopeId: 'folder-b' })).toBe('other-folder')
+    expect(reusableNativeLaunchSessionId(folderSession, summaries, {})).toBeNull()
+    expect(reusableNativeLaunchSessionId({ ...folderSession, status: 'running' }, [], { evaluationScopeId: 'folder-a' })).toBeNull()
   })
 
   it('does not restore legacy empty completed reviews or reviews already saved to history', () => {

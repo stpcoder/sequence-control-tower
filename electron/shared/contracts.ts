@@ -212,6 +212,35 @@ export interface ArtifactStageScanSourceResult {
 }
 export interface ArtifactStageScanResult { sources: ArtifactStageScanSourceResult[] }
 
+export interface ArtifactFailureAddressFields {
+  channel?: string
+  subChannel?: string
+  chipSelect?: string
+  rank?: string
+  bankGroup?: string
+  bank?: string
+  row?: string
+  column?: string
+  writeData?: string
+  readData?: string
+  dq?: string
+  bl?: string
+}
+export interface ArtifactFailureAddressEvent {
+  /** One-based line number. Raw log text never crosses IPC. */
+  lineNumber: number
+  fields: ArtifactFailureAddressFields
+}
+export interface ArtifactFailureAddressScanInput { sources: ArtifactEvidenceSource[] }
+export interface ArtifactFailureAddressScanSourceResult {
+  sourceId: string
+  artifactId: string
+  events: ArtifactFailureAddressEvent[]
+  truncated: boolean
+  error?: string
+}
+export interface ArtifactFailureAddressScanResult { sources: ArtifactFailureAddressScanSourceResult[] }
+
 export interface ArtifactLineWindowInput {
   artifactId: string
   /** One-based first line. */
@@ -864,25 +893,44 @@ export interface SequenceIntelligenceProjectsApi {
 export type NativeAgentBackend = 'opencode' | 'internal'
 export type NativeAgentSessionStatus = 'idle' | 'queued' | 'running' | 'paused' | 'failed'
 export type NativeAgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
+export type NativeAgentContextKind = 'free_chat' | 'log_search' | 'results' | 'analysis_view' | 'evaluation_history' | 'project_compare'
+export type NativeAgentAnalysisDimension =
+  | 'sample' | 'temperature' | 'temperatureCorner' | 'mode' | 'skew' | 'frequencyMHz' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
+  | 'lot' | 'material' | 'die' | 'socModel' | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank'
+  | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs' | 'grid' | 'result' | 'review' | 'folder' | 'run'
+export type NativeAgentAnalysisAggregation = 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'fail_event_count' | 'fail_source_count' | 'fail_event_share'
+export type NativeAgentAnalysisVisualization = 'cross_table' | 'heatmap' | 'bar' | 'bar_horizontal' | 'stacked_bar' | 'stacked_percent' | 'line' | 'combo'
+export interface NativeAgentAnalysisViewProposal {
+  id: string
+  dataBasis: 'evaluation' | 'failure_address'
+  rowAxes: NativeAgentAnalysisDimension[]
+  columnAxes: NativeAgentAnalysisDimension[]
+  aggregation: NativeAgentAnalysisAggregation
+  visualization: NativeAgentAnalysisVisualization
+  failOnly?: boolean
+  rationale?: string
+}
 export interface NativeAgentToolTraceView {
   id: string; name: string; label: string; state: 'running' | 'completed' | 'failed'
   startedAt: string; completedAt?: string; summary?: string; evidenceSourceIds?: string[]
 }
 export interface NativeAgentMessageView {
   id: string; role: NativeAgentMessageRole; content: string; createdAt: string
-  toolTraceId?: string; evidenceSourceIds?: string[]
+  toolTraceId?: string; evidenceSourceIds?: string[]; contextKind?: NativeAgentContextKind
 }
 export interface NativeAgentSessionSummary {
   id: string; projectId: string; title: string; backend: NativeAgentBackend
   /** Attached root folder used as one evaluation context. */
   evaluationScopeId?: string
   status: NativeAgentSessionStatus; createdAt: string; updatedAt: string
-  lastMessage?: string; failure?: string
+  lastMessage?: string; failure?: string; lastContextKind?: NativeAgentContextKind
 }
 export interface NativeAgentSessionView extends NativeAgentSessionSummary {
   messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]; question?: NativeAgentQuestionView
   /** Engineer-selected purpose candidate for this evaluation folder. */
   evaluationIntent?: string
+  /** Typed, uncommitted Results Summary proposal. Applying it never saves the project layout. */
+  analysisViewProposal?: NativeAgentAnalysisViewProposal
 }
 export interface NativeAgentBackendStatusView {
   preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
@@ -891,7 +939,7 @@ export interface NativeAgentBackendStatusView {
 export interface NativeAgentCreateRequest { projectId: string; title?: string; evaluationScopeId?: string; sourceIds?: string[] }
 export interface NativeAgentListRequest { projectId: string; evaluationScopeId?: string }
 export interface NativeAgentGetRequest { sessionId: string }
-export interface NativeAgentSendRequest { sessionId: string; content: string; sourceIds?: string[] }
+export interface NativeAgentSendRequest { sessionId: string; content: string; sourceIds?: string[]; contextKind?: NativeAgentContextKind }
 export interface NativeAgentRetryRequest { sessionId: string }
 export interface NativeAgentCancelRequest { sessionId: string }
 export interface NativeAgentSearchEventInput {
@@ -1033,6 +1081,7 @@ export interface SequenceIntelligenceApi {
     search(input: ArtifactSearchInput): Promise<ArtifactSearchResult>
     inspectEvidence(input: ArtifactEvidenceInput): Promise<ArtifactEvidenceResult>
     inspectStages(input: ArtifactStageScanInput): Promise<ArtifactStageScanResult>
+    inspectFailureAddresses(input: ArtifactFailureAddressScanInput): Promise<ArtifactFailureAddressScanResult>
     getLineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow>
     findSimilar(artifactId: string, limit?: number): Promise<SimilarArtifact[]>
   }
@@ -1092,6 +1141,7 @@ export const IPC_CHANNELS = {
   artifactSearch: 'artifact:search',
   artifactInspectEvidence: 'artifact:inspect-evidence',
   artifactInspectStages: 'artifact:inspect-stages',
+  artifactInspectFailureAddresses: 'artifact:inspect-failure-addresses',
   artifactLineWindow: 'artifact:line-window',
   artifactSimilar: 'artifact:similar',
   analysisStart: 'analysis:start',

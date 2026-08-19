@@ -3,7 +3,7 @@ import type {
   EngineerWorkflowMemoryView, NativeAgentBackendStatusView, NativeAgentCompleteEvaluationInput,
   NativeAgentCompleteEvaluationResult, NativeAgentConfirmWorkflowInput, NativeAgentDismissWorkflowInput,
   NativeAgentReuseKnowledgeInput, NativeAgentReuseKnowledgeResult,
-  NativeAgentSearchEventInput, NativeAgentSessionSummary, NativeAgentSessionView, ProjectSnapshot
+  NativeAgentContextKind, NativeAgentSearchEventInput, NativeAgentSessionSummary, NativeAgentSessionView, ProjectSnapshot
 } from '../shared/contracts'
 import type { OpenAiCompatibleClient } from './llm-service'
 import type { ProjectStore } from './project-store'
@@ -17,11 +17,14 @@ import type { OpenCodeHost } from './opencode-host'
 import type { SctMcpToolTrace } from './sct-mcp-server'
 import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
+import { extractAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
 
 const safe = (value: unknown, max = 12_000): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
   : ''
 const now = (): string => new Date().toISOString()
+const CONTEXT_KINDS = new Set<NativeAgentContextKind>(['free_chat', 'log_search', 'results', 'analysis_view', 'evaluation_history', 'project_compare'])
+const contextKind = (value: unknown): NativeAgentContextKind | undefined => typeof value === 'string' && CONTEXT_KINDS.has(value as NativeAgentContextKind) ? value as NativeAgentContextKind : undefined
 
 const EVALUATION_PURPOSE_LABELS: Record<string, string> = {
   screening: '불량 검출 강화',
@@ -80,8 +83,14 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   const calls: LpddrAgentToolCall[] = [
     { name: 'project_context_get' }, { name: 'project_history_get' }
   ]
-  if (/(브랜치|이력\s*(?:연결|관계)|어느\s*(?:불량|이슈)|같은\s*불량|별도\s*불량|retest|\brt\b|재현|가속|개선|side\s*effect|검증)/i.test(text)) {
+  const relationIntent = /(브랜치|이력\s*(?:연결|관계)|어느\s*(?:불량|이슈)|같은\s*불량|별도\s*불량|retest|\brt\b|재현|가속|개선|side\s*effect|(?:평가|효과)\s*검증|검증\s*평가)/i.test(text)
+  const workflowIntent = /(무슨 평가|어떤 평가|평가 목적|검색 기록|ctrl.?f|정규식|regex|찾아봤|분석 절차|검색\s*(?:순서|절차)|저장된\s*(?:검색|ctrl.?f)|boot|uefi|training|retest|\brt\b)/i.test(text)
+  const workflowApplyIntent = workflowIntent && /(적용|재사용|호환|반복|확장|순서로)/i.test(text)
+  if (workflowIntent) calls.push({ name: 'engineer_workflow_memory_get' })
+  if (workflowApplyIntent) calls.push({ name: 'engineer_workflow_apply' })
+  if (relationIntent) {
     calls.push({ name: 'evaluation_relation_suggest' })
+    calls.push({ name: 'pass_fail_scan' })
   }
   if (/(새|올렸|파일|로그|무슨 평가|어떤 평가|조건|온도|vdd|전압|자재|sample|샘플|lot|주파수|skew|tm|mode|sub.?channel|rank|row|column)/i.test(text)) {
     calls.push({ name: 'filename_dimensions_scan' })
@@ -93,9 +102,7 @@ export function planLpddrTools(content: string): LpddrAgentToolCall[] {
   if (/(새 로그|이 로그|무슨 평가|어떤 평가|pass|fail|판정|분석 절차|적용)/i.test(text)) calls.push({ name: 'engineer_workflow_apply' })
   if (/(경향|집중|불량률|dq|bl|channel|채널|sub.?channel|rank|bank|row|column|pattern|패턴|frequency|주파수|temperature|온도|vdd|전압|개선|비교)/i.test(text)) calls.push({ name: 'failure_trends_get' })
   if (/(과거|이전|유사|lpddr5|다음|추천|어떻게|시도)/i.test(text)) calls.push({ name: 'similar_case_search', args: { query: content.slice(0, 240) } })
-  if (/(무슨 평가|어떤 평가|평가 목적|검색 기록|ctrl.?f|정규식|regex|찾아봤|분석 절차|boot|uefi|training|retest|\brt\b)/i.test(text)) {
-    calls.push({ name: 'engineer_workflow_memory_get' })
-  }
+  if (workflowIntent) calls.push({ name: 'engineer_workflow_memory_get' })
   if (/(검색 기록|ctrl.?f|정규식|regex|찾아봤)/i.test(text)) calls.push({ name: 'search_history_get' })
   const quoted = content.match(/[“"']([^”"']{2,120})[”"']/)?.[1]
   if (quoted && /(검색|찾|marker|문장|라인)/i.test(text)) calls.push({ name: 'log_search', args: { query: quoted, mode: /정규식|regex/i.test(text) ? 'regex' : 'literal' } })
@@ -317,14 +324,15 @@ export class NativeAgentService {
     return session ? this.public(session) : null
   }
 
-  async send(sessionId: string, content: string, requestedSourceIds?: string[]): Promise<NativeAgentSessionView> {
+  async send(sessionId: string, content: string, requestedSourceIds?: string[], requestedContextKind?: NativeAgentContextKind): Promise<NativeAgentSessionView> {
     const session = await this.require(sessionId)
     if (session.status === 'queued' || session.status === 'running') throw new Error('현재 분석이 끝난 후 다시 보내 주세요.')
     const message = safe(content, 4_000)
+    const turnContextKind = contextKind(requestedContextKind)
     if (!message) throw new Error('메시지를 입력해 주세요.')
     if (!hasMeaningfulAgentMessage(message)) throw new Error('질문이나 확인할 로그 조건을 입력해 주세요.')
     if (session.question?.kind === 'boot-profile') {
-      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message, ...(turnContextKind ? { contextKind: turnContextKind } : {}) })
       if (message === '미확인으로 유지' || message === '건너뛰기') {
         next = await this.deps.store.update(session.id, (draft) => { draft.question = this.purposeQuestionFor(session) })
         next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `SoC profile은 미확인으로 두었습니다. ${this.purposeFollowup(session)}` })
@@ -338,7 +346,7 @@ export class NativeAgentService {
       this.emit(next); return this.public(next)
     }
     if (session.question?.kind === 'console-role') {
-      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message, ...(turnContextKind ? { contextKind: turnContextKind } : {}) })
       if (message === '건너뛰기' || message === '모름 · 저장 안 함') {
         next = await this.deps.store.update(session.id, (draft) => { draft.question = this.purposeQuestionFor(session) })
         next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `이 줄은 분류하지 않았습니다. ${this.purposeFollowup(session)}` })
@@ -374,7 +382,7 @@ export class NativeAgentService {
       this.emit(next); return this.public(next)
     }
     if (session.question?.kind === 'command-purpose') {
-      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message, ...(turnContextKind ? { contextKind: turnContextKind } : {}) })
       if (message === '건너뛰기' || message === '모름 · 저장 안 함') {
         next = await this.deps.store.update(session.id, (draft) => { draft.question = this.purposeQuestionFor(session) })
         next = await this.deps.store.appendMessage(session.id, { role: 'assistant', content: `명령 목적은 저장하지 않았습니다. ${this.purposeFollowup(session)}` })
@@ -389,7 +397,7 @@ export class NativeAgentService {
       this.emit(next); return this.public(next)
     }
     if (session.question?.kind === 'evaluation-purpose') {
-      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+      let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message, ...(turnContextKind ? { contextKind: turnContextKind } : {}) })
       const unknown = message === '모름 · 나중에 확인'
       next = await this.deps.store.update(session.id, (draft) => {
         draft.question = undefined
@@ -405,9 +413,11 @@ export class NativeAgentService {
     }
     const sourceIds = await this.authorize(session.projectId, requestedSourceIds, session.evaluationScopeId)
     const project = await this.deps.projects.get(session.projectId)
-    let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message })
+    let next = await this.deps.store.appendMessage(session.id, { role: 'user', content: message, ...(turnContextKind ? { contextKind: turnContextKind } : {}) })
     next = await this.deps.store.update(session.id, (draft) => {
-      draft.status = 'queued'; draft.failure = undefined; draft.lastRequest = { content: message, sourceIds }
+      draft.status = 'queued'; draft.failure = undefined; draft.analysisViewProposal = undefined
+      draft.lastRequest = { content: message, sourceIds, ...(turnContextKind ? { contextKind: turnContextKind } : {}) }
+      draft.lastContextKind = turnContextKind ?? 'free_chat'
       if (draft.messages.filter((item) => item.role === 'user').length === 1 || (project && draft.title === `${project.name} 분석`)) draft.title = message.slice(0, 48)
     })
     this.emit(next)
@@ -547,8 +557,10 @@ export class NativeAgentService {
             : response.toolNames
           const missingTools = missingRequiredOpenCodeTools(requiredToolNames, actualToolNames)
           if (missingTools.length) throw new Error(`OPENCODE_REQUIRED_TOOL_MISSING:${missingTools.join(',')}`)
+          const parsedReply = extractAnalysisViewProposal(response.content)
           session = await this.deps.store.update(session.id, (draft) => {
             draft.externalSessionId = response.externalSessionId
+            draft.analysisViewProposal = parsedReply.proposal ? { id: randomUUID(), ...parsedReply.proposal } : undefined
             const traces = response.toolTraces?.length
               ? response.toolTraces
               : response.toolNames.slice(0, 20).map((name) => ({ name, label: '', summary: '', evidenceSourceIds: [] }))
@@ -566,7 +578,7 @@ export class NativeAgentService {
           session = await this.deps.store.appendMessage(session.id, {
             role: 'assistant',
             content: enforceAgentScopeClaims(
-              enforceEvidenceBoundHistory(response.content, hasHistoricalTool((response.toolTraces?.length ? response.toolTraces.map((trace) => trace.name) : response.toolNames))),
+              enforceEvidenceBoundHistory(parsedReply.content || response.content, hasHistoricalTool((response.toolTraces?.length ? response.toolTraces.map((trace) => trace.name) : response.toolNames))),
               project, session.evaluationScopeId, lastRequest.sourceIds,
             ),
           })
@@ -622,9 +634,13 @@ export class NativeAgentService {
     try {
       const completed = await this.deps.llm.complete(prompt, signal, () => undefined)
       const project = await this.deps.projects.get(session.projectId)
+      const parsedReply = extractAnalysisViewProposal(completed.content)
+      session = await this.deps.store.update(session.id, (draft) => {
+        draft.analysisViewProposal = parsedReply.proposal ? { id: randomUUID(), ...parsedReply.proposal } : undefined
+      })
       session = await this.deps.store.appendMessage(session.id, {
         role: 'assistant', content: enforceAgentScopeClaims(
-          enforceEvidenceBoundHistory(enforceWorkflowProvenance(completed.content, confirmedWorkflow), hasHistoricalTool(results.map((result) => result.name))),
+          enforceEvidenceBoundHistory(enforceWorkflowProvenance(parsedReply.content || completed.content, confirmedWorkflow), hasHistoricalTool(results.map((result) => result.name))),
           project, session.evaluationScopeId, request.sourceIds,
         ),
         evidenceSourceIds: [...new Set(results.flatMap((item) => item.evidenceSourceIds))]

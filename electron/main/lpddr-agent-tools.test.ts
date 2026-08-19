@@ -13,7 +13,7 @@ describe('LPDDR agent tools', () => {
   it('shows only known saved result/pivot layout fields to the Agent', async () => {
     const contextProject = { ...project, exportPresets: [
       { id: 'sequence-control-tower.results-export.v1', name: '결과 열', format: 'csv' as const, options: { columns: ['filename', 'result'], secret: 'do-not-send' }, createdAt: '', updatedAt: '' },
-      { id: 'sequence-control-tower.patterns-layout.v1', name: '결과 축', format: 'json' as const, options: { rowAxes: ['sample'], columnAxes: ['temperature'], aggregation: 'count', secret: 'do-not-send' }, createdAt: '', updatedAt: '' },
+      { id: 'sequence-control-tower.patterns-layout.v1', name: '결과 축', format: 'json' as const, options: { rowAxes: ['sample'], columnAxes: ['temperature'], aggregation: 'count', visualization: 'heatmap', dataBasis: 'evaluation', secret: 'do-not-send' }, createdAt: '', updatedAt: '' },
     ] }
     const tools = new LpddrAgentToolService({
       artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
@@ -23,7 +23,7 @@ describe('LPDDR agent tools', () => {
     const result = await tools.execute('p', { name: 'project_context_get' })
     expect(result.data).toMatchObject({ savedLayouts: [
       { columns: ['filename', 'result'] },
-      { rowAxes: ['sample'], columnAxes: ['temperature'], aggregation: 'count' },
+      { rowAxes: ['sample'], columnAxes: ['temperature'], aggregation: 'count', visualization: 'heatmap', dataBasis: 'evaluation' },
     ] })
     expect(JSON.stringify(result.data)).not.toContain('do-not-send')
   })

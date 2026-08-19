@@ -60,7 +60,7 @@ const selectedStyle = (active: boolean, color?: string) => ({
   opacity: active ? 1 : .9,
 })
 
-const numberLabel = (value: number, aggregation: PivotAggregation) => aggregation === 'fail_rate'
+const numberLabel = (value: number, aggregation: PivotAggregation) => aggregation === 'fail_rate' || aggregation === 'fail_event_share'
   ? `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
   : value.toLocaleString('ko-KR')
 
@@ -131,6 +131,10 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
           const item = params.data
           const value = aggregation === 'pass_fail'
             ? `PASS ${item.passCount ?? 0} · FAIL ${item.failCount ?? 0}`
+            : aggregation === 'fail_event_count'
+              ? `Fail 주소 ${item.failureEventCount ?? item.value[2]}회 · ${item.failureSourceCount ?? 0}개 로그${item.topFailureSignature ? `<br/>${item.topFailureSignature}` : ''}`
+              : aggregation === 'fail_source_count'
+                ? `${item.failureSourceCount ?? item.value[2]}개 로그 · Fail 주소 ${item.failureEventCount ?? 0}회`
             : numberLabel(item.value[2], aggregation)
           return `<b>${item.name}</b><br/>${value}`
         },
@@ -144,7 +148,13 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
           label: {
             show: grid.rows.length * grid.columns.length <= 100,
             color: '#eef1f5', fontSize: 11,
-            formatter: aggregation === 'pass_fail' ? `P ${item.passCount ?? 0} · F ${item.failCount ?? 0}` : numberLabel(item.value, aggregation),
+            formatter: aggregation === 'pass_fail'
+              ? `PASS ${item.passCount ?? 0} · FAIL ${item.failCount ?? 0}`
+              : aggregation === 'fail_event_count'
+                ? `${item.failureEventCount ?? item.value}회`
+                : aggregation === 'fail_source_count'
+                  ? `${item.failureSourceCount ?? item.value}개`
+                  : numberLabel(item.value, aggregation),
           },
           emphasis: { itemStyle: { borderColor: '#fff', borderWidth: 1 } },
         })),
@@ -155,7 +165,7 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
   const model = analysisChartModel(grid)
   const horizontal = visualization === 'bar_horizontal'
   const categoryAxis = { type: 'category', data: model.categories, axisLabel: { color: TEXT, hideOverlap: true, width: horizontal ? 128 : undefined, overflow: 'truncate' }, axisLine: { lineStyle: { color: LINE } }, axisTick: { show: false } }
-  const valueAxis = { type: 'value', axisLabel: { color: MUTED, formatter: aggregation === 'fail_rate' ? '{value}%' : '{value}' }, splitLine: { lineStyle: { color: LINE } }, axisLine: { show: false } }
+  const valueAxis = { type: 'value', axisLabel: { color: MUTED, formatter: aggregation === 'fail_rate' || aggregation === 'fail_event_share' ? '{value}%' : '{value}' }, splitLine: { lineStyle: { color: LINE } }, axisLine: { show: false } }
   const commonCartesian = {
     ...base,
     grid: { top: 42, right: 26, bottom: 44, left: horizontal ? 48 : 34, containLabel: true },
@@ -189,7 +199,7 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
       yAxis: [valueAxis, { ...valueAxis, axisLabel: { color: '#dba96b', formatter: '{value}%' }, splitLine: { show: false } }],
       series: [
         { name: 'FAIL 건수', type: 'bar', barMaxWidth: 42, data: failData },
-        { name: 'FAIL률', type: 'line', yAxisIndex: 1, symbolSize: 7, smooth: false, data: rateData, lineStyle: { width: 2, color: '#dba96b' }, itemStyle: { color: '#dba96b' } },
+        { name: '불량률', type: 'line', yAxisIndex: 1, symbolSize: 7, smooth: false, data: rateData, lineStyle: { width: 2, color: '#dba96b' }, itemStyle: { color: '#dba96b' } },
       ],
     }
   }

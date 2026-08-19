@@ -512,4 +512,58 @@ describe('ArtifactService log workbench', () => {
     expect(JSON.stringify(result)).not.toContain('code=DQ9')
     expect(JSON.stringify(result)).not.toContain(root)
   })
+
+  it('extracts bounded fail-address events without returning log text or filename candidates', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    await writeFile(join(source, 'filename_DQ99_BL99.log'), [
+      'CONFIG DQ=31 BL=31 BANK=7',
+      '@FAIL CH=0 SUBCH=1 BG=2 BK=5 ROW=0x2A COL=0x14 DQ=0 BL=0 WR=0xAA RD=0xA8',
+      'HIDAG MISCOMPARE CH=0 SUBCH=1 BG=2 BK=5 ROW=0x2B COL=0x18 DQ=4 BL=8 WR=0x55 RD=0x51',
+    ].join('\n'), 'utf8')
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+    const artifact = imported.artifacts[0]
+    const location = artifact.sources![0]
+
+    const result = await service.inspectFailureAddresses({
+      sources: [{ sourceId: 'source-1', artifactId: artifact.id, rootId: location.rootId, relativePath: location.relativePath }],
+    })
+
+    expect(result.sources[0]).toMatchObject({ sourceId: 'source-1', truncated: false })
+    expect(result.sources[0].events).toEqual([
+      { lineNumber: 2, fields: expect.objectContaining({ channel: '0', subChannel: '1', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14', dq: '0', bl: '0', writeData: '0xAA', readData: '0xA8' }) },
+      { lineNumber: 3, fields: expect.objectContaining({ dq: '4', bl: '8' }) },
+    ])
+    expect(JSON.stringify(result)).not.toContain('@FAIL')
+    expect(JSON.stringify(result)).not.toContain('DQ99')
+    expect(JSON.stringify(result)).not.toContain(root)
+  })
+
+  it('scans every long-log source even when earlier logs contain more than the search detail limit', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    const event = (index: number) => `HIDAG @FAIL CH=0 SUBCH=0 BG=1 BK=3 ROW=0x${index.toString(16)} COL=0x14 DQ=9 BL=16 WR=0x55 RD=0x15`
+    await writeFile(join(source, 'a-many.log'), Array.from({ length: 2_100 }, (_, index) => event(index)).join('\n'), 'utf8')
+    await writeFile(join(source, 'z-late.log'), 'HIDAG @FAIL CH=2 SUBCH=1 BG=3 BK=7 ROW=0x2A COL=0x40 DQ=31 BL=32 WR=0xAA RD=0xA8\n', 'utf8')
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const imported = await service.importFolder(source, { extensions: ['log'] })
+    const first = imported.artifacts.find((artifact) => artifact.originalNames.includes('a-many.log'))!
+    const late = imported.artifacts.find((artifact) => artifact.originalNames.includes('z-late.log'))!
+
+    const result = await service.inspectFailureAddresses({ sources: [
+      { sourceId: 'many', artifactId: first.id },
+      { sourceId: 'late', artifactId: late.id },
+    ] })
+
+    expect(result.sources.find((sourceResult) => sourceResult.sourceId === 'many')).toMatchObject({ truncated: true, events: { length: 500 } })
+    expect(result.sources.find((sourceResult) => sourceResult.sourceId === 'late')).toMatchObject({
+      truncated: false,
+      events: [{ lineNumber: 1, fields: expect.objectContaining({ channel: '2', bank: '7', dq: '31', bl: '32' }) }],
+    })
+  })
 })

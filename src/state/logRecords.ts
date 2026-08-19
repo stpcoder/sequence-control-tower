@@ -4,7 +4,7 @@ import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 import { detectSocFilenameContext } from '../domain/soc-profile'
 import { extractLpddrFilenameDimensions } from '../domain/lpddr-filename-dimensions'
-import type { ProjectEvaluationDimensions } from '../../electron/shared/contracts'
+import type { ArtifactFailureAddressEvent, ArtifactFailureAddressFields, ProjectEvaluationDimensions } from '../../electron/shared/contracts'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
@@ -40,6 +40,7 @@ export interface MetadataApprovalValue {
 
 export type MetadataApprovalsBySource = Readonly<Record<string, Readonly<Record<string, MetadataApprovalValue>>>>
 export type StageResultsBySource = Readonly<Record<string, readonly EvaluationStageResult[]>>
+export type FailureAddressEventsBySource = Record<string, { events: readonly ArtifactFailureAddressEvent[]; truncated: boolean }>
 
 export interface LogResultRecord {
   id: string
@@ -59,6 +60,9 @@ export interface LogResultRecord {
   resultSource: ResultSource
   /** Independent checkpoints found in one log; a log may contain several passes before its final result. */
   stageResults: readonly EvaluationStageResult[]
+  /** Explicit fail-address events extracted from log lines, never filename metadata. */
+  failureAddressEvents?: readonly ArtifactFailureAddressEvent[]
+  failureAddressTruncated?: boolean
   review: ReviewState
   evidenceCount: number
   selectedEvidenceCount: number
@@ -75,6 +79,7 @@ export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 's
   | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs'
 export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
 export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'evidence_count'
+  | 'fail_event_count' | 'fail_source_count' | 'fail_event_share'
 
 /** Configuration for the results pivot. Axis lists are intentionally bounded to three dimensions. */
 export interface PivotConfig {
@@ -94,12 +99,22 @@ export interface PivotCell {
   value: number
   sourceIds: readonly string[]
   breakdown?: PivotOutcomeBreakdown
+  failureAddress?: PivotFailureAddressBreakdown
 }
 
 export interface PivotOutcomeBreakdown {
   passCount: number
   failCount: number
   definitiveCount: number
+  topFailureSignature?: string
+}
+
+export interface PivotFailureAddressBreakdown {
+  eventCount: number
+  sourceCount: number
+  totalEventCount: number
+  eventShare: number
+  topSignature?: string
 }
 
 export interface PivotGrid {
@@ -109,6 +124,7 @@ export interface PivotGrid {
   total: number
   sourceIds: readonly string[]
   breakdown?: PivotOutcomeBreakdown
+  failureAddress?: PivotFailureAddressBreakdown
 }
 
 /** Returns whether a renderer's selected pivot cell still exists in its current scope. */
@@ -155,6 +171,72 @@ export interface AggregateTrend {
 export interface AggregateTrendSummary {
   total: number
   trends: readonly AggregateTrend[]
+}
+
+export interface FailureAddressDistribution {
+  dimension: keyof ArtifactFailureAddressFields
+  value: string
+  eventCount: number
+  sourceCount: number
+  eventShare: number
+}
+
+export interface FailureAddressSummary {
+  eventCount: number
+  sourceCount: number
+  truncated: boolean
+  distribution: readonly FailureAddressDistribution[]
+}
+
+const FAILURE_ADDRESS_DISPLAY_ORDER: Record<keyof ArtifactFailureAddressFields, number> = {
+  dq: 0,
+  bl: 1,
+  channel: 2,
+  subChannel: 3,
+  bankGroup: 4,
+  bank: 5,
+  chipSelect: 6,
+  rank: 7,
+  row: 8,
+  column: 9,
+  writeData: 10,
+  readData: 11,
+}
+
+/** Summarizes explicit log-body events without mixing filename dimensions. */
+export function summarizeFailureAddressEvents(rows: readonly LogResultRecord[]): FailureAddressSummary {
+  const buckets = new Map<string, { dimension: keyof ArtifactFailureAddressFields; value: string; eventCount: number; sourceIds: Set<string> }>()
+  let eventCount = 0
+  const sourceIds = new Set<string>()
+  for (const row of rows) {
+    for (const event of row.failureAddressEvents ?? []) {
+      eventCount += 1
+      sourceIds.add(row.id)
+      for (const [dimension, raw] of Object.entries(event.fields) as Array<[keyof ArtifactFailureAddressFields, string | undefined]>) {
+        if (raw === undefined || raw === '') continue
+        const key = `${dimension}\u0000${raw}`
+        const bucket = buckets.get(key) ?? { dimension, value: raw, eventCount: 0, sourceIds: new Set<string>() }
+        bucket.eventCount += 1
+        bucket.sourceIds.add(row.id)
+        buckets.set(key, bucket)
+      }
+    }
+  }
+  return {
+    eventCount,
+    sourceCount: sourceIds.size,
+    truncated: rows.some((row) => row.failureAddressTruncated),
+    distribution: [...buckets.values()].map((item) => ({
+      dimension: item.dimension,
+      value: item.value,
+      eventCount: item.eventCount,
+      sourceCount: item.sourceIds.size,
+      eventShare: eventCount ? item.eventCount / eventCount : 0,
+    })).sort((left, right) => right.eventCount - left.eventCount
+      || right.sourceCount - left.sourceCount
+      || FAILURE_ADDRESS_DISPLAY_ORDER[left.dimension] - FAILURE_ADDRESS_DISPLAY_ORDER[right.dimension]
+      || left.value.localeCompare(right.value, 'ko-KR', { numeric: true })),
+  }
 }
 
 const TREND_MIN_TOTAL = 5
@@ -534,6 +616,7 @@ export function projectLogRecords(
   selectedEvidence: Readonly<Record<string, number>> = {},
   metadataApprovals: MetadataApprovalsBySource = {},
   stageResultsBySource: StageResultsBySource = {},
+  failureAddressEventsBySource: FailureAddressEventsBySource = {},
 ): LogResultRecord[] {
   const folderLabels = rootAwareFolderLabels(files)
   return files.map((file) => {
@@ -551,6 +634,7 @@ export function projectLogRecords(
     const inferred = inferResultCandidate(file)
     const stageResults = stageResultsBySource[file.id] ?? inferStageResults(file)
     const result = file.decision ?? file.ruleResult ?? inferred.result
+    const failureAddress = failureAddressEventsBySource[file.id]
     const resultSource: ResultSource = file.decision
       ? 'engineer'
       : file.ruleResult || inferred.result !== 'UNKNOWN'
@@ -580,11 +664,17 @@ export function projectLogRecords(
       result,
       resultSource,
       stageResults,
+      ...(pivotFailureResult(result) && failureAddress?.events.length ? { failureAddressEvents: failureAddress.events } : {}),
+      ...(pivotFailureResult(result) && failureAddress?.truncated ? { failureAddressTruncated: true } : {}),
       review: file.decision && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
       evidenceCount: hasSelectedEvidence ? selectedEvidenceCount : inferred.evidenceCount,
       selectedEvidenceCount,
     }
   })
+}
+
+function pivotFailureResult(result: ResultLabel): boolean {
+  return result !== 'PASS' && result !== 'UNKNOWN' && result !== 'INCOMPLETE' && result !== 'EXCLUDED'
 }
 
 function normalized(value: string | null | undefined): string {
@@ -604,8 +694,19 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
 }
 
 const PIVOT_UNKNOWN = '미확인'
+const FAILURE_ADDRESS_DIMENSIONS = new Set<PivotDimension>([
+  'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'dq', 'bl',
+])
+const FAILURE_ADDRESS_LABELS: ReadonlyArray<[keyof ArtifactFailureAddressFields, string]> = [
+  ['dq', 'DQ'], ['bl', 'BL'], ['channel', 'Channel'], ['subChannel', 'Sub Channel'],
+  ['bankGroup', 'Bank Group'], ['bank', 'Bank'], ['row', 'Row'], ['column', 'Column'],
+]
 
-function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension): string {
+function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension, event?: ArtifactFailureAddressEvent): string {
+  if (event && FAILURE_ADDRESS_DIMENSIONS.has(dimension)) {
+    const value = event.fields[dimension as keyof ArtifactFailureAddressFields]
+    return value === undefined || value === null || value === '' ? PIVOT_UNKNOWN : String(value)
+  }
   if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') {
     return row[dimension].value ?? PIVOT_UNKNOWN
   }
@@ -629,7 +730,7 @@ function comparePivotHeaders(left: PivotHeader, right: PivotHeader): number {
 }
 
 function pivotFailure(row: LogResultRecord): boolean {
-  return row.result !== 'PASS' && row.result !== 'UNKNOWN' && row.result !== 'INCOMPLETE' && row.result !== 'EXCLUDED'
+  return pivotFailureResult(row.result)
 }
 
 type PivotAccumulator = {
@@ -641,9 +742,41 @@ type PivotAccumulator = {
   sampleIds: Set<string>
   gridIds: Set<string>
   sourceIds: string[]
+  failureEventCount: number
+  signatureCounts: Map<string, number>
+  failureSourceIds: Set<string>
 }
 
-function pivotAccumulatorValue(value: PivotAccumulator, aggregation: PivotAggregation): number {
+function freshPivotAccumulator(): PivotAccumulator {
+  return { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set(), gridIds: new Set(), sourceIds: [], failureEventCount: 0, signatureCounts: new Map(), failureSourceIds: new Set() }
+}
+
+function failureSignature(fields: ArtifactFailureAddressFields): string | undefined {
+  const parts = FAILURE_ADDRESS_LABELS.flatMap(([key, label]) => {
+    const value = fields[key]
+    return value === undefined || value === null || value === '' ? [] : [`${label} ${value}`]
+  })
+  return parts.slice(0, 2).join(' · ') || undefined
+}
+
+function addFailureEvent(value: PivotAccumulator, event: ArtifactFailureAddressEvent, sourceId: string): void {
+  value.failureEventCount += 1
+  value.failureSourceIds.add(sourceId)
+  const signature = failureSignature(event.fields)
+  if (signature) value.signatureCounts.set(signature, (value.signatureCounts.get(signature) ?? 0) + 1)
+}
+
+function topFailureSignature(value: PivotAccumulator | undefined): string | undefined {
+  return value ? [...value.signatureCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'ko-KR', { numeric: true }))
+    .at(0)?.[0] : undefined
+}
+
+export function isFailureAddressAggregation(aggregation: PivotAggregation): boolean {
+  return aggregation === 'fail_event_count' || aggregation === 'fail_source_count' || aggregation === 'fail_event_share'
+}
+
+function pivotAccumulatorValue(value: PivotAccumulator, aggregation: PivotAggregation, totalFailureEvents = value.failureEventCount): number {
   if (aggregation === 'evidence_count') return value.evidenceCount
   if (aggregation === 'sample_count') return value.sampleIds.size
   if (aggregation === 'grid_count') return value.gridIds.size
@@ -651,6 +784,9 @@ function pivotAccumulatorValue(value: PivotAccumulator, aggregation: PivotAggreg
   if (aggregation === 'fail_count') return value.failCount
   if (aggregation === 'pass_fail') return value.definitiveCount
   if (aggregation === 'fail_rate') return value.definitiveCount ? Math.round((value.failCount / value.definitiveCount) * 1_000) / 10 : 0
+  if (aggregation === 'fail_event_count') return value.failureEventCount
+  if (aggregation === 'fail_source_count') return value.failureSourceIds.size
+  if (aggregation === 'fail_event_share') return totalFailureEvents ? Math.round((value.failureEventCount / totalFailureEvents) * 1_000) / 10 : 0
   return value.recordCount
 }
 
@@ -668,17 +804,10 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
   const columnMap = new Map<string, PivotHeader>()
   const values = new Map<string, PivotAccumulator>()
   const allSourceIds: string[] = []
-  const total: PivotAccumulator = { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set(), gridIds: new Set(), sourceIds: [] }
+  const total = freshPivotAccumulator()
+  const failureAddressMode = isFailureAddressAggregation(config.aggregation)
 
   for (const row of filtered) {
-    const rowValues = config.rows.map((dimension) => pivotDimensionValue(row, dimension))
-    const columnValues = config.columns.map((dimension) => pivotDimensionValue(row, dimension))
-    const rowHeader: PivotHeader = { key: pivotKey(rowValues), values: [...rowValues], label: rowValues.join(' / ') || '전체' }
-    const columnHeader: PivotHeader = { key: pivotKey(columnValues), values: [...columnValues], label: columnValues.join(' / ') || '전체' }
-    rowMap.set(rowHeader.key, rowHeader)
-    columnMap.set(columnHeader.key, columnHeader)
-    const cellKey = `${rowHeader.key}\u0000${columnHeader.key}`
-    const cell = values.get(cellKey) ?? { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set<string>(), gridIds: new Set<string>(), sourceIds: [] }
     const failed = pivotFailure(row)
     const passed = row.result === 'PASS'
     const definitive = passed || failed
@@ -687,31 +816,54 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
     const gridKey = gridId === undefined || gridId === null || String(gridId).trim() === ''
       ? undefined
       : JSON.stringify([row.folder, sampleId ?? '', String(gridId).trim(), row.run ?? ''])
-    cell.recordCount += 1
-    cell.definitiveCount += definitive ? 1 : 0
-    cell.passCount += passed ? 1 : 0
-    cell.failCount += failed ? 1 : 0
-    cell.evidenceCount += row.evidenceCount
-    if (sampleId !== undefined && sampleId !== null && String(sampleId).trim()) cell.sampleIds.add(String(sampleId).trim())
-    if (gridKey) cell.gridIds.add(gridKey)
-    total.recordCount += 1
-    total.definitiveCount += definitive ? 1 : 0
-    total.passCount += passed ? 1 : 0
-    total.failCount += failed ? 1 : 0
-    total.evidenceCount += row.evidenceCount
-    if (sampleId !== undefined && sampleId !== null && String(sampleId).trim()) total.sampleIds.add(String(sampleId).trim())
-    if (gridKey) total.gridIds.add(gridKey)
-    const includeSource = config.aggregation === 'count'
-      || (config.aggregation === 'sample_count' && sampleId !== undefined && sampleId !== null && String(sampleId).trim() !== '')
-      || (config.aggregation === 'grid_count' && Boolean(gridKey))
-      || (config.aggregation === 'pass_count' && passed)
-      || (config.aggregation === 'pass_fail' && definitive)
-      || (config.aggregation === 'fail_rate' && definitive)
-      || (config.aggregation === 'fail_count' && failed)
-      || (config.aggregation === 'evidence_count' && row.evidenceCount > 0)
-    if (includeSource && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
-    values.set(cellKey, cell)
-    if (!allSourceIds.includes(row.id)) allSourceIds.push(row.id)
+    const events = failureAddressMode ? [...(row.failureAddressEvents ?? [])] : [undefined]
+    for (const event of events) {
+      const rowValues = config.rows.map((dimension) => pivotDimensionValue(row, dimension, event))
+      const columnValues = config.columns.map((dimension) => pivotDimensionValue(row, dimension, event))
+      const rowHeader: PivotHeader = { key: pivotKey(rowValues), values: [...rowValues], label: rowValues.join(' / ') || '전체' }
+      const columnHeader: PivotHeader = { key: pivotKey(columnValues), values: [...columnValues], label: columnValues.join(' / ') || '전체' }
+      rowMap.set(rowHeader.key, rowHeader)
+      columnMap.set(columnHeader.key, columnHeader)
+      const cellKey = `${rowHeader.key}\u0000${columnHeader.key}`
+      const cell = values.get(cellKey) ?? freshPivotAccumulator()
+      cell.recordCount += 1
+      total.recordCount += 1
+      if (failureAddressMode && event) {
+        addFailureEvent(cell, event, row.id)
+        addFailureEvent(total, event, row.id)
+      } else {
+        cell.definitiveCount += definitive ? 1 : 0
+        cell.passCount += passed ? 1 : 0
+        cell.failCount += failed ? 1 : 0
+        cell.evidenceCount += row.evidenceCount
+        total.definitiveCount += definitive ? 1 : 0
+        total.passCount += passed ? 1 : 0
+        total.failCount += failed ? 1 : 0
+        total.evidenceCount += row.evidenceCount
+        for (const addressEvent of row.failureAddressEvents ?? []) {
+          addFailureEvent(cell, addressEvent, row.id)
+          addFailureEvent(total, addressEvent, row.id)
+        }
+      }
+      if (sampleId !== undefined && sampleId !== null && String(sampleId).trim()) {
+        cell.sampleIds.add(String(sampleId).trim())
+        total.sampleIds.add(String(sampleId).trim())
+      }
+      if (gridKey) { cell.gridIds.add(gridKey); total.gridIds.add(gridKey) }
+      const includeSource = failureAddressMode
+        || config.aggregation === 'count'
+        || (config.aggregation === 'sample_count' && sampleId !== undefined && sampleId !== null && String(sampleId).trim() !== '')
+        || (config.aggregation === 'grid_count' && Boolean(gridKey))
+        || (config.aggregation === 'pass_count' && passed)
+        || (config.aggregation === 'pass_fail' && definitive)
+        || (config.aggregation === 'fail_rate' && definitive)
+        || (config.aggregation === 'fail_count' && failed)
+        || (config.aggregation === 'evidence_count' && row.evidenceCount > 0)
+      if (includeSource && !cell.sourceIds.includes(row.id)) cell.sourceIds.push(row.id)
+      if (includeSource && !total.sourceIds.includes(row.id)) total.sourceIds.push(row.id)
+      values.set(cellKey, cell)
+      if (includeSource && !allSourceIds.includes(row.id)) allSourceIds.push(row.id)
+    }
   }
 
   const pivotRows = [...rowMap.values()].sort(comparePivotHeaders)
@@ -719,12 +871,20 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
   const cells = pivotRows.map((rowHeader) => pivotColumns.map((columnHeader) => {
     const cell = values.get(`${rowHeader.key}\u0000${columnHeader.key}`)
     return {
-      value: cell ? pivotAccumulatorValue(cell, config.aggregation) : 0,
+      value: cell ? pivotAccumulatorValue(cell, config.aggregation, total.failureEventCount) : 0,
       sourceIds: Object.freeze([...(cell?.sourceIds ?? [])]),
-      ...(config.aggregation === 'pass_fail' ? { breakdown: {
+      ...(['pass_fail', 'fail_rate'].includes(config.aggregation) ? { breakdown: {
         passCount: cell?.passCount ?? 0,
         failCount: cell?.failCount ?? 0,
         definitiveCount: cell?.definitiveCount ?? 0,
+        ...(topFailureSignature(cell) ? { topFailureSignature: topFailureSignature(cell) } : {}),
+      } } : {}),
+      ...(cell?.failureEventCount ? { failureAddress: {
+        eventCount: cell.failureEventCount,
+        sourceCount: cell.failureSourceIds.size,
+        totalEventCount: total.failureEventCount,
+        eventShare: total.failureEventCount ? cell.failureEventCount / total.failureEventCount : 0,
+        ...(topFailureSignature(cell) ? { topSignature: topFailureSignature(cell) } : {}),
       } } : {}),
     }
   }))
@@ -732,12 +892,20 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
     rows: Object.freeze(pivotRows.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
     columns: Object.freeze(pivotColumns.map((header) => ({ ...header, values: Object.freeze([...header.values]) }))),
     cells: Object.freeze(cells.map((row) => Object.freeze(row))),
-    total: pivotAccumulatorValue(total, config.aggregation),
+    total: pivotAccumulatorValue(total, config.aggregation, total.failureEventCount),
     sourceIds: Object.freeze(allSourceIds),
-    ...(config.aggregation === 'pass_fail' ? { breakdown: {
+    ...(['pass_fail', 'fail_rate'].includes(config.aggregation) ? { breakdown: {
       passCount: total.passCount,
       failCount: total.failCount,
       definitiveCount: total.definitiveCount,
+      ...(topFailureSignature(total) ? { topFailureSignature: topFailureSignature(total) } : {}),
+    } } : {}),
+    ...(total.failureEventCount ? { failureAddress: {
+      eventCount: total.failureEventCount,
+      sourceCount: total.failureSourceIds.size,
+      totalEventCount: total.failureEventCount,
+      eventShare: 1,
+      ...(topFailureSignature(total) ? { topSignature: topFailureSignature(total) } : {}),
     } } : {}),
   }
 }
@@ -983,6 +1151,51 @@ function exportRows(rows: readonly LogResultRecord[], columns: readonly LogRecor
 
 export function normalizedExportCell(value: unknown): string {
   return safeSpreadsheetCell(value).replace(/[\t\r\n]+/g, ' ')
+}
+
+const FAILURE_ADDRESS_EXPORT_COLUMNS = [
+  'source_id', 'artifact_id', 'filename', 'folder', 'line_number', 'result',
+  'sample', 'skew', 'lot', 'die', 'grid', 'run', 'temperature_c', 'temperature_corner',
+  'vdd', 'vdd_corner', 'frequency_mhz', 'test_mode', 'pattern', 'soc_model',
+  'channel', 'sub_channel', 'chip_select', 'rank', 'bank_group', 'bank', 'row', 'column', 'dq', 'bl', 'write_data', 'read_data',
+] as const
+
+/** Exports one explicit fail-address event per row for Spotfire/Excel joins. */
+export function serializeFailureAddressEventsCsv(rows: readonly LogResultRecord[]): string {
+  const records: unknown[][] = [
+    [...FAILURE_ADDRESS_EXPORT_COLUMNS],
+    ...rows.flatMap((record) => (record.failureAddressEvents ?? []).map((event) => {
+      const fields = event.fields
+      const values: Record<(typeof FAILURE_ADDRESS_EXPORT_COLUMNS)[number], unknown> = {
+        source_id: record.id,
+        artifact_id: record.artifactId ?? '',
+        filename: pathBaseName(record.fileName),
+        folder: safeExportPath(record.folder),
+        line_number: event.lineNumber,
+        result: record.result,
+        sample: record.sample.value ?? record.dimensions?.sample ?? '',
+        skew: record.dimensions?.skew ?? '',
+        lot: record.dimensions?.lot ?? '',
+        die: record.dimensions?.die ?? '',
+        grid: record.grid.value ?? record.dimensions?.gridId ?? '',
+        run: record.run ?? '',
+        temperature_c: record.temperature.value ?? record.dimensions?.temperatureC ?? '',
+        temperature_corner: record.dimensions?.temperatureCorner ?? '',
+        vdd: record.dimensions?.vdd ?? '',
+        vdd_corner: record.dimensions?.vddCorner ?? '',
+        frequency_mhz: record.dimensions?.frequencyMHz ?? '',
+        test_mode: record.mode.value ?? record.dimensions?.testMode ?? '',
+        pattern: record.dimensions?.pattern ?? '',
+        soc_model: record.dimensions?.socModel ?? '',
+        channel: fields.channel ?? '', sub_channel: fields.subChannel ?? '', chip_select: fields.chipSelect ?? '', rank: fields.rank ?? '',
+        bank_group: fields.bankGroup ?? '', bank: fields.bank ?? '', row: fields.row ?? '', column: fields.column ?? '',
+        dq: fields.dq ?? '', bl: fields.bl ?? '', write_data: fields.writeData ?? '', read_data: fields.readData ?? '',
+      }
+      return FAILURE_ADDRESS_EXPORT_COLUMNS.map((column) => values[column])
+    })),
+  ]
+  const escape = (value: unknown) => `"${normalizedExportCell(value).replace(/"/g, '""')}"`
+  return `\uFEFF${records.map((record) => record.map(escape).join(',')).join('\r\n')}`
 }
 
 /** Exports the visible n×m pivot exactly as arranged on screen. */
