@@ -540,7 +540,7 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentSend, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
     const value = input as NativeAgentSendRequest
-    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds)
+    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds, value.contextKind)
   })
   handle(IPC_CHANNELS.nativeAgentRetry, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')

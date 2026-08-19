@@ -19,6 +19,7 @@ describe('analysis selections handed to the native Agent', () => {
       regex: false, caseSensitive: true, wholeWord: false,
     })
     expect(request.fileIds).toEqual(['a', 'b'])
+    expect(request.contextKind).toBe('log_search')
     expect(request.prompt).toContain('현재 평가')
     expect(request.prompt).toContain('12회 일치')
     expect(request.prompt).toContain('검색 순서로 확정할지 제안')
@@ -28,6 +29,7 @@ describe('analysis selections handed to the native Agent', () => {
   it('keeps selected result folders separate and asks for denominators', () => {
     const request = resultRowsAgentContext([row('a', 'screen', 'TEST_FAIL'), row('b', 'improve', 'PASS')])
     expect(request.fileIds).toEqual(['a', 'b'])
+    expect(request.contextKind).toBe('project_compare')
     expect(request.prompt).toContain('평가 폴더 2개')
     expect(request.prompt).toContain('TEST_FAIL 1, PASS 1')
     expect(request.prompt).toContain('하나의 평가로 합치지 말고')
@@ -79,6 +81,8 @@ describe('analysis selections handed to the native Agent', () => {
       selected: [{ rowValues: ['5'], columnValues: ['9'], displayValue: '3' }],
     })
     expect(request.title).toBe('선택 조건 1개 분석')
+    expect(request.contextKind).toBe('analysis_view')
+    expect(request.prompt).toContain('[SCT_ANALYSIS_VIEW_CONTEXT]')
     expect(request.prompt).toContain('Heatmap')
     expect(request.prompt).toContain('Bank=5')
     expect(request.prompt).toContain('DQ=9')

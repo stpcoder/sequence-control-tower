@@ -1,4 +1,4 @@
-import type { JsonValue, ProjectExportPreset } from '../../electron/shared/contracts'
+import type { JsonValue, NativeAgentAnalysisViewProposal, ProjectExportPreset } from '../../electron/shared/contracts'
 import type { ResultLabel } from '../domain/workbench'
 import { isFailureAddressAggregation, type PivotAggregation, type PivotDimension } from './logRecords'
 import { normalizedVisualization, type AnalysisDataBasis, type AnalysisVisualization } from '../domain/analysis-view'
@@ -89,4 +89,18 @@ export function patternLayoutPreset(layout: PatternLayout, existing?: ProjectExp
     options: normalizePatternLayout(layout) as unknown as Record<string, JsonValue>,
     ...(existing?.archived ? { archived: false } : {}),
   }
+}
+
+/** Apply an Agent suggestion as ordinary renderer state. Filters not named by
+ * the proposal are preserved and persistence remains a separate user action. */
+export function patternLayoutWithAgentProposal(current: PatternLayout, proposal: NativeAgentAnalysisViewProposal): PatternLayout {
+  return normalizePatternLayout({
+    ...current,
+    rowAxes: proposal.rowAxes,
+    columnAxes: proposal.columnAxes,
+    aggregation: proposal.aggregation,
+    visualization: proposal.visualization,
+    dataBasis: proposal.dataBasis,
+    ...(proposal.failOnly !== undefined ? { failOnly: proposal.failOnly } : {}),
+  })
 }

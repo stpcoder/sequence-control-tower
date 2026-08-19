@@ -810,6 +810,22 @@
   gap: 7px;
 }
 
+.analysis-agent-preview {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  margin: -3px 0 10px;
+  color: #a9c6f4;
+  font-size: 12px;
+}
+
+.analysis-agent-preview > svg { flex: 0 0 auto; }
+.analysis-agent-preview > span { color: #dce9fb; font-weight: 650; }
+.analysis-agent-preview > small { min-width: 0; overflow: hidden; color: var(--data-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-agent-preview > button { min-height: 30px; margin-left: auto; padding: 0 8px; border-radius: 6px; color: var(--data-muted); font-size: 11px; }
+.analysis-agent-preview > button:hover { color: #fff; background: var(--sct-hover); }
+
 .analysis-view-presets,
 .analysis-visualization-picker {
   position: relative;

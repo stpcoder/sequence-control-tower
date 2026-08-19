@@ -2,17 +2,18 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type {
   EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerConsolePromptRuleView, EngineerEvaluationAttemptView, EngineerWorkflowCheckView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
-  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentMessageView, NativeAgentSearchEventInput,
+  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentContextKind, NativeAgentMessageView, NativeAgentSearchEventInput,
   NativeAgentSessionStatus, NativeAgentSessionSummary, NativeAgentSessionView,
   NativeAgentToolTraceView, ProjectEvaluationDimensions
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
 import { buildEngineerWorkflowCandidate, engineerWorkflowContextCompatibility, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
+import { normalizeAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
 
 export interface StoredNativeAgentSession extends NativeAgentSessionView {
   externalSessionId?: string
-  lastRequest?: { content: string; sourceIds: string[] }
+  lastRequest?: { content: string; sourceIds: string[]; contextKind?: NativeAgentContextKind }
 }
 
 export interface SearchEvent extends NativeAgentSearchEventInput { id: string; occurredAt: string }
@@ -145,6 +146,10 @@ export class NativeAgentStore {
       session.title = clean(session.title, 160) || '새 분석'
       session.failure = session.failure ? clean(session.failure, 500) : undefined
       session.evaluationIntent = session.evaluationIntent ? clean(session.evaluationIntent, 400) : undefined
+      const proposal = normalizeAnalysisViewProposal(session.analysisViewProposal)
+      session.analysisViewProposal = proposal && session.analysisViewProposal?.id
+        ? { id: clean(session.analysisViewProposal.id, 160), ...proposal }
+        : undefined
       session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
       session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
       if (session.question) {
@@ -598,6 +603,7 @@ export class NativeAgentStore {
     id: clean(message.id, 160), role: message.role, content: clean(message.content, 12_000),
     createdAt: clean(message.createdAt, 80),
     ...(message.toolTraceId ? { toolTraceId: clean(message.toolTraceId, 160) } : {}),
+    ...(message.contextKind ? { contextKind: message.contextKind } : {}),
     ...(message.evidenceSourceIds?.length ? { evidenceSourceIds: [...new Set(message.evidenceSourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100) } : {})
   })
 

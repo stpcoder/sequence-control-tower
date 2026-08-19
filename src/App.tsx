@@ -41,6 +41,7 @@ import type {
   RendererCommand,
   ArtifactStageScanInput,
   ArtifactFailureAddressScanInput,
+  NativeAgentAnalysisViewProposal,
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
@@ -345,6 +346,7 @@ export default function App() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [evaluationAgentLaunch, setEvaluationAgentLaunch] = useState<EvaluationAgentLaunchRequest | null>(null)
   const [nativeAgentLaunch, setNativeAgentLaunch] = useState<NativeAgentLaunchRequest | null>(null)
+  const [agentAnalysisViewRequest, setAgentAnalysisViewRequest] = useState<NativeAgentAnalysisViewProposal | null>(null)
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationProjectSnapshot | null>(null)
   const [project, setProject] = useState<ProjectSnapshot | null>(null)
@@ -850,6 +852,7 @@ export default function App() {
       title: request.title,
       prompt: unique.length > selected.length ? `${request.prompt}\n\n전체 ${unique.length.toLocaleString('ko-KR')}개 중 Agent 한도에 맞춰 앞 ${selected.length}개 로그를 확인합니다.` : request.prompt,
       sourceIds: selected.map((source) => source.sourceId),
+      contextKind: roots.length > 1 ? 'project_compare' : request.contextKind,
       ...(evaluationScopeId ? { evaluationScopeId } : {}),
     })
     setAgentOpen(true)
@@ -947,7 +950,7 @@ export default function App() {
   ) : activePage === 'results' ? (
     <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} onAnalyzeContext={launchAgentContext} />
   ) : activePage === 'patterns' ? (
-    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} />
+    <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} agentViewRequest={agentAnalysisViewRequest} onAgentViewRequestConsumed={() => setAgentAnalysisViewRequest(null)} />
   ) : activePage === 'history' ? (
     <EvaluationMemoryView
       memory={memory}
@@ -992,6 +995,10 @@ export default function App() {
         evaluationLaunchRequest={evaluationAgentLaunch}
         nativeLaunchRequest={nativeAgentLaunch}
         onOpenSource={openProjectSource}
+        onApplyAnalysisViewProposal={(proposal) => {
+          setAgentAnalysisViewRequest(proposal)
+          navigate('patterns')
+        }}
       /> : null}
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}

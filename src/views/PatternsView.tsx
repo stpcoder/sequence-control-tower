@@ -52,13 +52,14 @@ import {
   type PivotDimension,
   type PivotHeader,
 } from '../state/logRecords'
-import type { ProjectSnapshot } from '../../electron/shared/contracts'
+import type { NativeAgentAnalysisViewProposal, ProjectSnapshot } from '../../electron/shared/contracts'
 import {
   DEFAULT_PATTERN_LAYOUT,
   MAX_PATTERN_AXES,
   PATTERN_LAYOUT_PRESET_ID,
   patternLayoutFromPreset,
   patternLayoutPreset,
+  patternLayoutWithAgentProposal,
   type PatternLayout,
 } from '../state/patternLayout'
 import { analysisViewAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
@@ -82,6 +83,8 @@ interface PatternsViewProps {
   onProjectUpdated: (project: ProjectSnapshot) => void
   onNotify: (message: string, tone?: 'success' | 'error' | 'info') => void
   onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
+  agentViewRequest?: NativeAgentAnalysisViewProposal | null
+  onAgentViewRequestConsumed?: () => void
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
@@ -357,7 +360,7 @@ export function isProjectRevisionConflict(error: unknown): boolean {
   return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
 }
 
-export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify, onAnalyzeContext }: PatternsViewProps) {
+export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify, onAnalyzeContext, agentViewRequest, onAgentViewRequestConsumed }: PatternsViewProps) {
   const [rowAxes, setRowAxes] = useState<PatternLayout['rowAxes']>(DEFAULT_PATTERN_LAYOUT.rowAxes)
   const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
   const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
@@ -371,6 +374,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const [markedCellKeys, setMarkedCellKeys] = useState<ReadonlySet<string>>(() => new Set())
   const [draggedAxis, setDraggedAxis] = useState<DraggedAxis | null>(null)
   const [rawDetailsOpen, setRawDetailsOpen] = useState(false)
+  const [agentPreview, setAgentPreview] = useState<{ id: string; previous: PatternLayout; proposal: NativeAgentAnalysisViewProposal } | null>(null)
   const chartExportRef = useRef<(() => string | null) | null>(null)
 
   useEffect(() => {
@@ -378,7 +382,22 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation); setVisualization(layout.visualization); setDataBasis(layout.dataBasis)
     setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
     setMarkedCellKeys(new Set())
+    setAgentPreview(null)
   }, [project?.id])
+
+  useEffect(() => {
+    if (!agentViewRequest || agentPreview?.id === agentViewRequest.id) return
+    setAgentPreview({
+      id: agentViewRequest.id,
+      previous: { rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly },
+      proposal: agentViewRequest,
+    })
+    const next = patternLayoutWithAgentProposal({ rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, agentViewRequest)
+    setRowAxes(next.rowAxes); setColumnAxes(next.columnAxes); setAggregation(next.aggregation); setVisualization(next.visualization); setDataBasis(next.dataBasis)
+    setResultFilter(next.resultFilter); setFolderFilter(next.folderFilter); setFailOnly(next.failOnly); setUnknownMetadataOnly(next.unknownMetadataOnly)
+    setMarkedCellKeys(new Set())
+    onAgentViewRequestConsumed?.()
+  }, [agentViewRequest?.id])
 
   const saveLayout = async () => {
     if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
@@ -400,6 +419,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         next = await persist(refreshed)
       }
       onProjectUpdated(next)
+      setAgentPreview(null)
       onNotify('표 구성을 저장했습니다.', 'success')
     } catch (error) {
       onNotify(error instanceof Error ? `구성을 저장하지 못했습니다: ${error.message}` : '구성을 저장하지 못했습니다.', 'error')
@@ -470,6 +490,13 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     return value === undefined || value === null || value === ''
   }))
   const clearSelection = () => setMarkedCellKeys(new Set())
+  const undoAgentPreview = () => {
+    if (!agentPreview) return
+    const previous = agentPreview.previous
+    setRowAxes(previous.rowAxes); setColumnAxes(previous.columnAxes); setAggregation(previous.aggregation); setVisualization(previous.visualization); setDataBasis(previous.dataBasis)
+    setResultFilter(previous.resultFilter); setFolderFilter(previous.folderFilter); setFailOnly(previous.failOnly); setUnknownMetadataOnly(previous.unknownMetadataOnly)
+    setAgentPreview(null); clearSelection()
+  }
 
   const markChartCells = (cellKeys: readonly string[], additive: boolean) => {
     setMarkedCellKeys((current) => {
@@ -652,6 +679,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       {dataBasis === 'evaluation' && trendSummary.trends.length ? <section className="trend-summary" aria-label="조건 경향 후보"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <h2 id="pivot-heading" className="sr-only">분석 보기</h2>
+        {agentPreview ? <div className="analysis-agent-preview" role="status"><Sparkles size={14} /><span>Agent 추천 보기</span>{agentPreview.proposal.rationale ? <small>{agentPreview.proposal.rationale}</small> : null}<button type="button" onClick={undoAgentPreview}>되돌리기</button></div> : null}
         <div className="analysis-viewbar">
           <details className="analysis-view-presets"><summary><span>분석 보기</span><b>{activePreset?.label ?? '사용자 구성'}</b><ChevronDown size={14} /></summary><div className="analysis-view-menu">
             {ANALYSIS_VIEW_PRESETS.map((preset) => <button type="button" className={activePreset?.id === preset.id ? 'active' : ''} key={preset.id} onClick={(event) => applyViewPreset(preset, event.currentTarget)}><span>{preset.label}</span><small>{ANALYSIS_DATA_BASIS_LABELS[preset.basis]} · {ANALYSIS_VISUALIZATION_LABELS[preset.visualization]}</small></button>)}

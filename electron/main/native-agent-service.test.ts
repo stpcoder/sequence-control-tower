@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, isStandardCommandSignature, missingRequiredOpenCodeTools, NativeAgentService, openCodeToolPresentation, planLpddrTools, requiredOpenCodeTools } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
+import type { NativeAgentSessionView } from '../shared/contracts'
 
 describe('planLpddrTools', () => {
   it('presents OpenCode tool traces as product language', () => {
@@ -144,6 +145,52 @@ describe('planLpddrTools', () => {
     await expect(service.send(session.id, ',         .', ['s1'])).rejects.toThrow('질문이나 확인할 로그 조건')
     expect((await store.get(session.id))?.messages.some((message) => message.content === ',         .')).toBe(false)
     await expect(service.create('p', undefined, 'folder-a', ['s2'])).rejects.toThrow('평가 폴더 로그 범위')
+  })
+
+  it('keeps menu context in one folder session and returns a typed, uncommitted Results Summary proposal', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-analysis-view-')))
+    const result = (name: string, sourceIds: string[], data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: sourceIds })
+    const execute = vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => result(
+      call.name,
+      sourceIds,
+      call.name === 'filename_dimensions_scan' ? { rows: [{ sourceId: 's1', dimensions: { socVendor: 'qualcomm', skew: 'SS', dq: 9 } }] }
+        : call.name === 'console_transcript_scan' ? { ambiguous: [] }
+          : call.name === 'engineer_workflow_memory_get' ? { confirmed: [] }
+            : call.name === 'failure_trends_get' ? { failAddress: { eventCount: 12, sourceCount: 4, distribution: [{ dimension: 'dq', value: '9', eventCount: 9 }] } }
+              : {},
+    ))
+    const complete = vi.fn()
+      .mockResolvedValueOnce({ content: 'DQ9 집중을 비교했습니다.\n<sct-analysis-view>{"dataBasis":"failure_address","rowAxes":["dq"],"columnAxes":["bl"],"aggregation":"fail_event_count","visualization":"heatmap","failOnly":true,"rationale":"DQ·BL 주소 집중을 확인합니다."}</sct-analysis-view>' })
+      .mockResolvedValueOnce({ content: '선택한 결과의 분모를 다시 확인했습니다.' })
+    const scopedProject = {
+      id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM-8975_SS_DQ9.log' }],
+      evaluationNodes: [{ id: 'n1', evaluationScopeId: 'folder-a', name: 'VPERI 재현', purpose: 'reproduction', interpretation: '동일 조건 RT', reviewState: 'confirmed' }],
+    }
+    const service = new NativeAgentService({
+      store, tools: { execute }, projects: { get: vi.fn(async () => scopedProject) }, artifacts: { list: vi.fn(async () => []) },
+      llm: { complete }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    await service.initialize()
+    const session = await service.create('p', 'VPERI 분석', 'folder-a', ['s1'])
+    const waitForIdle = () => new Promise<NativeAgentSessionView>((resolve) => {
+      const unsubscribe = service.onUpdate((next) => {
+        if (next.id === session.id && next.status === 'idle' && next.messages.at(-1)?.role === 'assistant') { unsubscribe(); resolve(next) }
+      })
+    })
+    const firstIdle = waitForIdle()
+    await service.send(session.id, '[SCT_ANALYSIS_VIEW_CONTEXT]\nDQ와 BL 집중을 보여줘', ['s1'], 'analysis_view')
+    const proposed = await firstIdle
+    expect(proposed.messages.find((message) => message.role === 'user' && message.content.includes('DQ와 BL'))).toMatchObject({ contextKind: 'analysis_view' })
+    expect(proposed.messages.at(-1)?.content).toBe('DQ9 집중을 비교했습니다.')
+    expect(proposed.analysisViewProposal).toMatchObject({ dataBasis: 'failure_address', rowAxes: ['dq'], columnAxes: ['bl'], aggregation: 'fail_event_count', visualization: 'heatmap' })
+
+    const secondIdle = waitForIdle()
+    await service.send(session.id, '선택한 PASS/FAIL 결과를 비교해줘', ['s1'], 'results')
+    const continued = await secondIdle
+    expect(continued.id).toBe(session.id)
+    expect(continued.lastContextKind).toBe('results')
+    expect(continued.messages.filter((message) => message.role === 'user').map((message) => message.contextKind)).toEqual(['analysis_view', 'results'])
+    expect(continued.analysisViewProposal).toBeUndefined()
   })
 
   it('reuses a confirmed folder purpose without asking the engineer again', async () => {

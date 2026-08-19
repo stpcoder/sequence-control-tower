@@ -7,6 +7,7 @@ import {
   PATTERN_LAYOUT_PRESET_NAME,
   normalizePatternLayout,
   patternLayoutPreset,
+  patternLayoutWithAgentProposal,
 } from './patternLayout'
 
 describe('pattern layout persistence', () => {
@@ -15,6 +16,18 @@ describe('pattern layout persistence', () => {
       rowAxes: ['sample', 'sample'], columnAxes: ['not-a-dimension', 'folder'], aggregation: 'invalid',
       resultFilter: 'INVALID', folderFilter: 'bad\nfolder', failOnly: 'yes', unknownMetadataOnly: true,
     })).toEqual({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['sample'], columnAxes: ['folder'], unknownMetadataOnly: true })
+  })
+
+  it('applies a validated Agent view temporarily while preserving unrelated filters', () => {
+    const current = { ...DEFAULT_PATTERN_LAYOUT, resultFilter: 'TEST_FAIL' as const, folderFilter: '03-acceleration', unknownMetadataOnly: true }
+    const next = patternLayoutWithAgentProposal(current, {
+      id: 'proposal-1', dataBasis: 'failure_address', rowAxes: ['dq'], columnAxes: ['bl'],
+      aggregation: 'fail_event_count', visualization: 'heatmap', failOnly: true,
+    })
+    expect(next).toMatchObject({
+      dataBasis: 'failure_address', rowAxes: ['dq'], columnAxes: ['bl'], aggregation: 'fail_event_count', visualization: 'heatmap', failOnly: true,
+      resultFilter: 'TEST_FAIL', folderFilter: '03-acceleration', unknownMetadataOnly: true,
+    })
   })
 
   it('writes one reserved JSON preset identity with the complete layout', () => {
