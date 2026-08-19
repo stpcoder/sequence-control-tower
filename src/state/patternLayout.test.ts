@@ -33,6 +33,12 @@ describe('pattern layout persistence', () => {
     expect(normalizePatternLayout({ aggregation: 'pass_fail' }).aggregation).toBe('pass_fail')
   })
 
+  it('restores a compatible visualization and safely opens incompatible legacy data as a table', () => {
+    expect(normalizePatternLayout({ visualization: 'heatmap', aggregation: 'fail_rate' }).visualization).toBe('heatmap')
+    expect(normalizePatternLayout({ visualization: 'stacked_percent', aggregation: 'pass_fail' }).visualization).toBe('stacked_percent')
+    expect(normalizePatternLayout({ visualization: 'stacked_percent', aggregation: 'count' }).visualization).toBe('cross_table')
+  })
+
   it('keeps the layout preset in a reused project clone plan', () => {
     const source: ProjectSnapshot = {
       schemaVersion: 2, id: 'source', name: 'source', revision: 3, archived: false,

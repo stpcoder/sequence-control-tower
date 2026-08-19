@@ -5,8 +5,8 @@
 `package.json`의 version과 같은 `v` tag를 push하면 Windows Release와 macOS Release workflow가 각각 실행되어 같은 GitHub Release에 운영체제별 asset을 추가합니다. 일반 branch에 commit을 push하면 CI가 type-check, test, production build를 자동 실행합니다.
 
 ```bash
-git tag -a v0.10.1 -m "Sequence Control Tower v0.10.1"
-git push origin main v0.10.1
+git tag -a v0.11.0 -m "Sequence Control Tower v0.11.0"
+git push origin main v0.11.0
 ```
 
 Workflow는 Windows에서 type-check/test/build 후 다음 고정 이름으로 Release asset을 게시합니다.
@@ -33,8 +33,8 @@ macOS workflow는 macOS에서 동일 검증 후 다음 asset을 게시합니다.
 Windows 수동 실행도 이미 원격에 존재하는 tag만 빌드합니다. 먼저 현재 `package.json` version과 같은 tag를 생성해 push한 뒤 GitHub에서 **Actions → Windows Release → Run workflow**를 선택하고 같은 tag를 입력합니다. macOS workflow는 tag push로 자동 실행됩니다.
 
 ```bash
-git tag -a v0.10.1 -m "Sequence Control Tower v0.10.1"
-git push origin v0.10.1
+git tag -a v0.11.0 -m "Sequence Control Tower v0.11.0"
+git push origin v0.11.0
 ```
 
 Workflow는 현재 선택한 branch가 아니라 입력한 tag commit을 checkout합니다. tag가 없거나 tag의 `package.json` version과 입력값이 다르면 중단됩니다. pre-release를 선택한 경우 `/releases/latest/download` 링크의 대상이 되지 않을 수 있으므로 일반 사용자에게는 Release 페이지 링크를 전달합니다.

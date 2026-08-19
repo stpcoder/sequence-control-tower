@@ -185,6 +185,7 @@ export class LpddrAgentToolService {
           rowAxes: Array.isArray(item.options.rowAxes) ? item.options.rowAxes.slice(0, 3) : [],
           columnAxes: Array.isArray(item.options.columnAxes) ? item.options.columnAxes.slice(0, 3) : [],
           aggregation: item.options.aggregation,
+          visualization: item.options.visualization,
         }
       }
       return { id: item.id, name: item.name, format: item.format }

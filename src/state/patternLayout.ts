@@ -1,6 +1,7 @@
 import type { JsonValue, ProjectExportPreset } from '../../electron/shared/contracts'
 import type { ResultLabel } from '../domain/workbench'
 import type { PivotAggregation, PivotDimension } from './logRecords'
+import { normalizedVisualization, type AnalysisVisualization } from '../domain/analysis-view'
 
 export const PATTERN_LAYOUT_PRESET_ID = 'sequence-control-tower.patterns-layout.v1'
 export const PATTERN_LAYOUT_PRESET_NAME = '결과 정리 표 구성'
@@ -10,6 +11,7 @@ export type PatternLayout = {
   rowAxes: PivotDimension[]
   columnAxes: PivotDimension[]
   aggregation: PivotAggregation
+  visualization: AnalysisVisualization
   resultFilter: ResultLabel | 'all'
   folderFilter: string
   failOnly: boolean
@@ -18,6 +20,7 @@ export type PatternLayout = {
 
 export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
   rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'pass_fail',
+  visualization: 'cross_table',
   resultFilter: 'all', folderFilter: 'all', failOnly: false, unknownMetadataOnly: false,
 }
 
@@ -57,6 +60,9 @@ export function normalizePatternLayout(value: unknown): PatternLayout {
     aggregation: source.aggregation === 'evidence_count'
       ? 'count'
       : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation,
+    visualization: normalizedVisualization(source.visualization, source.aggregation === 'evidence_count'
+      ? 'count'
+      : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation),
     resultFilter: typeof source.resultFilter === 'string' && (source.resultFilter === 'all' || RESULTS.has(source.resultFilter as ResultLabel)) ? source.resultFilter as ResultLabel | 'all' : 'all',
     folderFilter: typeof source.folderFilter === 'string' && source.folderFilter.length <= 240 && !/[\u0000-\u001f\u007f\r\n]/.test(source.folderFilter) ? source.folderFilter : 'all',
     failOnly: source.failOnly === true,

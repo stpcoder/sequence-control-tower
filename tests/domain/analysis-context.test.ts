@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pivotSelectionAgentContext, pivotSelectionsAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
+import { analysisViewAgentContext, pivotSelectionAgentContext, pivotSelectionsAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
 import type { LogResultRecord } from '../../src/state/logRecords'
 
 function row(id: string, folder: string, result: LogResultRecord['result']): LogResultRecord {
@@ -69,5 +69,19 @@ describe('analysis selections handed to the native Agent', () => {
     })
     expect(request.prompt).toContain('PASS / FAIL P 1 · F 1')
     expect(request.prompt).toContain('PASS 1, TEST_FAIL 1')
+  })
+
+  it('hands the active visualization and evidence scope to the native Agent', () => {
+    const request = analysisViewAgentContext({
+      rows: [row('a', 'screen', 'TEST_FAIL')], rowAxes: ['bank'], columnAxes: ['dq'],
+      aggregation: 'fail_count', visualization: 'heatmap',
+      selected: [{ rowValues: ['5'], columnValues: ['9'], displayValue: '3' }],
+    })
+    expect(request.title).toBe('선택 조건 1개 분석')
+    expect(request.prompt).toContain('Heatmap')
+    expect(request.prompt).toContain('Bank=5')
+    expect(request.prompt).toContain('DQ=9')
+    expect(request.prompt).toContain('로컬 도구로 다시 확인')
+    expect(request.fileIds).toEqual(['a'])
   })
 })

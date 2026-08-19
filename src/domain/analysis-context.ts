@@ -1,4 +1,5 @@
 import type { LogResultRecord, PivotAggregation, PivotDimension } from '../state/logRecords'
+import { ANALYSIS_VISUALIZATION_LABELS, type AnalysisVisualization } from './analysis-view'
 
 export interface AgentAnalysisContextRequest {
   title: string
@@ -33,7 +34,7 @@ const dimensionLabel = (dimension: PivotDimension): string => ({
 })[dimension]
 
 const aggregationLabel = (aggregation: PivotAggregation): string => ({
-  count: '로그 파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 로그', fail_count: 'FAIL 로그', pass_fail: 'PASS / FAIL', fail_rate: 'FAIL률', evidence_count: '판정 신호 수',
+  count: '파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 파일', fail_count: 'FAIL 파일', pass_fail: 'PASS / FAIL', fail_rate: 'FAIL률', evidence_count: '판정 신호 수',
 })[aggregation]
 
 export function searchAgentContext(input: SearchAnalysisContextInput): AgentAnalysisContextRequest {
@@ -107,5 +108,29 @@ export function pivotSelectionsAgentContext(input: {
     title: selections.length > 1 ? `표 조건 ${selections.length}개 비교` : `표 선택 해석 · ${firstCondition.slice(0, 42)}`,
     fileIds: [...new Set(rows.map((row) => row.id))].slice(0, 100),
     prompt: `결과 정리 표에서 ${selectionText} 연결 로그는 중복을 제외해 ${rows.length.toLocaleString('ko-KR')}개이며 판정은 ${resultCounts(rows)}입니다. 선택 조건 사이의 차이와 불량 집중 여부를 분모와 함께 검토하고, 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 중 실제 근거가 있는 차원만 설명해 주세요. 서로 다른 평가 폴더는 합치지 말고, 인과관계는 확정하지 말고 비교가 필요한 대조 조건과 다음 평가를 제안해 주세요.`,
+  }
+}
+
+/** Gives the native Agent the exact renderer state. The Agent still recomputes
+ * numeric claims with its local tools rather than trusting the visible chart. */
+export function analysisViewAgentContext(input: {
+  rows: readonly LogResultRecord[]
+  rowAxes: readonly PivotDimension[]
+  columnAxes: readonly PivotDimension[]
+  aggregation: PivotAggregation
+  visualization: AnalysisVisualization
+  selected: readonly PivotAnalysisSelection[]
+}): AgentAnalysisContextRequest {
+  const axes = [
+    input.rowAxes.length ? `세로 ${input.rowAxes.map(dimensionLabel).join(' → ')}` : '세로 전체',
+    input.columnAxes.length ? `가로 ${input.columnAxes.map(dimensionLabel).join(' → ')}` : '가로 전체',
+  ].join(', ')
+  const selected = input.selected.slice(0, 12).map((item, index) =>
+    `${index + 1}. ${pivotConditionText(input.rowAxes, input.columnAxes, item)} · ${item.displayValue}`,
+  )
+  return {
+    title: selected.length ? `선택 조건 ${selected.length}개 분석` : '현재 분석 보기 점검',
+    fileIds: [...new Set(input.rows.map((row) => row.id))].slice(0, 100),
+    prompt: `결과 정리에서 ${ANALYSIS_VISUALIZATION_LABELS[input.visualization]}를 보고 있습니다. ${axes}, 값 ${aggregationLabel(input.aggregation)}입니다.${selected.length ? `\n선택 조건:\n${selected.join('\n')}` : ''}\n현재 범위의 로그 ${input.rows.length.toLocaleString('ko-KR')}개를 로컬 도구로 다시 확인해 주세요. 현재 평가 폴더의 목적과 저장된 검색 절차를 먼저 읽고, 선택한 축에서 실제로 의미 있는 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 경향만 설명해 주세요. 비교 분모, 반대 조건, 미확인 값을 구분하고 다음에 볼 분석 축을 하나 제안해 주세요. 화면의 집계 숫자만 복사하지 말고 근거 로그로 검증해 주세요.`,
   }
 }
