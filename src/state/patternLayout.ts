@@ -1,7 +1,7 @@
 import type { JsonValue, ProjectExportPreset } from '../../electron/shared/contracts'
 import type { ResultLabel } from '../domain/workbench'
-import type { PivotAggregation, PivotDimension } from './logRecords'
-import { normalizedVisualization, type AnalysisVisualization } from '../domain/analysis-view'
+import { isFailureAddressAggregation, type PivotAggregation, type PivotDimension } from './logRecords'
+import { normalizedVisualization, type AnalysisDataBasis, type AnalysisVisualization } from '../domain/analysis-view'
 
 export const PATTERN_LAYOUT_PRESET_ID = 'sequence-control-tower.patterns-layout.v1'
 export const PATTERN_LAYOUT_PRESET_NAME = '결과 정리 표 구성'
@@ -12,6 +12,7 @@ export type PatternLayout = {
   columnAxes: PivotDimension[]
   aggregation: PivotAggregation
   visualization: AnalysisVisualization
+  dataBasis: AnalysisDataBasis
   resultFilter: ResultLabel | 'all'
   folderFilter: string
   failOnly: boolean
@@ -21,6 +22,7 @@ export type PatternLayout = {
 export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
   rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'pass_fail',
   visualization: 'cross_table',
+  dataBasis: 'evaluation',
   resultFilter: 'all', folderFilter: 'all', failOnly: false, unknownMetadataOnly: false,
 }
 
@@ -30,7 +32,7 @@ const DIMENSIONS = new Set<PivotDimension>([
   'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'timingSkewPs',
   'grid', 'result', 'review', 'folder', 'run',
 ])
-const AGGREGATIONS = new Set<PivotAggregation>(['count', 'sample_count', 'grid_count', 'pass_count', 'fail_count', 'pass_fail', 'fail_rate'])
+const AGGREGATIONS = new Set<PivotAggregation>(['count', 'sample_count', 'grid_count', 'pass_count', 'fail_count', 'pass_fail', 'fail_rate', 'fail_event_count', 'fail_source_count', 'fail_event_share'])
 const RESULTS = new Set<ResultLabel>(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
 
 function normalizedAxis(value: unknown, fallback: readonly PivotDimension[]): PivotDimension[] {
@@ -55,14 +57,19 @@ export function normalizePatternLayout(value: unknown): PatternLayout {
   const rows = normalizedAxis(source.rowAxes, DEFAULT_PATTERN_LAYOUT.rowAxes)
   const columns = normalizedAxis(source.columnAxes, DEFAULT_PATTERN_LAYOUT.columnAxes)
   const normalized = uniqueAxes(rows, columns)
+  const legacyFileCount = source.aggregation === 'evidence_count' || source.aggregation === 'count'
+  const requestedAggregation = legacyFileCount
+    ? 'pass_fail'
+    : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation
+  const requestedBasis: AnalysisDataBasis = source.dataBasis === 'failure_address' || isFailureAddressAggregation(requestedAggregation) ? 'failure_address' : 'evaluation'
+  const aggregation: PivotAggregation = requestedBasis === 'failure_address'
+    ? isFailureAddressAggregation(requestedAggregation) ? requestedAggregation : 'fail_event_count'
+    : isFailureAddressAggregation(requestedAggregation) ? 'pass_fail' : requestedAggregation
   return {
     ...normalized,
-    aggregation: source.aggregation === 'evidence_count'
-      ? 'count'
-      : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation,
-    visualization: normalizedVisualization(source.visualization, source.aggregation === 'evidence_count'
-      ? 'count'
-      : typeof source.aggregation === 'string' && AGGREGATIONS.has(source.aggregation as PivotAggregation) ? source.aggregation as PivotAggregation : DEFAULT_PATTERN_LAYOUT.aggregation),
+    aggregation,
+    dataBasis: requestedBasis,
+    visualization: legacyFileCount ? 'cross_table' : normalizedVisualization(source.visualization, aggregation),
     resultFilter: typeof source.resultFilter === 'string' && (source.resultFilter === 'all' || RESULTS.has(source.resultFilter as ResultLabel)) ? source.resultFilter as ResultLabel | 'all' : 'all',
     folderFilter: typeof source.folderFilter === 'string' && source.folderFilter.length <= 240 && !/[\u0000-\u001f\u007f\r\n]/.test(source.folderFilter) ? source.folderFilter : 'all',
     failOnly: source.failOnly === true,

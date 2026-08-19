@@ -35,6 +35,8 @@ import type {
   ArtifactEvidenceOccurrence,
   ArtifactEvidenceResult,
   ArtifactEvidenceSpec,
+  ArtifactFailureAddressScanInput,
+  ArtifactFailureAddressScanResult,
   ArtifactRecord,
   ArtifactSearchFileResult,
   ArtifactSearchInput,
@@ -49,6 +51,7 @@ import type {
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
 import { parseSequence, similarityScore } from './sequence-parser'
+import { extractLpddrFailureAddress } from '../../src/domain/lpddr-evaluation-baseline'
 
 interface ArtifactDatabase {
   schemaVersion: 1
@@ -75,6 +78,7 @@ const MAX_SEARCH_MATCHES = 2_000
 const DEFAULT_SEARCH_MATCHES = 500
 const MAX_SEARCH_QUERY_CHARS = 1_000
 const MAX_SEARCH_LINE_DISPLAY_CHARS = 4_000
+const MAX_FAILURE_ADDRESS_EVENTS_PER_SOURCE = 500
 const MAX_CONTEXT_LINE_CHARS = 800
 const MAX_LINE_WINDOW_LINES = 1_000
 const MAX_LINE_WINDOW_TEXT_CHARS = 20_000
@@ -1041,6 +1045,76 @@ export class ArtifactService {
           artifactId: source.artifactId,
           stages: [...stages.values()],
           ...(source.error ? { error: source.error } : {}),
+        }
+      }),
+    }
+  }
+
+  /**
+   * Extracts bounded, explicit Hdiag/diagnostic fail-address events. Only the
+   * structured fields and line number cross IPC; raw log text and paths stay in
+   * the main process. Filename dimensions are deliberately not used here.
+   */
+  async inspectFailureAddresses(
+    input: ArtifactFailureAddressScanInput,
+    signal?: AbortSignal,
+  ): Promise<ArtifactFailureAddressScanResult> {
+    abortSearch(signal)
+    if (!input || !Array.isArray(input.sources) || !input.sources.length) {
+      throw new Error('검사할 로그를 선택해 주세요.')
+    }
+    if (input.sources.length > MAX_SEARCH_ARTIFACTS) {
+      throw new Error(`한 번에 ${MAX_SEARCH_ARTIFACTS.toLocaleString()}개까지 검사할 수 있습니다.`)
+    }
+    const sources = [...new Map(input.sources.map((source) => [source.sourceId, source])).values()]
+    const sourceIdsByArtifact = new Map<string, string[]>()
+    for (const source of sources) {
+      const ids = sourceIdsByArtifact.get(source.artifactId) ?? []
+      ids.push(source.sourceId)
+      sourceIdsByArtifact.set(source.artifactId, ids)
+    }
+    const database = await this.store.read()
+    const scans = new Map<string, { events: ArtifactFailureAddressScanResult['sources'][number]['events']; truncated: boolean; error?: string }>()
+    const addressToken = /(?:CH(?:ANNEL)?|SUB(?:CH|CHANNEL)|SUB[ _]?CHANNEL|CS|CHIP[ _]?SELECT|BK|BANK|RK|RANK|BG|BANK[ _]?GROUP|ROW|COL(?:UMN)?|WR|WRITE|RD|READ|DQ|BL)\s*[=:]/i
+    for (const artifactId of sourceIdsByArtifact.keys()) {
+      abortSearch(signal)
+      if (!/^[a-f0-9]{64}$/.test(artifactId) || !database.artifacts[artifactId]) {
+        scans.set(artifactId, { events: [], truncated: false, error: '아티팩트를 찾을 수 없습니다.' })
+        continue
+      }
+      const events: ArtifactFailureAddressScanResult['sources'][number]['events'] = []
+      let lineNumber = 0
+      let truncated = false
+      let error: string | undefined
+      try {
+        for await (const line of streamTextLines(this.objectPath(artifactId), signal)) {
+          lineNumber += 1
+          if (line.includes('\0')) throw new Error('이진 파일은 텍스트로 분석할 수 없습니다.')
+          if (!addressToken.test(line) || /^\s*(?:#|META(?:DATA)?\b|CONDITION\b|CONFIG\b)/i.test(line)) continue
+          const fields = extractLpddrFailureAddress(line)
+          if (!fields) continue
+          const fieldCount = Object.values(fields).filter(Boolean).length
+          const isFailure = /(?:@FAIL|FAIL(?:URE)?|ERR(?:OR)?|MISCOMPARE|MISMATCH|\bEDAC\b.*\b(?:UE|CE)\b)/i.test(line)
+            || (fieldCount >= 3 && fields.writeData !== undefined && fields.readData !== undefined)
+          if (!isFailure) continue
+          if (events.length < MAX_FAILURE_ADDRESS_EVENTS_PER_SOURCE) events.push({ lineNumber, fields })
+          else truncated = true
+        }
+      } catch (cause) {
+        if (signal?.aborted) throw cause
+        error = safeFailure(cause)
+      }
+      scans.set(artifactId, { events, truncated, ...(error ? { error } : {}) })
+    }
+    return {
+      sources: sources.map((source) => {
+        const scan = scans.get(source.artifactId) ?? { events: [], truncated: false }
+        return {
+          sourceId: source.sourceId,
+          artifactId: source.artifactId,
+          events: [...scan.events],
+          truncated: scan.truncated,
+          ...(scan.error ? { error: scan.error } : {}),
         }
       }),
     }

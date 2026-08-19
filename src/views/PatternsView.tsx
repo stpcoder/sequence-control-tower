@@ -38,8 +38,11 @@ import {
   filterLogRecords,
   RESULT_LABEL_KO,
   serializeLogRecordsCsv,
+  serializeFailureAddressEventsCsv,
   serializePivotGridCsv,
   serializePivotGridTsv,
+  summarizeFailureAddressEvents,
+  isFailureAddressAggregation,
   type AggregateTrend,
   type LogRecordExportColumn,
   type LogRecordFilters,
@@ -60,8 +63,10 @@ import {
 } from '../state/patternLayout'
 import { analysisViewAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
 import {
+  ANALYSIS_DATA_BASIS_LABELS,
   ANALYSIS_VIEW_PRESETS,
   ANALYSIS_VISUALIZATION_LABELS,
+  type AnalysisDataBasis,
   type AnalysisViewPreset,
   type AnalysisVisualization,
 } from '../domain/analysis-view'
@@ -115,6 +120,7 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
 ]
 
 const DIMENSION_LABEL = Object.fromEntries(DIMENSIONS.map((item) => [item.value, item.label])) as Record<PivotDimension, string>
+const FAILURE_ADDRESS_DIMENSIONS = new Set<PivotDimension>(['dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData'])
 const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
   sample: 'sample_value', temperature: 'temperature_value', mode: 'mode_value', grid: 'grid_value',
   skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model',
@@ -122,17 +128,18 @@ const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
   result: 'result', review: 'review', folder: 'folder', run: 'run',
 }
 const AGGREGATIONS: Array<{ value: PivotAggregation; label: string }> = [
-  { value: 'pass_fail', label: 'PASS / FAIL' },
-  { value: 'fail_rate', label: 'FAIL률' },
-  { value: 'count', label: '파일 수' },
+  { value: 'pass_fail', label: '판정 결과' },
+  { value: 'fail_count', label: 'FAIL 횟수' },
+  { value: 'fail_rate', label: '불량률' },
   { value: 'sample_count', label: 'Sample 수' },
   { value: 'grid_count', label: 'Grid 수' },
-  { value: 'pass_count', label: 'PASS 파일' },
-  { value: 'fail_count', label: 'FAIL 파일' },
+  { value: 'pass_count', label: 'PASS 횟수' },
+  { value: 'fail_event_count', label: '이벤트 수' },
+  { value: 'fail_source_count', label: '포함 로그 수' },
+  { value: 'fail_event_share', label: '이벤트 비율' },
 ]
-const PRIMARY_AGGREGATIONS = new Set<PivotAggregation>(['pass_fail', 'fail_rate', 'count'])
-const primaryAggregations = AGGREGATIONS.filter((item) => PRIMARY_AGGREGATIONS.has(item.value))
-const secondaryAggregations = AGGREGATIONS.filter((item) => !PRIMARY_AGGREGATIONS.has(item.value))
+const EVALUATION_PRIMARY = new Set<PivotAggregation>(['pass_fail', 'fail_count', 'fail_rate'])
+const ADDRESS_PRIMARY = new Set<PivotAggregation>(['fail_event_count', 'fail_source_count', 'fail_event_share'])
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
 
@@ -240,9 +247,21 @@ async function copyText(contents: string): Promise<void> {
   if (!copied) throw new Error('클립보드에 복사하지 못했습니다.')
 }
 
-function formatPivotValue(value: number, aggregation: PivotAggregation, breakdown?: PivotCell['breakdown']): string {
-  if (aggregation === 'pass_fail') return `P ${breakdown?.passCount ?? 0} · F ${breakdown?.failCount ?? 0}`
-  if (aggregation === 'fail_rate') return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
+function formatPivotValue(value: number, aggregation: PivotAggregation, breakdown?: PivotCell['breakdown'], failureAddress?: PivotCell['failureAddress']): string {
+  if (aggregation === 'pass_fail') {
+    const pass = breakdown?.passCount ?? 0
+    const fail = breakdown?.failCount ?? 0
+    if (!pass && !fail) return '미확인'
+    if (!fail) return pass === 1 ? 'PASS' : `PASS ${pass.toLocaleString('ko-KR')}`
+    if (!pass) return `${fail === 1 ? 'FAIL' : `FAIL ${fail.toLocaleString('ko-KR')}`}${breakdown?.topFailureSignature ? ` · ${breakdown.topFailureSignature}` : ''}`
+    return `PASS ${pass.toLocaleString('ko-KR')} · FAIL ${fail.toLocaleString('ko-KR')}`
+  }
+  if (aggregation === 'fail_rate') return `${breakdown?.failCount ?? 0}/${breakdown?.definitiveCount ?? 0} · ${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
+  if (aggregation === 'fail_count') return `FAIL ${value.toLocaleString('ko-KR')}`
+  if (aggregation === 'pass_count') return `PASS ${value.toLocaleString('ko-KR')}`
+  if (aggregation === 'fail_event_count') return `${value.toLocaleString('ko-KR')}회${failureAddress?.topSignature ? ` · ${failureAddress.topSignature}` : ''}`
+  if (aggregation === 'fail_source_count') return `${value.toLocaleString('ko-KR')}개 로그`
+  if (aggregation === 'fail_event_share') return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
   return value.toLocaleString('ko-KR')
 }
 
@@ -267,12 +286,16 @@ export function evaluationMetricSummary(aggregation: PivotAggregation, rows: rea
   }).length
   if (aggregation === 'sample_count') return `중복을 제외한 Sample ${samples.toLocaleString()}개`
   if (aggregation === 'grid_count') return `확인된 Grid ${gridKeys.size.toLocaleString()}개${gridUnknown ? ` · Grid 미확인 로그 ${gridUnknown.toLocaleString()}개 제외` : ''}`
-  if (aggregation === 'pass_count') return `PASS로 판정된 로그 파일 ${pass.toLocaleString()}개`
-  if (aggregation === 'fail_count') return `FAIL·Training Fail·Halt·Reboot로 판정된 로그 파일 ${fail.toLocaleString()}개`
-  if (aggregation === 'pass_fail') return `PASS ${pass.toLocaleString()}회 / FAIL ${fail.toLocaleString()}회 · 판정 완료 ${decided.toLocaleString()}회`
-  if (aggregation === 'fail_rate') return `FAIL ${fail.toLocaleString()}회 / 판정 완료 ${decided.toLocaleString()}회 · 미확인 결과는 제외`
+  if (aggregation === 'pass_count') return `PASS 판정 ${pass.toLocaleString()}회`
+  if (aggregation === 'fail_count') return `FAIL·Training Fail·Halt·Reboot 판정 ${fail.toLocaleString()}회`
+  if (aggregation === 'pass_fail') return `PASS ${pass.toLocaleString()} · FAIL ${fail.toLocaleString()} · 판정 완료 ${decided.toLocaleString()}`
+  if (aggregation === 'fail_rate') return `FAIL ${fail.toLocaleString()}/${decided.toLocaleString()} · 불량률 ${decided ? (fail / decided * 100).toLocaleString('ko-KR', { maximumFractionDigits: 1 }) : 0}% · 미확인 제외`
+  const address = summarizeFailureAddressEvents(rows)
+  if (aggregation === 'fail_event_count') return `Fail 주소 ${address.eventCount.toLocaleString()}회 · ${address.sourceCount.toLocaleString()}개 로그${address.truncated ? ' · 일부 로그는 표시 한도 초과' : ''}`
+  if (aggregation === 'fail_source_count') return `Fail 주소가 확인된 로그 ${address.sourceCount.toLocaleString()}개 · 이벤트 ${address.eventCount.toLocaleString()}회`
+  if (aggregation === 'fail_event_share') return `전체 Fail 주소 이벤트 ${address.eventCount.toLocaleString()}회를 기준으로 계산`
   if (aggregation === 'evidence_count') return '판정에 사용한 marker 줄 수'
-  return `현재 범위의 로그 파일 ${rows.length.toLocaleString()}개`
+  return `수집한 로그 파일 ${rows.length.toLocaleString()}개 · 평가 횟수나 Grid 수와 다를 수 있음`
 }
 
 function SelectControl({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {
@@ -339,6 +362,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
   const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
   const [visualization, setVisualization] = useState<AnalysisVisualization>(DEFAULT_PATTERN_LAYOUT.visualization)
+  const [dataBasis, setDataBasis] = useState<AnalysisDataBasis>(DEFAULT_PATTERN_LAYOUT.dataBasis)
   const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>(DEFAULT_PATTERN_LAYOUT.resultFilter)
   const [folderFilter, setFolderFilter] = useState(DEFAULT_PATTERN_LAYOUT.folderFilter)
   const [failOnly, setFailOnly] = useState(DEFAULT_PATTERN_LAYOUT.failOnly)
@@ -351,7 +375,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
 
   useEffect(() => {
     const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
-    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation); setVisualization(layout.visualization)
+    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation); setVisualization(layout.visualization); setDataBasis(layout.dataBasis)
     setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
     setMarkedCellKeys(new Set())
   }, [project?.id])
@@ -361,7 +385,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     setSavingLayout(true)
     try {
       const api = window.sequenceIntelligence.projects
-      const layout = { rowAxes, columnAxes, aggregation, visualization, resultFilter, folderFilter, failOnly, unknownMetadataOnly }
+      const layout = { rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }
       const persist = (target: ProjectSnapshot) => api.saveExportPreset({
         projectId: target.id,
         expectedRevision: target.revision,
@@ -391,6 +415,9 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     return true
   }), [failOnly, filters, records, unknownMetadataOnly])
   const activeDimensions = [...rowAxes, ...columnAxes]
+  const primaryAggregationSet = dataBasis === 'failure_address' ? ADDRESS_PRIMARY : EVALUATION_PRIMARY
+  const primaryAggregations = AGGREGATIONS.filter((item) => primaryAggregationSet.has(item.value))
+  const secondaryAggregations = AGGREGATIONS.filter((item) => !primaryAggregationSet.has(item.value) && (dataBasis === 'failure_address' ? isFailureAddressAggregation(item.value) : !isFailureAddressAggregation(item.value)))
   const pivotConfig = useMemo(() => ({ aggregation, filters: { query: '', result: 'all' as const, review: 'all' as const } }), [aggregation])
   const grid = useMemo(() => buildPivotGrid(scopedRecords, { rows: rowAxes, columns: columnAxes, ...pivotConfig }), [columnAxes, pivotConfig, rowAxes, scopedRecords])
   const passFailGrid = useMemo(() => buildPivotGrid(scopedRecords, {
@@ -425,11 +452,18 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }, [pivotCells])
 
   const visibleRows = useMemo(() => markedCells.length ? scopedRecords.filter((row) => markedSourceIds.has(row.id)) : scopedRecords, [markedCells.length, markedSourceIds, scopedRecords])
+  const visibleFailureAddresses = useMemo(() => summarizeFailureAddressEvents(visibleRows), [visibleRows])
   const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = markedCells.length > 0
   const trendSummary = useMemo(() => aggregateRecordTrends(scopedRecords), [scopedRecords])
   const unknownActiveDimensions = activeDimensions.filter((dimension) => scopedRecords.every((row) => {
     if (dimension === 'run') return !row.run
+    if (dataBasis === 'failure_address' && FAILURE_ADDRESS_DIMENSIONS.has(dimension)) {
+      return !(row.failureAddressEvents ?? []).some((event) => {
+        const value = event.fields[dimension as keyof typeof event.fields]
+        return value !== undefined && value !== null && value !== ''
+      })
+    }
     if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') return !row[dimension].value
     if (dimension === 'result' || dimension === 'review' || dimension === 'folder') return false
     const value = row.dimensions?.[dimension]
@@ -498,22 +532,22 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const rowLabels = rowAxes.length ? rowAxes.map((axis) => DIMENSION_LABEL[axis]) : ['전체']
   const secondaryAggregation = secondaryAggregations.find((item) => item.value === aggregation)
   const activePreset = ANALYSIS_VIEW_PRESETS.find((preset) =>
+    preset.basis === dataBasis
+    &&
     preset.visualization === visualization
     && preset.aggregation === aggregation
     && JSON.stringify(preset.rowAxes) === JSON.stringify(rowAxes)
     && JSON.stringify(preset.columnAxes) === JSON.stringify(columnAxes),
   )
+  const availableVisualizations = (Object.keys(ANALYSIS_VISUALIZATION_LABELS) as AnalysisVisualization[]).filter((item) =>
+    dataBasis === 'evaluation' || ['cross_table', 'heatmap', 'bar', 'bar_horizontal'].includes(item),
+  )
   const VisualizationIcon = VISUALIZATION_ICONS[visualization]
-  const pivotExportOptions = aggregation === 'pass_fail' ? {
-    rowTotals: grid.rows.map((row) => { const cell = rowTotalByKey.get(row.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
-    columnTotals: grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown) }),
-    grandTotal: formatPivotValue(grid.total, aggregation, grid.breakdown),
-    formatCell: (cell: PivotCell) => formatPivotValue(cell.value, aggregation, cell.breakdown),
-  } : {
-    rowTotals: grid.rows.map((row) => rowTotalByKey.get(row.key)?.value ?? 0),
-    columnTotals: grid.columns.map((column) => columnTotalByKey.get(column.key)?.value ?? 0),
-    grandTotal: grid.total,
-    formatValue: (value: number) => aggregation === 'fail_rate' ? formatPivotValue(value, aggregation) : value,
+  const pivotExportOptions = {
+    rowTotals: grid.rows.map((row) => { const cell = rowTotalByKey.get(row.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress) }),
+    columnTotals: grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress) }),
+    grandTotal: formatPivotValue(grid.total, aggregation, grid.breakdown, grid.failureAddress),
+    formatCell: (cell: PivotCell) => formatPivotValue(cell.value, aggregation, cell.breakdown, cell.failureAddress),
   }
   const projectFileName = safeExportName(project?.name ?? 'sequence-control-tower')
   const closeShareMenu = (target: HTMLElement) => target.closest('details')?.removeAttribute('open')
@@ -533,7 +567,12 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     const columns = analysisExportColumns(scopedRecords, activeDimensions)
     downloadText(serializeLogRecordsCsv(scopedRecords, columns), `${projectFileName}-spotfire-data.csv`)
     closeShareMenu(target)
-    onNotify(`${scopedRecords.length.toLocaleString()}개 로그를 분석용 CSV로 저장했습니다.`, 'success')
+    onNotify(`${scopedRecords.length.toLocaleString()}개 평가 결과를 CSV로 저장했습니다.`, 'success')
+  }
+  const downloadFailureAddresses = (target: HTMLElement) => {
+    downloadText(serializeFailureAddressEventsCsv(visibleRows), `${projectFileName}-fail-address-events.csv`)
+    closeShareMenu(target)
+    onNotify(`Fail 주소 이벤트 ${visibleFailureAddresses.eventCount.toLocaleString()}회를 CSV로 저장했습니다.`, 'success')
   }
   const downloadSelected = (target: HTMLElement) => {
     const columns = analysisExportColumns(visibleRows, activeDimensions)
@@ -560,6 +599,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       columnAxes,
       aggregation,
       visualization,
+      dataBasis,
       selected: markedCells.map((cell) => ({
         rowValues: cell.row.values,
         columnValues: cell.column.values,
@@ -572,6 +612,14 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     if ((next === 'stacked_bar' || next === 'stacked_percent' || next === 'combo') && aggregation !== 'pass_fail') setAggregation('pass_fail')
     if (next === 'line' && aggregation === 'pass_fail') setAggregation('fail_rate')
   }
+  const changeDataBasis = (next: AnalysisDataBasis) => {
+    const preset = ANALYSIS_VIEW_PRESETS.find((item) => item.basis === next)
+    if (!preset) return
+    setDataBasis(next)
+    setAxes([...preset.rowAxes], [...preset.columnAxes])
+    setAggregation(preset.aggregation)
+    setVisualization(preset.visualization)
+  }
   const changeAggregation = (next: PivotAggregation) => {
     setAggregation(next)
     if ((visualization === 'stacked_bar' || visualization === 'stacked_percent' || visualization === 'combo') && next !== 'pass_fail') setVisualization('cross_table')
@@ -579,6 +627,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }
   const applyViewPreset = (preset: AnalysisViewPreset, target: HTMLElement) => {
     setAxes([...preset.rowAxes], [...preset.columnAxes])
+    setDataBasis(preset.basis)
     setAggregation(preset.aggregation)
     setVisualization(preset.visualization)
     closeShareMenu(target)
@@ -589,25 +638,29 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       <details className="pattern-share"><summary><Share2 size={16} />공유<ChevronDown size={14} /></summary><div className="pattern-share-menu">
         <div className="pattern-share-summary"><strong>{rowLabels.join(' · ')} × {columnAxes.length ? columnAxes.map((axis) => DIMENSION_LABEL[axis]).join(' · ') : '전체'}</strong><span>{AGGREGATIONS.find((item) => item.value === aggregation)?.label}</span></div>
         <button type="button" onClick={(event) => void copyPivot(event.currentTarget)}><Clipboard size={16} /><span><b>표 복사</b><small>Excel·메신저에 붙여넣기</small></span></button>
-        <button type="button" onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 가로·세로 구성</small></span></button>
+        <button type="button" onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 왼쪽·상단 축 구성</small></span></button>
         {visualization !== 'cross_table' ? <button type="button" onClick={(event) => downloadChart(event.currentTarget)}><Download size={16} /><span><b>현재 시각화 PNG</b><small>보고서·메신저 공유</small></span></button> : null}
         {hasSelection ? <button type="button" onClick={(event) => downloadSelected(event.currentTarget)}><Download size={16} /><span><b>선택 로그 CSV</b><small>선택한 셀의 원본 행</small></span></button> : null}
-        <button type="button" onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>분석용 원본 CSV</b><small>Spotfire용 · 로그 1개당 1행</small></span></button>
+        {visibleFailureAddresses.eventCount ? <button type="button" onClick={(event) => downloadFailureAddresses(event.currentTarget)}><Download size={16} /><span><b>Fail 주소 CSV</b><small>주소 이벤트 1회당 1행</small></span></button> : null}
+        <button type="button" onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>평가 결과 CSV</b><small>로그 1개당 1행 · 조건과 판정</small></span></button>
       </div></details>
       <button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Save size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>
       {hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}
     </div></header>
 
     {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>조건에 맞는 로그가 없습니다.</strong><span>필터를 초기화해 보세요.</span></div> : <>
-      {trendSummary.trends.length ? <section className="trend-summary" aria-label="집중 경향"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
+      {dataBasis === 'evaluation' && trendSummary.trends.length ? <section className="trend-summary" aria-label="조건 경향 후보"><ul>{trendSummary.trends.map((trend) => <li key={`${trend.dimension}-${trend.value}-${trend.outcome}`}><b>{DIMENSION_LABEL[trend.dimension]}</b> {trend.value} · {trend.outcome === 'majority' && trend.result ? RESULT_LABEL_KO[trend.result] : TREND_OUTCOME_LABEL[trend.outcome]} {trend.count}/{trend.total} ({Math.round(trend.percentage * 100)}%)</li>)}</ul></section> : null}
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <h2 id="pivot-heading" className="sr-only">분석 보기</h2>
         <div className="analysis-viewbar">
           <details className="analysis-view-presets"><summary><span>분석 보기</span><b>{activePreset?.label ?? '사용자 구성'}</b><ChevronDown size={14} /></summary><div className="analysis-view-menu">
-            {ANALYSIS_VIEW_PRESETS.map((preset) => <button type="button" className={activePreset?.id === preset.id ? 'active' : ''} key={preset.id} onClick={(event) => applyViewPreset(preset, event.currentTarget)}><span>{preset.label}</span><small>{ANALYSIS_VISUALIZATION_LABELS[preset.visualization]}</small></button>)}
+            {ANALYSIS_VIEW_PRESETS.map((preset) => <button type="button" className={activePreset?.id === preset.id ? 'active' : ''} key={preset.id} onClick={(event) => applyViewPreset(preset, event.currentTarget)}><span>{preset.label}</span><small>{ANALYSIS_DATA_BASIS_LABELS[preset.basis]} · {ANALYSIS_VISUALIZATION_LABELS[preset.visualization]}</small></button>)}
           </div></details>
+          <div className="analysis-basis" role="radiogroup" aria-label="분석 데이터 기준">
+            {(Object.keys(ANALYSIS_DATA_BASIS_LABELS) as AnalysisDataBasis[]).map((basis) => <button type="button" role="radio" aria-checked={dataBasis === basis} className={dataBasis === basis ? 'active' : ''} key={basis} onClick={() => changeDataBasis(basis)}>{ANALYSIS_DATA_BASIS_LABELS[basis]}</button>)}
+          </div>
           <details className="analysis-visualization-picker"><summary><VisualizationIcon size={16} /><b>{ANALYSIS_VISUALIZATION_LABELS[visualization]}</b><ChevronDown size={14} /></summary><div className="analysis-visualization-menu" role="radiogroup" aria-label="시각화 선택">
-            {(Object.keys(ANALYSIS_VISUALIZATION_LABELS) as AnalysisVisualization[]).map((item) => { const Icon = VISUALIZATION_ICONS[item]; return <button type="button" role="radio" aria-checked={visualization === item} className={visualization === item ? 'active' : ''} key={item} onClick={(event) => { changeVisualization(item); closeShareMenu(event.currentTarget) }}><Icon size={17} /><span>{ANALYSIS_VISUALIZATION_LABELS[item]}</span></button> })}
+            {availableVisualizations.map((item) => { const Icon = VISUALIZATION_ICONS[item]; return <button type="button" role="radio" aria-checked={visualization === item} className={visualization === item ? 'active' : ''} key={item} onClick={(event) => { changeVisualization(item); closeShareMenu(event.currentTarget) }}><Icon size={17} /><span>{ANALYSIS_VISUALIZATION_LABELS[item]}</span></button> })}
           </div></details>
           {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />{hasSelection ? '선택 분석' : 'Agent 분석'}</button> : null}
           <div className="pattern-metrics" aria-label="표시할 값">
@@ -625,25 +678,28 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
         <div className="pattern-axis-builder">
-          <AxisWell group="rows" label="세로" axes={rowAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('rows', index)} onAdd={(dimension) => addAxis('rows', dimension)} onKeyMove={keyboardMoveAxis} />
-          <button type="button" className="pattern-swap-axes" onClick={() => setAxes([...columnAxes], [...rowAxes])} title="가로와 세로 바꾸기"><ArrowLeftRight size={15} />축 바꾸기</button>
-          <AxisWell group="columns" label="가로" axes={columnAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('columns', index)} onAdd={(dimension) => addAxis('columns', dimension)} onKeyMove={keyboardMoveAxis} />
+          <AxisWell group="rows" label="왼쪽 축" axes={rowAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('rows', index)} onAdd={(dimension) => addAxis('rows', dimension)} onKeyMove={keyboardMoveAxis} />
+          <button type="button" className="pattern-swap-axes" onClick={() => setAxes([...columnAxes], [...rowAxes])} title="왼쪽 축과 상단 축 바꾸기"><ArrowLeftRight size={15} />축 바꾸기</button>
+          <AxisWell group="columns" label="상단 축" axes={columnAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('columns', index)} onAdd={(dimension) => addAxis('columns', dimension)} onKeyMove={keyboardMoveAxis} />
         </div>
         {unknownActiveDimensions.length ? <p className="pivot-guidance">{unknownActiveDimensions.map((dimension) => DIMENSION_LABEL[dimension]).join(' · ')} 값이 없습니다. 다른 항목을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
-        {visualization === 'cross_table' ? <div className="pivot-scroll"><table className={`pivot-table metric-${aggregation}`} style={{ minWidth: Math.max(720, (rowAxes.length || 1) * 118 + grid.columns.length * 82 + 90) }}>
+        {dataBasis === 'failure_address' && !grid.rows.length ? <div className="pattern-inline-empty"><strong>확인된 Fail 주소가 없습니다.</strong><span>FAIL 로그 본문에 DQ, BL, Bank 등의 주소 정보가 있어야 표시됩니다.</span></div> : visualization === 'cross_table' ? <div className="pivot-scroll"><table className={`pivot-table metric-${aggregation}`} style={{ minWidth: Math.max(720, (rowAxes.length || 1) * 118 + grid.columns.length * (dataBasis === 'failure_address' ? 108 : 82) + 90) }}>
           <thead>{columnHeaderRows.length ? columnHeaderRows.map((groups, level) => <tr key={level}>{level === 0 ? (rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" rowSpan={columnHeaderRows.length} key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis" rowSpan={columnHeaderRows.length}>전체</th>) : null}{groups.map((group) => <th colSpan={group.span} key={group.key}>{group.label}</th>)}{level === 0 ? <th className="pivot-total" rowSpan={columnHeaderRows.length}>합계</th> : null}</tr>) : <tr>{rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis">전체</th>}<th>전체</th><th className="pivot-total">합계</th></tr>}</thead>
           <tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}>{rowAxes.length ? rowAxes.map((axis, level) => { const span = pivotRowHeaderSpan(grid.rows, rowIndex, level); return span ? <th className="pivot-row-value" scope="row" rowSpan={span} key={axis}>{row.values[level] ?? '미확인'}</th> : null }) : <th className="pivot-row-value" scope="row">전체</th>}{grid.columns.map((column, columnIndex) => {
             const cell = grid.cells[rowIndex][columnIndex]
             const cellKey = `${row.key}-${column.key}`
             const active = markedCellKeys.has(cellKey)
             const selectable = cell.sourceIds.length > 0
-            const display = formatPivotValue(cell.value, aggregation, cell.breakdown)
+            const display = formatPivotValue(cell.value, aggregation, cell.breakdown, cell.failureAddress)
             const intensity = aggregation === 'pass_fail'
               ? cell.breakdown?.definitiveCount ? Math.max(.05, cell.breakdown.failCount / cell.breakdown.definitiveCount) : 0
               : maxCellValue ? Math.max(.05, cell.value / maxCellValue) : 0
-            return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} aria-pressed={active} title={selectable ? `${cell.sourceIds.length.toLocaleString()}개 로그 · Ctrl/⌘ 클릭으로 조건 추가` : '관련 로그 없음'} aria-label={selectable ? `${display}, 관련 로그 ${cell.sourceIds.length}개${active ? ', 선택됨' : ''}` : `${display}, 관련 로그 없음`} onClick={(event) => setMarkedCellKeys((current) => nextPivotMarking(current, cellKey, event.ctrlKey || event.metaKey || event.shiftKey))}>{display}</button></td>
-          })}<td className="pivot-total">{formatPivotValue(rowTotalByKey.get(row.key)?.value ?? 0, aggregation, rowTotalByKey.get(row.key)?.breakdown)}</td></tr>)}</tbody>
-          <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => <td className="pivot-total" key={column.key}>{formatPivotValue(columnTotalByKey.get(column.key)?.value ?? 0, aggregation, columnTotalByKey.get(column.key)?.breakdown)}</td>)}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation, grid.breakdown)}</td></tr></tfoot>
+            const scopeTitle = dataBasis === 'failure_address' && cell.failureAddress
+              ? `Fail 주소 ${cell.failureAddress.eventCount.toLocaleString()}회 · ${cell.failureAddress.sourceCount.toLocaleString()}개 로그`
+              : `${cell.sourceIds.length.toLocaleString()}개 로그`
+            return <td key={column.key}><button data-testid={`pivot-cell-${row.key}-${column.key}`} className={active ? 'active' : ''} style={{ '--pivot-intensity': intensity } as CSSProperties} disabled={!selectable} aria-pressed={active} title={selectable ? `${scopeTitle} · Ctrl/⌘ 클릭으로 조건 추가` : '관련 로그 없음'} aria-label={selectable ? `${display}, ${scopeTitle}${active ? ', 선택됨' : ''}` : `${display}, 관련 로그 없음`} onClick={(event) => setMarkedCellKeys((current) => nextPivotMarking(current, cellKey, event.ctrlKey || event.metaKey || event.shiftKey))}>{display}</button></td>
+          })}{(() => { const cell = rowTotalByKey.get(row.key); return <td className="pivot-total">{formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress)}</td> })()}</tr>)}</tbody>
+          <tfoot><tr><th className="pivot-total-label" colSpan={rowAxes.length || 1}>합계</th>{grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return <td className="pivot-total" key={column.key}>{formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress)}</td> })}<td className="pivot-total pivot-grand-total">{formatPivotValue(grid.total, aggregation, grid.breakdown, grid.failureAddress)}</td></tr></tfoot>
         </table></div> : <Suspense fallback={<div className="analysis-chart-loading">시각화 준비 중…</div>}><AnalysisChart
           grid={grid}
           passFailGrid={passFailGrid}
@@ -653,11 +709,15 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           onMark={markChartCells}
           onExportReady={(exportImage) => { chartExportRef.current = exportImage }}
         /></Suspense>}
+        {hasSelection ? <section className="pattern-selection-inspector" aria-label="선택 상세">
+          <div><strong>선택한 조건 {markedCells.length.toLocaleString()}개</strong><span>PASS {visibleRows.filter((row) => row.result === 'PASS').length.toLocaleString()} · FAIL {visibleRows.filter((row) => FAIL_RESULTS.has(row.result)).length.toLocaleString()}</span></div>
+          {visibleFailureAddresses.eventCount ? <div className="pattern-address-summary"><span>Fail 주소 {visibleFailureAddresses.eventCount.toLocaleString()}회 · {visibleFailureAddresses.sourceCount.toLocaleString()}개 로그</span>{visibleFailureAddresses.distribution.slice(0, 3).map((item) => <b key={`${item.dimension}-${item.value}`}>{DIMENSION_LABEL[item.dimension as PivotDimension] ?? item.dimension} {item.value} · {item.eventCount.toLocaleString()}회</b>)}</div> : <span className="pattern-selection-muted">선택 범위에 Fail 주소 이벤트가 없습니다.</span>}
+          <div className="pattern-selection-tools"><button type="button" onClick={clearSelection}><X size={14} />선택 해제</button><button type="button" onClick={(event) => dataBasis === 'failure_address' ? downloadFailureAddresses(event.currentTarget) : downloadSelected(event.currentTarget)}><Download size={14} />선택 CSV</button>{onAnalyzeContext ? <button type="button" onClick={analyzeView}><Sparkles size={14} />Agent 분석</button> : null}</div>
+        </section> : null}
       </section>
 
       <details className="pattern-section marked-rows" open={hasSelection || rawDetailsOpen} onToggle={(event) => setRawDetailsOpen(event.currentTarget.open)}>
-        <summary><span>{hasSelection ? markedCells.length > 1 ? `선택한 조건 ${markedCells.length.toLocaleString()}개 · 로그 ${visibleRows.length.toLocaleString()}개` : `선택한 로그 ${visibleRows.length.toLocaleString()}개` : `원본 로그 ${visibleRows.length.toLocaleString()}개`}</span><ChevronDown size={15} /></summary>
-        <div className="pattern-selection-actions">{hasSelection ? <button type="button" onClick={clearSelection}><X size={15} />선택 해제</button> : null}</div>
+        <summary><span>{hasSelection ? `선택 로그 ${visibleRows.length.toLocaleString()}개` : `전체 로그 ${visibleRows.length.toLocaleString()}개`}</span><ChevronDown size={15} /></summary>
         <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>확인 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
       </details>
     </>}

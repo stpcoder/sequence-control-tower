@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url'
 import type {
   ArtifactImportOptions,
   ArtifactEvidenceInput,
+  ArtifactFailureAddressScanInput,
   ArtifactLineWindowInput,
   ArtifactSearchInput,
   EvaluationArchiveRecipeInput,
@@ -78,6 +79,7 @@ const packagedRendererUrl = pathToFileURL(join(__dirname, '../renderer/index.htm
 const activeArtifactSearches = new Map<number, AbortController>()
 const activeArtifactEvidenceInspections = new Map<number, AbortController>()
 const activeArtifactStageInspections = new Map<number, AbortController>()
+const activeArtifactFailureAddressInspections = new Map<number, AbortController>()
 const activeArtifactFolderImports = new Map<string, symbol>()
 const agentOwners = new Map<string, number>()
 const agentRunsBySender = new Map<number, Set<string>>()
@@ -404,6 +406,17 @@ export function registerIpc(services: Services): void {
       if (activeArtifactStageInspections.get(senderId) === controller) activeArtifactStageInspections.delete(senderId)
     }
   })
+  handle(IPC_CHANNELS.artifactInspectFailureAddresses, async (event, input) => {
+    const senderId = event.sender.id
+    activeArtifactFailureAddressInspections.get(senderId)?.abort()
+    const controller = new AbortController()
+    activeArtifactFailureAddressInspections.set(senderId, controller)
+    try {
+      return await services.artifacts.inspectFailureAddresses(input as ArtifactFailureAddressScanInput, controller.signal)
+    } finally {
+      if (activeArtifactFailureAddressInspections.get(senderId) === controller) activeArtifactFailureAddressInspections.delete(senderId)
+    }
+  })
   handle(IPC_CHANNELS.artifactLineWindow, (_event, input) =>
     services.artifacts.lineWindow(input as ArtifactLineWindowInput)
   )
@@ -611,6 +624,8 @@ export function unregisterIpc(): void {
   activeArtifactEvidenceInspections.clear()
   activeArtifactStageInspections.forEach((controller) => controller.abort())
   activeArtifactStageInspections.clear()
+  activeArtifactFailureAddressInspections.forEach((controller) => controller.abort())
+  activeArtifactFailureAddressInspections.clear()
   Object.values(IPC_CHANNELS).forEach((channel) => {
     if (channel !== IPC_CHANNELS.analysisUpdate && channel !== IPC_CHANNELS.agentUpdate && channel !== IPC_CHANNELS.nativeAgentUpdate && channel !== IPC_CHANNELS.appCommand) {
       ipcMain.removeHandler(channel)

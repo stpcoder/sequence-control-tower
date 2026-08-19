@@ -1,5 +1,5 @@
 import type { LogResultRecord, PivotAggregation, PivotDimension } from '../state/logRecords'
-import { ANALYSIS_VISUALIZATION_LABELS, type AnalysisVisualization } from './analysis-view'
+import { ANALYSIS_DATA_BASIS_LABELS, ANALYSIS_VISUALIZATION_LABELS, type AnalysisDataBasis, type AnalysisVisualization } from './analysis-view'
 
 export interface AgentAnalysisContextRequest {
   title: string
@@ -34,7 +34,8 @@ const dimensionLabel = (dimension: PivotDimension): string => ({
 })[dimension]
 
 const aggregationLabel = (aggregation: PivotAggregation): string => ({
-  count: '파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 파일', fail_count: 'FAIL 파일', pass_fail: 'PASS / FAIL', fail_rate: 'FAIL률', evidence_count: '판정 신호 수',
+  count: '로그 파일 수', sample_count: 'Sample 수', grid_count: 'Grid 수', pass_count: 'PASS 횟수', fail_count: 'FAIL 횟수', pass_fail: '판정 결과', fail_rate: '불량률', evidence_count: '판정 신호 수',
+  fail_event_count: 'Fail 주소 이벤트 수', fail_source_count: 'Fail 주소 포함 로그 수', fail_event_share: 'Fail 주소 이벤트 비율',
 })[aggregation]
 
 export function searchAgentContext(input: SearchAnalysisContextInput): AgentAnalysisContextRequest {
@@ -119,11 +120,12 @@ export function analysisViewAgentContext(input: {
   columnAxes: readonly PivotDimension[]
   aggregation: PivotAggregation
   visualization: AnalysisVisualization
+  dataBasis: AnalysisDataBasis
   selected: readonly PivotAnalysisSelection[]
 }): AgentAnalysisContextRequest {
   const axes = [
-    input.rowAxes.length ? `세로 ${input.rowAxes.map(dimensionLabel).join(' → ')}` : '세로 전체',
-    input.columnAxes.length ? `가로 ${input.columnAxes.map(dimensionLabel).join(' → ')}` : '가로 전체',
+    input.rowAxes.length ? `왼쪽 축 ${input.rowAxes.map(dimensionLabel).join(' → ')}` : '왼쪽 축 전체',
+    input.columnAxes.length ? `상단 축 ${input.columnAxes.map(dimensionLabel).join(' → ')}` : '상단 축 전체',
   ].join(', ')
   const selected = input.selected.slice(0, 12).map((item, index) =>
     `${index + 1}. ${pivotConditionText(input.rowAxes, input.columnAxes, item)} · ${item.displayValue}`,
@@ -131,6 +133,6 @@ export function analysisViewAgentContext(input: {
   return {
     title: selected.length ? `선택 조건 ${selected.length}개 분석` : '현재 분석 보기 점검',
     fileIds: [...new Set(input.rows.map((row) => row.id))].slice(0, 100),
-    prompt: `결과 정리에서 ${ANALYSIS_VISUALIZATION_LABELS[input.visualization]}를 보고 있습니다. ${axes}, 값 ${aggregationLabel(input.aggregation)}입니다.${selected.length ? `\n선택 조건:\n${selected.join('\n')}` : ''}\n현재 범위의 로그 ${input.rows.length.toLocaleString('ko-KR')}개를 로컬 도구로 다시 확인해 주세요. 현재 평가 폴더의 목적과 저장된 검색 절차를 먼저 읽고, 선택한 축에서 실제로 의미 있는 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 경향만 설명해 주세요. 비교 분모, 반대 조건, 미확인 값을 구분하고 다음에 볼 분석 축을 하나 제안해 주세요. 화면의 집계 숫자만 복사하지 말고 근거 로그로 검증해 주세요.`,
+    prompt: `결과 정리에서 ${ANALYSIS_DATA_BASIS_LABELS[input.dataBasis]} 기준의 ${ANALYSIS_VISUALIZATION_LABELS[input.visualization]}를 보고 있습니다. ${axes}, 값 ${aggregationLabel(input.aggregation)}입니다.${selected.length ? `\n선택 조건:\n${selected.join('\n')}` : ''}\n현재 범위의 로그 ${input.rows.length.toLocaleString('ko-KR')}개를 로컬 도구로 다시 확인해 주세요. 현재 평가 폴더의 목적과 저장된 검색 절차를 먼저 읽고, 평가 결과 기준이면 Pass/Fail 분모를, Fail 주소 기준이면 failure_trends_get의 event 수와 포함 로그 수를 각각 재계산해 주세요. 온도·VDD·주파수·SKEW·Sample·DQ·BL·Channel·Sub Channel·Bank·Pattern 중 실제 근거가 있는 경향만 설명하고, 반대 조건과 미확인 값을 구분해 다음 분석 축을 하나 제안해 주세요. 화면의 집계 숫자만 복사하지 말고 근거 로그로 검증해 주세요.`,
   }
 }

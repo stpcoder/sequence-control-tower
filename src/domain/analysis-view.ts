@@ -10,9 +10,17 @@ export type AnalysisVisualization =
   | 'line'
   | 'combo'
 
+export type AnalysisDataBasis = 'evaluation' | 'failure_address'
+
+export const ANALYSIS_DATA_BASIS_LABELS: Record<AnalysisDataBasis, string> = {
+  evaluation: '평가 결과',
+  failure_address: 'Fail 주소',
+}
+
 export interface AnalysisViewPreset {
   id: string
   label: string
+  basis: AnalysisDataBasis
   visualization: AnalysisVisualization
   rowAxes: PivotDimension[]
   columnAxes: PivotDimension[]
@@ -33,11 +41,13 @@ export const ANALYSIS_VISUALIZATION_LABELS: Record<AnalysisVisualization, string
 /** Compact, LPDDR-specific starting views. They are starting points, not
  * immutable templates: every axis and measure remains editable afterwards. */
 export const ANALYSIS_VIEW_PRESETS: readonly AnalysisViewPreset[] = [
-  { id: 'condition-overview', label: '조건별 결과', visualization: 'cross_table', rowAxes: ['skew', 'sample'], columnAxes: ['temperatureCorner', 'vddCorner'], aggregation: 'pass_fail' },
-  { id: 'failure-location', label: '불량 집중 위치', visualization: 'heatmap', rowAxes: ['bankGroup', 'bank'], columnAxes: ['dq'], aggregation: 'fail_count' },
-  { id: 'tm-comparison', label: 'TM 개선 비교', visualization: 'stacked_bar', rowAxes: ['mode'], columnAxes: [], aggregation: 'pass_fail' },
-  { id: 'frequency-sweep', label: '주파수 경향', visualization: 'line', rowAxes: ['frequencyMHz'], columnAxes: ['skew'], aggregation: 'fail_rate' },
-  { id: 'corner-comparison', label: '4-Corner 비교', visualization: 'bar', rowAxes: ['conditionCorner'], columnAxes: ['skew'], aggregation: 'fail_rate' },
+  { id: 'condition-overview', label: '조건별 판정', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'pass_fail' },
+  { id: 'reproduction', label: '재현 비교', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['skew', 'sample'], columnAxes: ['run'], aggregation: 'pass_fail' },
+  { id: 'acceleration', label: '가속 조건', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['frequencyMHz'], columnAxes: ['temperatureCorner', 'vddCorner'], aggregation: 'fail_rate' },
+  { id: 'tm-comparison', label: 'TM 개선 비교', basis: 'evaluation', visualization: 'stacked_bar', rowAxes: ['mode'], columnAxes: [], aggregation: 'pass_fail' },
+  { id: 'corner-comparison', label: '4-Corner 비교', basis: 'evaluation', visualization: 'bar', rowAxes: ['conditionCorner'], columnAxes: ['skew'], aggregation: 'fail_rate' },
+  { id: 'failure-dq-bl', label: 'DQ · BL 집중', basis: 'failure_address', visualization: 'heatmap', rowAxes: ['dq'], columnAxes: ['bl'], aggregation: 'fail_event_count' },
+  { id: 'failure-bank-dq', label: 'Bank · DQ 집중', basis: 'failure_address', visualization: 'heatmap', rowAxes: ['bankGroup', 'bank'], columnAxes: ['dq'], aggregation: 'fail_event_count' },
 ] as const
 
 export interface AnalysisChartDatum {
@@ -48,6 +58,9 @@ export interface AnalysisChartDatum {
   passCount?: number
   failCount?: number
   definitiveCount?: number
+  failureEventCount?: number
+  failureSourceCount?: number
+  topFailureSignature?: string
 }
 
 export interface AnalysisChartSeries {
@@ -81,6 +94,7 @@ export function analysisChartModel(grid: PivotGrid): AnalysisChartModel {
             cellKeys: [cellKey(grid, rowIndex, columnIndex)],
             sourceIds: [...cell.sourceIds],
             ...(cell.breakdown ?? {}),
+            ...(cell.failureAddress ? { failureEventCount: cell.failureAddress.eventCount, failureSourceCount: cell.failureAddress.sourceCount, topFailureSignature: cell.failureAddress.topSignature } : {}),
           }
         }),
       })),
@@ -98,6 +112,7 @@ export function analysisChartModel(grid: PivotGrid): AnalysisChartModel {
           cellKeys: [cellKey(grid, 0, columnIndex)],
           sourceIds: [...cell.sourceIds],
           ...(cell.breakdown ?? {}),
+          ...(cell.failureAddress ? { failureEventCount: cell.failureAddress.eventCount, failureSourceCount: cell.failureAddress.sourceCount, topFailureSignature: cell.failureAddress.topSignature } : {}),
         }
       }),
     }],
@@ -113,6 +128,7 @@ export function analysisHeatmapData(grid: PivotGrid): AnalysisChartDatum[] {
       cellKeys: [cellKey(grid, rowIndex, columnIndex)],
       sourceIds: [...cell.sourceIds],
       ...(cell.breakdown ?? {}),
+      ...(cell.failureAddress ? { failureEventCount: cell.failureAddress.eventCount, failureSourceCount: cell.failureAddress.sourceCount, topFailureSignature: cell.failureAddress.topSignature } : {}),
     }
   }))
 }

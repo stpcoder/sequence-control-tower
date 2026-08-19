@@ -212,6 +212,35 @@ export interface ArtifactStageScanSourceResult {
 }
 export interface ArtifactStageScanResult { sources: ArtifactStageScanSourceResult[] }
 
+export interface ArtifactFailureAddressFields {
+  channel?: string
+  subChannel?: string
+  chipSelect?: string
+  rank?: string
+  bankGroup?: string
+  bank?: string
+  row?: string
+  column?: string
+  writeData?: string
+  readData?: string
+  dq?: string
+  bl?: string
+}
+export interface ArtifactFailureAddressEvent {
+  /** One-based line number. Raw log text never crosses IPC. */
+  lineNumber: number
+  fields: ArtifactFailureAddressFields
+}
+export interface ArtifactFailureAddressScanInput { sources: ArtifactEvidenceSource[] }
+export interface ArtifactFailureAddressScanSourceResult {
+  sourceId: string
+  artifactId: string
+  events: ArtifactFailureAddressEvent[]
+  truncated: boolean
+  error?: string
+}
+export interface ArtifactFailureAddressScanResult { sources: ArtifactFailureAddressScanSourceResult[] }
+
 export interface ArtifactLineWindowInput {
   artifactId: string
   /** One-based first line. */
@@ -1033,6 +1062,7 @@ export interface SequenceIntelligenceApi {
     search(input: ArtifactSearchInput): Promise<ArtifactSearchResult>
     inspectEvidence(input: ArtifactEvidenceInput): Promise<ArtifactEvidenceResult>
     inspectStages(input: ArtifactStageScanInput): Promise<ArtifactStageScanResult>
+    inspectFailureAddresses(input: ArtifactFailureAddressScanInput): Promise<ArtifactFailureAddressScanResult>
     getLineWindow(input: ArtifactLineWindowInput): Promise<ArtifactLineWindow>
     findSimilar(artifactId: string, limit?: number): Promise<SimilarArtifact[]>
   }
@@ -1092,6 +1122,7 @@ export const IPC_CHANNELS = {
   artifactSearch: 'artifact:search',
   artifactInspectEvidence: 'artifact:inspect-evidence',
   artifactInspectStages: 'artifact:inspect-stages',
+  artifactInspectFailureAddresses: 'artifact:inspect-failure-addresses',
   artifactLineWindow: 'artifact:line-window',
   artifactSimilar: 'artifact:similar',
   analysisStart: 'analysis:start',
