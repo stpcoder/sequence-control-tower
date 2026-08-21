@@ -129,7 +129,7 @@ describe('Native Agent DRAM persona interactions', () => {
     const paused = waitFor(service, session.id, 'paused')
     await service.send(session.id, 'QC Training FAIL 근거를 다시 확인해줘', ['qc-1'], 'results')
     const first = await paused
-    expect(first.failure).toContain('사내 LLM 응답이 늦거나')
+    expect(first.failure).toContain('사내 LLM 요청 시간 초과')
     expect(first.messages.at(-1)?.content).toContain('로컬에서 계산된 값')
 
     const idle = waitFor(service, session.id, 'idle')

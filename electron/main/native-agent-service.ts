@@ -18,6 +18,7 @@ import type { SctMcpToolTrace } from './sct-mcp-server'
 import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 import { extractAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
+import { llmFailureDisplay } from '../../src/domain/llm-error'
 
 const MAX_AGENT_SOURCE_SCOPE = 32
 
@@ -701,7 +702,8 @@ export class NativeAgentService {
   }
   private failure(error: unknown): string {
     const raw = error instanceof Error ? error.message : 'AGENT_FAILED'
-    if (/timeout|429|LLM_REQUEST_TIMEOUT/i.test(raw)) return '사내 LLM 응답이 늦거나 사용량 제한에 도달했습니다.'
+    const llmFailure = llmFailureDisplay(error)
+    if (llmFailure) return llmFailure
     if (/LLM_UNAVAILABLE/i.test(raw)) return '설정에서 LLM 주소와 모델을 연결해 주세요.'
     if (/OPENCODE/i.test(raw)) return 'OpenCode harness를 시작하지 못해 내장 분석으로 전환했습니다.'
     return safe(raw, 300) || '에이전트 분석을 완료하지 못했습니다.'

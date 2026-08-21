@@ -14,6 +14,7 @@ import type {
 import { ArtifactService } from './artifact-service'
 import { AtomicJsonStore } from './json-store'
 import { buildMinimalLlmEvidence, buildMinimalLlmPrompt } from './llm-evidence'
+import { llmFailureDisplay } from '../../src/domain/llm-error'
 import { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import { PARSER_VERSION, parseSequence, semanticChanges } from './sequence-parser'
 import { parseFilenameMetadata } from '../../src/domain/workbench/filenameMetadata'
@@ -340,7 +341,7 @@ export class AnalysisService {
       } catch (error) {
         if (job.controller.signal.aborted) throw error
         warnings.push(
-          'LLM 응답을 사용할 수 없어 파일 구조와 사용자 코멘트만으로 요약했습니다.'
+          `${llmFailureDisplay(error) ?? 'LLM 응답을 사용할 수 없습니다.'} 로컬 파일 구조와 사용자 코멘트만으로 요약했습니다.`
         )
       }
     } else if (!llmSummary.configured) {

@@ -8,6 +8,7 @@ import type {
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
 import { isVertexOpenAiBaseUrl, vertexAccessTokenProvider, type VertexAccessTokenProvider } from './vertex-auth'
+import { llmErrorCode, llmFailureDisplay, llmHttpErrorCode } from '../../src/domain/llm-error'
 
 interface SavedLlmConfig {
   schemaVersion: 1
@@ -562,6 +563,7 @@ interface ChatCompletionResponse {
 }
 
 const MAX_CHAT_RESPONSE_BYTES = 2 * 1024 * 1024
+const MAX_CHAT_ERROR_BYTES = 16 * 1024
 
 function isGemini3Model(model: string): boolean {
   return /(?:^|\/)gemini-3(?:\.\d+)?-/i.test(model.trim())
@@ -603,7 +605,7 @@ export class OpenAiCompatibleClient {
       await this.limiter.reserve(estimatedTokens, config, signal, (waitMs) => {
         onStage(`LLM 사용량 대기 · 약 ${Math.ceil(waitMs / 1_000)}초`)
       })
-      if (attempt > 0) onStage(`LLM 재시도 ${attempt}/${config.maxRetries}`)
+      if (attempt > 0) onStage(`${llmFailureDisplay(lastError) ?? '사내 LLM 요청 실패'} · 재시도 ${attempt}/${config.maxRetries}`)
       else onStage('사내 LLM 응답 대기')
 
       const timeoutController = new AbortController()
@@ -637,9 +639,10 @@ export class OpenAiCompatibleClient {
           signal: timeoutController.signal
         })
         if (!response.ok) {
-          await response.body?.cancel().catch(() => undefined)
+          const bodyText = await readResponseTextCapped(response, MAX_CHAT_ERROR_BYTES, 'LLM_ERROR_RESPONSE_TOO_LARGE')
+            .catch(async () => { await response.body?.cancel().catch(() => undefined); return '' })
           const retryable = response.status === 429 || response.status >= 500
-          const error = new Error(`LLM_HTTP_${response.status}`)
+          const error = new Error(llmHttpErrorCode(response.status, bodyText, response.statusText))
           if (!retryable || attempt >= config.maxRetries) throw error
           const retryAfter = retryAfterMilliseconds(response.headers.get('retry-after'))
           const backoff = retryAfter !== null
@@ -668,14 +671,15 @@ export class OpenAiCompatibleClient {
         const original = error instanceof Error ? error : undefined
         const current = timedOut
           ? new Error('LLM_REQUEST_TIMEOUT')
-          : original && /^LLM_(?:HTTP_\d{3}|INVALID_JSON_RESPONSE|EMPTY_RESPONSE|RESPONSE_TOO_LARGE|TPM_REQUEST_TOO_LARGE)$/.test(original.message)
+          : original && llmErrorCode(original)
             ? original
             : new Error('LLM_REQUEST_FAILED')
         lastError = current
+        const currentCode = llmErrorCode(current)
         const retryable =
-          current.message === 'LLM_REQUEST_TIMEOUT' ||
-          current.message === 'LLM_REQUEST_FAILED' ||
-          /^LLM_HTTP_(?:408|429|5\d{2})$/.test(current.message)
+          currentCode === 'LLM_REQUEST_TIMEOUT' ||
+          currentCode === 'LLM_REQUEST_FAILED' ||
+          /^LLM_HTTP_(?:408|429|5\d{2})$/.test(currentCode)
         if (!retryable || attempt >= config.maxRetries) throw current
         await delay(Math.min(1_000 * 2 ** attempt + Math.random() * 500, 15_000), signal)
       } finally {

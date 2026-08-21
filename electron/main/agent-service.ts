@@ -13,6 +13,7 @@ import type { ArtifactService } from './artifact-service'
 import type { EvaluationStore } from './evaluation-store'
 import type { LlmConfigService, OpenAiCompatibleClient } from './llm-service'
 import type { ProjectStore } from './project-store'
+import { llmErrorCode } from '../../src/domain/llm-error'
 
 export interface AgentServiceDeps {
   artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'>
@@ -51,7 +52,7 @@ type CachedAgentResult = Pick<AgentRun, 'candidate' | 'needsReview' | 'failureRe
   observations: BoundedObservation[]
 }
 
-const failCodes = new Set(['LLM_REQUEST_TIMEOUT', 'LLM_REQUEST_FAILED', 'LLM_UNAVAILABLE', 'LLM_TPM_REQUEST_TOO_LARGE', 'LLM_HTTP_429'])
+const failCodes = new Set(['LLM_REQUEST_TIMEOUT', 'LLM_REQUEST_FAILED', 'LLM_UNAVAILABLE', 'LLM_TPM_REQUEST_TOO_LARGE', 'LLM_HTTP_408', 'LLM_HTTP_429'])
 
 function stamp(now: () => Date): string { return now().toISOString() }
 function hash(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex') }
@@ -243,7 +244,8 @@ export class AgentService {
     } catch (error) {
       if (run.controller.signal.aborted || run.generation !== generation) return
       const message = error instanceof Error ? error.message : 'agent failed'
-      this.fail(run, failCodes.has(message) ? 'budget-exceeded' : 'invalid-action', message)
+      const code = llmErrorCode(error)
+      this.fail(run, failCodes.has(code) || /^LLM_HTTP_5\d{2}$/.test(code) ? 'budget-exceeded' : 'invalid-action', message)
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer)
       run.driving = false

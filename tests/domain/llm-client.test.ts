@@ -174,15 +174,17 @@ describe('OpenAI-compatible chat client', () => {
   it.each([401, 403, 404])('does not retry permanent HTTP %s errors', async (status) => {
     const server = await mockServer((_request, response) => {
       response.writeHead(status, { 'content-type': 'application/json' })
-      response.end('{"detail":"must never be reflected"}')
+      response.end('{"error":{"code":"auth_denied","message":"token=server-secret"}}')
     })
     const request = client(effective({ baseUrl: server.baseUrl, maxRetries: 3 }))
 
-    await expect(request.complete('minimal evidence', undefined, vi.fn())).rejects.toThrow(`LLM_HTTP_${status}`)
+    await expect(request.complete('minimal evidence', undefined, vi.fn())).rejects.toThrow(
+      `LLM_HTTP_${status} · auth_denied · token=[REDACTED]`,
+    )
     expect(server.records).toHaveLength(1)
   })
 
-  it('retries 429 and 5xx, honoring numeric and HTTP-date Retry-After without exposing response bodies', async () => {
+  it('retries 429 and 5xx, reports the status, and does not expose arbitrary response bodies', async () => {
     let count = 0
     const retryAfterValues = ['0', new Date(Date.now() - 1_000).toUTCString()]
     const server = await mockServer((_request, response) => {
@@ -198,11 +200,15 @@ describe('OpenAI-compatible chat client', () => {
       completion(response, 'recovered')
     })
 
+    const stages: string[] = []
     const result = await client(effective({ baseUrl: server.baseUrl, maxRetries: 2 }))
-      .complete('minimal evidence', undefined, vi.fn())
+      .complete('minimal evidence', undefined, (stage) => stages.push(stage))
 
     expect(result.content).toBe('recovered')
     expect(server.records).toHaveLength(3)
+    expect(stages.some((stage) => stage.includes('HTTP 429'))).toBe(true)
+    expect(stages.some((stage) => stage.includes('HTTP 503'))).toBe(true)
+    expect(stages.join(' ')).not.toContain('server-internal-detail')
   })
 
   it.each([

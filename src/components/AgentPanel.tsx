@@ -20,6 +20,7 @@ import { resolveProjectSource } from '../state/sourceIdentity'
 import { projectSnapshotToEvaluationMemory } from '../state/evaluationMemory'
 import { evaluationRelationLabel, relationForEvaluationPurpose, suggestEvaluationRelation, type EvaluationRelationSuggestion } from '../domain/evaluation-relation'
 import { AgentMarkdown } from './AgentMarkdown'
+import { llmFailureDisplay } from '../domain/llm-error'
 import { hasMeaningfulAgentMessage } from '../domain/agent-message'
 import { analysisContextLabel } from '../domain/agent-analysis-view'
 import { ANALYSIS_DATA_BASIS_LABELS, ANALYSIS_VISUALIZATION_LABELS } from '../domain/analysis-view'
@@ -405,10 +406,11 @@ function shouldClearSubmissionBusy(run: AgentRun): boolean {
 
 function boundedError(error: unknown): string {
   const raw = error instanceof Error ? error.message : ''
+  const llmFailure = llmFailureDisplay(error)
+  if (llmFailure) return llmFailure
   if (raw.includes('REVISION_CONFLICT')) return '분석 결과가 바뀌었습니다. 최신 결과를 확인해 주세요.'
   if (raw.includes('찾을 수 없습니다')) return '프로젝트 또는 실행을 찾을 수 없습니다.'
   if (raw.includes('입력인지 출력인지 선택')) return '먼저 위 질문에 답해 주세요.'
-  if (raw.includes('LLM_') || raw.includes('provider failed') || raw.includes('timeout') || raw.includes('429')) return '분석 서버 응답이 늦거나 제한되었습니다.'
   if (raw.includes('Error invoking remote method')) return 'Agent 요청을 처리하지 못했습니다. 다시 시도해 주세요.'
   return raw ? `작업을 완료하지 못했습니다: ${raw.replace(/[\r\n]+/g, ' ').slice(0, 120)}` : '작업을 완료하지 못했습니다.'
 }

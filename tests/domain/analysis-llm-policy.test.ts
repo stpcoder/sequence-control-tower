@@ -249,6 +249,7 @@ describe('analysis LLM call policy', () => {
     expect(first.result?.cached).toBe(false)
     expect(second.result?.cached).toBe(false)
     expect(second.result?.source).toBe('deterministic-fallback')
+    expect(second.result?.warnings).toContain('사내 LLM 요청 시간 초과 로컬 파일 구조와 사용자 코멘트만으로 요약했습니다.')
   })
 
   it('sends only redacted minimal evidence when a human hint explicitly enables LLM analysis', async () => {

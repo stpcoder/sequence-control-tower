@@ -6,6 +6,11 @@ import { ArtifactService } from './artifact-service'
 import { ProjectStore } from './project-store'
 import { SampleProjectService } from './sample-project-service'
 import { sourceEngineeringContext } from './lpddr-agent-tools'
+import {
+  extractLpddrFilenameDimensions,
+  extractLpddrFilenameOutcome,
+  parsePositionalLabFilename,
+} from '../../src/domain/lpddr-filename-dimensions'
 
 describe('SampleProjectService', () => {
   it('creates a usable LPDDR6 project with logs, branches and an archived LPDDR5 reference', async () => {
@@ -27,8 +32,24 @@ describe('SampleProjectService', () => {
     expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(4)
     expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-8975'] })
     const allArtifacts = new Map((await artifacts.list()).map((artifact) => [artifact.id, artifact]))
-    const initial = result.project.artifacts.find((item) => item.relativePath.includes('SMP-01_T85_VDD1p295') && item.relativePath.includes('RUN1'))!
-    const rt = result.project.artifacts.find((item) => item.relativePath.includes('SMP-01_T85_VDD1p295') && item.relativePath.includes('RT2'))!
+    expect(result.project.artifacts.every((item) => Boolean(parsePositionalLabFilename(item.relativePath)))).toBe(true)
+    const initial = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_BASE_'))!
+    const rt = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_RT2_'))!
+    expect(initial).toBeDefined()
+    expect(rt).toBeDefined()
+    expect(parsePositionalLabFilename(initial.relativePath)).toMatchObject({
+      equipmentChannel: '8', gridId: '1', temperatureC: 85, vdd: 1.295,
+      eccMode: 'EN', material: 'DHCST-89', evaluationStep: 'C', frequencyMHz: 9600,
+      outcome: 'TEST_FAIL',
+    })
+    expect(extractLpddrFilenameDimensions(initial.relativePath)).toMatchObject({
+      sample: 'DHCST-89', material: 'DHCST-89', skew: 'SS', lot: 'A1', die: '03',
+      socVendor: 'qualcomm', socModel: 'SM-8975', equipmentChannel: '8', gridId: '1',
+      temperatureC: 85, vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR',
+      evaluationStep: 'C', eccMode: 'EN',
+    })
+    expect(extractLpddrFilenameDimensions(initial.relativePath).channel).toBeUndefined()
+    expect(extractLpddrFilenameOutcome(initial.relativePath)).toBe('TEST_FAIL')
     expect(sourceEngineeringContext(initial.relativePath, allArtifacts.get(initial.artifactId)).sequenceSignature).toBe(
       sourceEngineeringContext(rt.relativePath, allArtifacts.get(rt.artifactId)).sequenceSignature,
     )

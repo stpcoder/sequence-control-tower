@@ -113,7 +113,7 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
   const vdd = capture(name, /(?:^|[_\-.])VDD(?:=|_|-)?(\d+(?:[p.]\d+)?)(?:V)?(?:[_\-.]|$)/i)
   const frequency = capture(name, /(?:^|[_\-.])(?:FREQ|F)(?:=|_|-)?(\d{3,5})(?:MHZ|MT)?(?:[_\-.]|$)/i)
     ?? capture(name, /(?:^|[_\-.])(\d{3,5})MT(?:[_\-.]|$)/i)
-  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9][A-Z0-9_-]*?)(?=[_.-](?:DQ|BL|CH|CHANNEL|SUBCH|SCH|CS|RANK|RK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|PASS|FAIL|HALT|REBOOT|TRAIN)(?:=|_|-)?|\.LOG$|$)/i)
+  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9][A-Z0-9_-]*?)(?=[_.-](?:DQ|BL|CH|CHANNEL|SUBCH|SCH|CS|RANK|RK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|COM|ECC|PASS|FAIL|HALT|REBOOT|TRAIN)(?:=|_|-)?|\.LOG$|$)/i)
   const samples = captures(name, /(?:^|[_\-.])(?:SAMPLE|SMP)(?:=|_|-)?([A-Z0-9]+(?:-[A-Z0-9]+)*?)(?=[_.-](?:SAMPLE|SMP)(?:=|_|-)|[_.]|$)/gi)
   const explicitMaterial = capture(name, /(?:^|[_\-.])(?:MATERIAL|MAT)(?:=|_|-)([A-Z0-9-]+)/i)
   // In this workflow "material" and "Sample" are the same physical identifier.
