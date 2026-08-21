@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Beaker, ChevronDown, FolderPlus, LoaderCircle, Plus, Unplug, X } from 'lucide-react'
 import type { ProjectLoadResult, ProjectSaveInput, ProjectSnapshot } from '../../electron/shared/contracts'
 
-export const PROJECT_INIT_ITEMS = ['Sample', '온도', 'Mode', 'Grid', 'PASS/FAIL', 'Reboot/Halt'] as const
+export const PROJECT_INIT_ITEMS = ['자재 (Sample)', '온도', 'Mode', 'Grid', 'PASS/FAIL', 'Reboot/Halt'] as const
 export type ProjectInitItem = typeof PROJECT_INIT_ITEMS[number]
 export type ProjectInitStep = 1 | 2 | 3
 export interface ProjectInitDraft { name: string; purpose: string; items: ProjectInitItem[]; custom: string; reuseProjectId: string }

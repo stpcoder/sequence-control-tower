@@ -559,8 +559,8 @@ export class NativeAgentStore {
       const dimensions = structuredClone(input.dimensions ?? {})
       const signature = clean(input.sequenceSignature, 200)
       const identityKeys: Array<keyof ProjectEvaluationDimensions> = [
-        'skew', 'lot', 'material', 'die', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner',
-        'conditionCorner', 'frequencyMHz', 'testMode', 'pattern',
+        'skew', 'lot', 'die', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner',
+        'conditionCorner', 'frequencyMHz', 'testMode', 'pattern', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep',
       ]
       const related = rows.filter((item) => item.sourceId !== input.sourceId && (item.evaluationScopeId ?? '') === evaluationScopeId && signature && item.sequenceSignature === signature
         && Boolean(dimensions.sample) && item.dimensions.sample === dimensions.sample

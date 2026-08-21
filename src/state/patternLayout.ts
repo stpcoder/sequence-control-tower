@@ -28,7 +28,7 @@ export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
 
 const DIMENSIONS = new Set<PivotDimension>([
   'sample', 'temperature', 'temperatureCorner', 'mode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
-  'lot', 'material', 'die', 'socModel',
+  'lot', 'material', 'die', 'socModel', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep',
   'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'timingSkewPs',
   'grid', 'result', 'review', 'folder', 'run',
 ])
@@ -38,6 +38,7 @@ const RESULTS = new Set<ResultLabel>(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAININ
 function normalizedAxis(value: unknown, fallback: readonly PivotDimension[]): PivotDimension[] {
   if (!Array.isArray(value)) return [...fallback]
   return value
+    .map((item) => item === 'material' ? 'sample' : item)
     .filter((item): item is PivotDimension => typeof item === 'string' && DIMENSIONS.has(item as PivotDimension))
     .slice(0, MAX_PATTERN_AXES)
 }

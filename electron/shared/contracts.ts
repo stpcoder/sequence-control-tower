@@ -830,6 +830,7 @@ export interface ProjectLpddrDevelopmentContext {
 export interface ProjectEvaluationDimensions {
   skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor
   socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number
+  equipmentChannel?: string | number; eccMode?: string; customCondition?: string; evaluationStep?: string
   channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number
   bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number
   writeData?: string | number; readData?: string | number; gridId?: string
@@ -896,7 +897,7 @@ export type NativeAgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
 export type NativeAgentContextKind = 'free_chat' | 'log_search' | 'results' | 'analysis_view' | 'evaluation_history' | 'project_compare'
 export type NativeAgentAnalysisDimension =
   | 'sample' | 'temperature' | 'temperatureCorner' | 'mode' | 'skew' | 'frequencyMHz' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
-  | 'lot' | 'material' | 'die' | 'socModel' | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank'
+  | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank'
   | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs' | 'grid' | 'result' | 'review' | 'folder' | 'run'
 export type NativeAgentAnalysisAggregation = 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'fail_event_count' | 'fail_source_count' | 'fail_event_share'
 export type NativeAgentAnalysisVisualization = 'cross_table' | 'heatmap' | 'bar' | 'bar_horizontal' | 'stacked_bar' | 'stacked_percent' | 'line' | 'combo'
@@ -1043,7 +1044,7 @@ export type RendererCommand = 'open-logs' | 'find' | 'find-workspace' | 'prefere
 export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_question' | 'waiting_confirmation' | 'completed' | 'failed'
 export type EvaluationAgentPublicOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
-export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; writeData?: string | number; readData?: string | number; gridId?: string; frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string; timingSkewPs?: number; testMode?: string }
+export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; equipmentChannel?: string | number; eccMode?: string; customCondition?: string; evaluationStep?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; writeData?: string | number; readData?: string | number; gridId?: string; frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string; timingSkewPs?: number; testMode?: string }
 export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
 export interface EvaluationAgentRestoreRequest { projectId: string; evaluationScopeId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }

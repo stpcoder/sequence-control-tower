@@ -3,7 +3,7 @@ import type { MetadataFieldDefinition } from '../domain/workbench/records'
 import { parseFilenameMetadata } from '../domain/workbench/filenameMetadata'
 import type { WorkbenchFile } from '../views/WorkbenchView'
 import { detectSocFilenameContext } from '../domain/soc-profile'
-import { extractLpddrFilenameDimensions } from '../domain/lpddr-filename-dimensions'
+import { extractLpddrFilenameDimensions, extractLpddrFilenameOutcome, parsePositionalLabFilename } from '../domain/lpddr-filename-dimensions'
 import type { ArtifactFailureAddressEvent, ArtifactFailureAddressFields, ProjectEvaluationDimensions } from '../../electron/shared/contracts'
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
@@ -75,7 +75,7 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
+export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
   | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs'
 export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
 export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'evidence_count'
@@ -254,6 +254,10 @@ const TREND_DIMENSIONS: readonly PivotDimension[] = [
   'vddCorner',
   'conditionCorner',
   'pattern',
+  'equipmentChannel',
+  'eccMode',
+  'customCondition',
+  'evaluationStep',
   'dq',
   'bl',
   'channel',
@@ -537,20 +541,23 @@ function matchingLineCount(text: string, pattern: RegExp): number {
 
 export function inferResultCandidate(file: WorkbenchFile): { result: ResultLabel; evidenceCount: number } {
   const text = file.text ?? ''
-  const candidates: Array<{ result: ResultLabel; pattern: RegExp }> = [
+  const failureCandidates: Array<{ result: ResultLabel; pattern: RegExp }> = [
     { result: 'SYSTEM_REBOOT', pattern: /reboot_reason|WATCHDOG_RESET|session recovery detected|\bTERMINAL_RESULT=SYSTEM_REBOOT\b/i },
     { result: 'SYSTEM_HALT', pattern: /\b(?:TERMINAL_RESULT=)?SYSTEM_HALT\b/i },
     { result: 'TRAINING_FAIL', pattern: /TRAINING_FAIL|training:\s*.+timeout/i },
     { result: 'DIAG_FAIL', pattern: /DIAG_FAIL|hidag[^\n]*(?:fail|error)/i },
     { result: 'TEST_FAIL', pattern: /TEST_FAIL|@FAIL/i },
-    { result: 'PASS', pattern: /(?:@PASS\b|\bTERMINAL_RESULT=PASS\b)/i },
   ]
-  for (const candidate of candidates) {
+  for (const candidate of failureCandidates) {
     if (candidate.pattern.test(text)) {
       candidate.pattern.lastIndex = 0
       return { result: candidate.result, evidenceCount: matchingLineCount(text, candidate.pattern) }
     }
   }
+  const filenameOutcome = extractLpddrFilenameOutcome(file.relativePath ?? file.name)
+  if (filenameOutcome) return { result: filenameOutcome, evidenceCount: 1 }
+  const passPattern = /(?:@PASS\b|\bTERMINAL_RESULT=PASS\b)/i
+  if (passPattern.test(text)) return { result: 'PASS', evidenceCount: matchingLineCount(text, passPattern) }
   const started = /stressapp:\s*start|hidag:\s*start/i.test(text)
   const ended = /@PASS|@FAIL|normal_end:\s*true/i.test(text)
   if (started && !ended) {
@@ -621,16 +628,25 @@ export function projectLogRecords(
   const folderLabels = rootAwareFolderLabels(files)
   return files.map((file) => {
     const approvals = metadataApprovals[file.id] ?? {}
-    const filenameDimensions = extractLpddrFilenameDimensions(file.relativePath ?? file.name)
-    const sampleCandidate = metadataCandidate(file, 'sample')
-    const temperatureCandidate = metadataCandidate(file, 'temperature')
+    const fileName = file.relativePath ?? file.name
+    const positionalFilename = parsePositionalLabFilename(fileName)
+    const filenameDimensions = extractLpddrFilenameDimensions(fileName)
+    const sampleCandidate = positionalFilename && filenameDimensions.sample !== undefined
+      ? { value: String(filenameDimensions.sample), state: 'candidate' as const }
+      : metadataCandidate(file, 'sample')
+    const temperatureCandidate = positionalFilename && filenameDimensions.temperatureC !== undefined
+      ? { value: String(filenameDimensions.temperatureC), state: 'candidate' as const }
+      : metadataCandidate(file, 'temperature')
     const modeCandidate = filenameDimensions.testMode !== undefined && /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)/i.test(file.name)
       ? { value: String(filenameDimensions.testMode), state: 'candidate' as const }
       : metadataCandidate(file, 'mode')
     const sample = applyMetadataApproval(sampleCandidate, approvals.sample)
     const temperature = applyMetadataApproval(temperatureCandidate, approvals.temperature)
     const mode = applyMetadataApproval(modeCandidate, approvals.mode)
-    const grid = applyMetadataApproval(metadataCandidate(file, 'grid'), approvals.grid)
+    const gridCandidate = positionalFilename && filenameDimensions.gridId !== undefined
+      ? { value: String(filenameDimensions.gridId), state: 'candidate' as const }
+      : metadataCandidate(file, 'grid')
+    const grid = applyMetadataApproval(gridCandidate, approvals.grid)
     const inferred = inferResultCandidate(file)
     const stageResults = stageResultsBySource[file.id] ?? inferStageResults(file)
     const result = file.decision ?? file.ruleResult ?? inferred.result
@@ -657,7 +673,9 @@ export function projectLogRecords(
       grid,
       dimensions: {
         ...filenameDimensions,
-        ...(sample.value !== null ? { sample: sample.value } : {}),
+        // Material and Sample are one canonical identifier in this product.
+        // A user correction in Results must update both legacy contract aliases.
+        ...(sample.value !== null ? { sample: sample.value, material: sample.value } : {}),
         ...(temperature.value !== null && Number.isFinite(Number(temperature.value)) ? { temperatureC: Number(temperature.value) } : {}),
         ...(mode.value !== null ? { testMode: mode.value } : {}),
       },
@@ -1022,7 +1040,7 @@ const BASE_EXPORT_HEADER = [
 ] as const
 
 export const ENGINEERING_EXPORT_COLUMNS = [
-  'skew', 'lot', 'material', 'die', 'soc_model', 'temperature_corner', 'frequency_mhz', 'vdd', 'vdd_corner', 'condition_corner', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
+  'skew', 'lot', 'material', 'die', 'soc_model', 'equipment_channel', 'ecc_mode', 'custom_condition', 'evaluation_step', 'temperature_corner', 'frequency_mhz', 'vdd', 'vdd_corner', 'condition_corner', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
   'chip_select', 'rank', 'bank_group', 'bank', 'row', 'column', 'write_data', 'read_data', 'timing_skew_ps',
 ] as const
 export const EVIDENCE_EXPORT_COLUMNS = ['evidence_count', 'selected_evidence_count'] as const
@@ -1046,10 +1064,13 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'folder', label: '폴더', section: 'identity' },
   { key: 'skew', label: 'SKEW', section: 'condition' },
   { key: 'lot', label: 'Lot', section: 'condition' },
-  { key: 'material', label: '자재', section: 'condition' },
   { key: 'die', label: 'Die', section: 'condition' },
   { key: 'soc_model', label: 'SoC', section: 'condition' },
-  { key: 'sample_value', label: 'Sample', section: 'condition' },
+  { key: 'equipment_channel', label: '실장기 채널', section: 'condition' },
+  { key: 'ecc_mode', label: 'ECC', section: 'condition' },
+  { key: 'custom_condition', label: '사용자 조건', section: 'condition' },
+  { key: 'evaluation_step', label: '평가 Step', section: 'condition' },
+  { key: 'sample_value', label: '자재 (Sample)', section: 'condition' },
   { key: 'temperature_value', label: '온도 (°C)', section: 'condition' },
   { key: 'temperature_corner', label: '온도 조건', section: 'condition' },
   { key: 'mode_value', label: 'Mode', section: 'condition' },
@@ -1103,6 +1124,10 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     material: row.dimensions?.material ?? '',
     die: row.dimensions?.die ?? '',
     soc_model: row.dimensions?.socModel ?? '',
+    equipment_channel: row.dimensions?.equipmentChannel ?? '',
+    ecc_mode: row.dimensions?.eccMode ?? '',
+    custom_condition: row.dimensions?.customCondition ?? '',
+    evaluation_step: row.dimensions?.evaluationStep ?? '',
     temperature_corner: row.dimensions?.temperatureCorner ?? '',
     frequency_mhz: row.dimensions?.frequencyMHz ?? '',
     vdd: row.dimensions?.vdd ?? '',
@@ -1156,7 +1181,7 @@ export function normalizedExportCell(value: unknown): string {
 const FAILURE_ADDRESS_EXPORT_COLUMNS = [
   'source_id', 'artifact_id', 'filename', 'folder', 'line_number', 'result',
   'sample', 'skew', 'lot', 'die', 'grid', 'run', 'temperature_c', 'temperature_corner',
-  'vdd', 'vdd_corner', 'frequency_mhz', 'test_mode', 'pattern', 'soc_model',
+  'vdd', 'vdd_corner', 'frequency_mhz', 'test_mode', 'pattern', 'soc_model', 'equipment_channel', 'ecc_mode', 'custom_condition', 'evaluation_step',
   'channel', 'sub_channel', 'chip_select', 'rank', 'bank_group', 'bank', 'row', 'column', 'dq', 'bl', 'write_data', 'read_data',
 ] as const
 
@@ -1187,6 +1212,10 @@ export function serializeFailureAddressEventsCsv(rows: readonly LogResultRecord[
         test_mode: record.mode.value ?? record.dimensions?.testMode ?? '',
         pattern: record.dimensions?.pattern ?? '',
         soc_model: record.dimensions?.socModel ?? '',
+        equipment_channel: record.dimensions?.equipmentChannel ?? '',
+        ecc_mode: record.dimensions?.eccMode ?? '',
+        custom_condition: record.dimensions?.customCondition ?? '',
+        evaluation_step: record.dimensions?.evaluationStep ?? '',
         channel: fields.channel ?? '', sub_channel: fields.subChannel ?? '', chip_select: fields.chipSelect ?? '', rank: fields.rank ?? '',
         bank_group: fields.bankGroup ?? '', bank: fields.bank ?? '', row: fields.row ?? '', column: fields.column ?? '',
         dq: fields.dq ?? '', bl: fields.bl ?? '', write_data: fields.writeData ?? '', read_data: fields.readData ?? '',

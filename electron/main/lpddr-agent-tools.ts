@@ -57,7 +57,8 @@ const finite = (value: unknown): number | undefined => typeof value === 'number'
 const agentDimensionView = (dimensions: ProjectEvaluationDimensions | undefined) => ({ ...dimensions })
 const AGENT_DIMENSION_LABELS: Record<string, string> = {
   skew: 'SKEW', timingSkewPs: 'Timing SKEW (ps)', temperatureC: '온도', frequencyMHz: '주파수',
-  testMode: 'Mode', material: '자재', sample: 'Sample', die: 'Die', lot: 'Lot', socModel: 'SoC', bootProfileId: 'Boot profile',
+  testMode: 'Mode', material: '자재 (Sample)', sample: '자재 (Sample)', die: 'Die', lot: 'Lot', socModel: 'SoC', bootProfileId: 'Boot profile',
+  equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '사용자 조건', evaluationStep: '평가 Step',
   channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank', row: 'Row', column: 'Column',
   dq: 'DQ', bl: 'BL', pattern: 'Pattern', writeData: 'WR', readData: 'RD', gridId: 'Grid', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner',
 }
@@ -491,7 +492,7 @@ export class LpddrAgentToolService {
       data: { rows: [] }, evidenceSourceIds: [],
     }
     const dimensionKeys: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'gridId', 'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'frequencyMHz', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId',
+      'testMode', 'gridId', 'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'frequencyMHz', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep',
       'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'writeData', 'readData', 'pattern', 'timingSkewPs',
     ]
     const selectedBySource = new Map(sources.flatMap((source) => {
@@ -554,7 +555,7 @@ export class LpddrAgentToolService {
     const [workflows, artifacts, bindings] = await Promise.all([this.deps.agentStore.workflowMemories(project.id, 50), this.deps.artifacts.list(), this.deps.agentStore.profileBindings(project.id)])
     const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
-      'testMode', 'gridId', 'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'frequencyMHz', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId',
+      'testMode', 'gridId', 'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'frequencyMHz', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep',
       'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'writeData', 'readData', 'pattern', 'timingSkewPs',
     ]
     const rows = sources.map((source) => {
@@ -770,7 +771,7 @@ export class LpddrAgentToolService {
     const definitiveStatuses = new Set(['PASS', ...failureStatuses])
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
       'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'gridId', 'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'writeData', 'readData', 'pattern',
-      'frequencyMHz', 'timingSkewPs', 'testMode', 'material', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId'
+      'frequencyMHz', 'timingSkewPs', 'testMode', 'die', 'skew', 'lot', 'sample', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep'
     ]
     const buckets = new Map<string, { dimension: string; value: string; total: number; failures: number; sourceIds: string[] }>()
     filenameRows.forEach((row) => {

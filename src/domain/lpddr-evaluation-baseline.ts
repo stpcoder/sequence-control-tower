@@ -10,7 +10,7 @@ export const LPDDR_FOUR_CORNERS = ['HH', 'CH', 'HL', 'CL'] as const
  */
 export const LPDDR_EVALUATION_AGENT_CONTEXT = `LPDDR 평가 기준:
 - 한 프로젝트에는 같은 개발 목표 아래 여러 평가 폴더가 있고, 폴더 하나는 보통 하나의 평가 목적과 연결됩니다.
-- 자재는 Sample로 식별하고 SKEW(TT/SS/SF/FS/FF, 프로젝트별 예외 가능)별 Sample 수를 따로 계산합니다.
+- 자재와 Sample은 같은 식별자이므로 Sample 하나로 정규화하고, SKEW(TT/SS/SF/FS/FF, 프로젝트별 예외 가능)별 Sample 수를 따로 계산합니다.
 - Sequence는 실장기에 보낼 명령과 Grid별 온도, VDD, 주파수, Test Mode를 정합니다. Grid는 한 번 전원 인가해 부팅·Training·테스트 후 종료하는 평가 단위입니다. 로그 파일 1개가 Grid 1개라는 근거가 없으면 동일시하지 않습니다.
 - 온도 조건은 Hot/Room/Cold, 전압 조건은 HVDD/NVDD/LVDD로 기록합니다. 4-Corner는 HH=Hot+HVDD, CH=Cold+HVDD, HL=Hot+LVDD, CL=Cold+LVDD이며 명시된 토큰이나 프로젝트 기준이 있을 때만 분류합니다.
 - Qualcomm은 전원 인가·Training·UEFI·OS, MediaTek은 전원 인가·Training과 Post-PBL/LK/LK2·OS profile을 사용합니다. Training Fail은 OS 진입 전 실패로 분리합니다.

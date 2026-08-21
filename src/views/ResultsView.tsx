@@ -55,7 +55,7 @@ const PAGE_SIZE = 200
 const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'fileName', label: '파일명' },
   { key: 'folder', label: '폴더' },
-  { key: 'sample', label: 'Sample' },
+  { key: 'sample', label: '자재 (Sample)' },
   { key: 'temperature', label: '온도' },
   { key: 'mode', label: 'Mode' },
   { key: 'grid', label: 'Grid' },
@@ -82,7 +82,7 @@ const EXPORT_SECTIONS = [
   { key: 'result' as const, label: '판정' },
 ] as const
 
-const METADATA_LABEL: Record<PatternAxis, string> = { sample: 'Sample', temperature: '온도', mode: 'Mode', grid: 'Grid' }
+const METADATA_LABEL: Record<PatternAxis, string> = { sample: '자재 (Sample)', temperature: '온도', mode: 'Mode', grid: 'Grid' }
 
 function candidateLabel(field: CandidateValue, suffix = '', onOpen?: () => void) {
   if (!field.value) return onOpen

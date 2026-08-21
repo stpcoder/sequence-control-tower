@@ -86,9 +86,8 @@ interface PatternsViewProps {
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
-  { value: 'sample', label: 'Sample', group: '자재' },
+  { value: 'sample', label: '자재 (Sample)', group: '자재' },
   { value: 'skew', label: 'SKEW', group: '자재' },
-  { value: 'material', label: '자재명', group: '자재' },
   { value: 'lot', label: 'Lot', group: '자재' },
   { value: 'die', label: 'Die', group: '자재' },
   { value: 'temperature', label: '온도 (°C)', group: '평가 조건' },
@@ -101,6 +100,10 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
   { value: 'pattern', label: 'Pattern', group: '평가 조건' },
   { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: '평가 조건' },
   { value: 'socModel', label: '실장기 SoC', group: '실장기' },
+  { value: 'equipmentChannel', label: '실장기 채널', group: '실장기' },
+  { value: 'eccMode', label: 'ECC', group: '평가 조건' },
+  { value: 'customCondition', label: '사용자 조건', group: '평가 조건' },
+  { value: 'evaluationStep', label: '평가 Step', group: '평가 조건' },
   { value: 'dq', label: 'DQ', group: 'Fail 위치' },
   { value: 'bl', label: 'BL', group: 'Fail 위치' },
   { value: 'channel', label: 'Channel', group: 'Fail 위치' },
@@ -124,7 +127,7 @@ const DIMENSION_LABEL = Object.fromEntries(DIMENSIONS.map((item) => [item.value,
 const FAILURE_ADDRESS_DIMENSIONS = new Set<PivotDimension>(['dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData'])
 const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
   sample: 'sample_value', temperature: 'temperature_value', mode: 'mode_value', grid: 'grid_value',
-  skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model',
+  skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model', equipmentChannel: 'equipment_channel', eccMode: 'ecc_mode', customCondition: 'custom_condition', evaluationStep: 'evaluation_step',
   dq: 'dq', bl: 'bl', channel: 'channel', subChannel: 'sub_channel', chipSelect: 'chip_select', rank: 'rank', bankGroup: 'bank_group', bank: 'bank', row: 'row', column: 'column', writeData: 'write_data', readData: 'read_data', timingSkewPs: 'timing_skew_ps',
   result: 'result', review: 'review', folder: 'folder', run: 'run',
 }

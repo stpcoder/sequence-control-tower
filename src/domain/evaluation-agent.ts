@@ -7,7 +7,7 @@ import type { AssessmentOrigin, EvaluationDimensions, EvaluationNode, Evaluation
 import { LPDDR_EVALUATION_AGENT_CONTEXT } from './lpddr-evaluation-baseline'
 
 /** Reuse the durable evaluation-memory vocabulary; do not invent agent-only keys. */
-export const EVALUATION_DIMENSIONS = ['skew', 'lot', 'material', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'bl', 'dq', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'pattern', 'writeData', 'readData', 'gridId', 'frequencyMHz', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner', 'conditionCorner', 'timingSkewPs', 'testMode'] as const satisfies readonly (keyof EvaluationDimensions)[]
+export const EVALUATION_DIMENSIONS = ['skew', 'lot', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep', 'bl', 'dq', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'pattern', 'writeData', 'readData', 'gridId', 'frequencyMHz', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner', 'conditionCorner', 'timingSkewPs', 'testMode'] as const satisfies readonly (keyof EvaluationDimensions)[]
 export type EvaluationDimension = typeof EVALUATION_DIMENSIONS[number]
 export type EvaluationQuestionField = EvaluationDimension | 'evaluationIntent'
 export type EvaluationOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN'

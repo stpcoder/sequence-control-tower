@@ -19,6 +19,11 @@ export interface EvaluationDimensions {
   socVendor?: "qualcomm" | "mediatek" | "unknown";
   socModel?: string;
   bootProfileId?: string;
+  /** Serial test-system channel from the filename (for example Ch8), not DRAM Channel. */
+  equipmentChannel?: string | number;
+  eccMode?: string;
+  customCondition?: string;
+  evaluationStep?: string;
   bl?: string | number;
   dq?: string | number;
   channel?: string | number;
@@ -119,7 +124,7 @@ export interface EvaluationMemory {
 }
 
 export const DOMINANCE_DIMENSIONS = [
-  "skew", "lot", "material", "die", "sample", "socModel", "dq", "bl", "pattern", "channel", "subChannel", "chipSelect", "rank", "bank", "bankGroup", "row", "column", "writeData", "readData", "gridId", "frequencyMHz", "temperatureC", "temperatureCorner", "vdd", "vddCorner", "conditionCorner", "timingSkewPs", "testMode",
+  "skew", "lot", "die", "sample", "socModel", "equipmentChannel", "eccMode", "customCondition", "evaluationStep", "dq", "bl", "pattern", "channel", "subChannel", "chipSelect", "rank", "bank", "bankGroup", "row", "column", "writeData", "readData", "gridId", "frequencyMHz", "temperatureC", "temperatureCorner", "vdd", "vddCorner", "conditionCorner", "timingSkewPs", "testMode",
 ] as const;
 export type DominanceDimension = (typeof DOMINANCE_DIMENSIONS)[number];
 
@@ -227,7 +232,7 @@ export interface EvaluationExportRow {
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
   nodeId: string; parentNodeId: string; branchId: string; evaluationScopeId: string; nodeName: string; nodePurpose: string; nodeStatus: string; interpretation: string; authorship: string; reviewState: string; sequenceSignature: string; attemptNo: string; retestOf: string; relation: string; relationConfidence: string; relationReason: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
-  skew: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; bl: string; dq: string; channel: string; subChannel: string; chipSelect: string; rank: string; bank: string; bankGroup: string; row: string; column: string;
+  skew: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; equipmentChannel: string; eccMode: string; customCondition: string; evaluationStep: string; bl: string; dq: string; channel: string; subChannel: string; chipSelect: string; rank: string; bank: string; bankGroup: string; row: string; column: string;
   pattern: string; writeData: string; readData: string; gridId: string; frequencyMHz: string; temperatureC: string; temperatureCorner: string; vdd: string; vddCorner: string; conditionCorner: string; timingSkewPs: string; testMode: string;
 }
 
@@ -246,7 +251,7 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
       nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), evaluationScopeId: text(node.evaluationScopeId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), interpretation: text(node.interpretation), authorship: text(node.authorship), reviewState: text(node.reviewState), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf), relation: text(node.relation), relationConfidence: text(node.relationConfidence), relationReason: text(node.relationReason),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
-      skew: text(d.skew), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), subChannel: text(d.subChannel), chipSelect: text(d.chipSelect), rank: text(d.rank), bank: text(d.bank), bankGroup: text(d.bankGroup), row: text(d.row), column: text(d.column), pattern: text(d.pattern), writeData: text(d.writeData), readData: text(d.readData), gridId: text(d.gridId), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), temperatureCorner: text(d.temperatureCorner), vdd: text(d.vdd), vddCorner: text(d.vddCorner), conditionCorner: text(d.conditionCorner), timingSkewPs: text(d.timingSkewPs), testMode: text(d.testMode),
+      skew: text(d.skew), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), equipmentChannel: text(d.equipmentChannel), eccMode: text(d.eccMode), customCondition: text(d.customCondition), evaluationStep: text(d.evaluationStep), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), subChannel: text(d.subChannel), chipSelect: text(d.chipSelect), rank: text(d.rank), bank: text(d.bank), bankGroup: text(d.bankGroup), row: text(d.row), column: text(d.column), pattern: text(d.pattern), writeData: text(d.writeData), readData: text(d.readData), gridId: text(d.gridId), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), temperatureCorner: text(d.temperatureCorner), vdd: text(d.vdd), vddCorner: text(d.vddCorner), conditionCorner: text(d.conditionCorner), timingSkewPs: text(d.timingSkewPs), testMode: text(d.testMode),
     };
   });
 }

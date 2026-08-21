@@ -157,7 +157,7 @@ function scoreNode(nodes: readonly EvaluationNode[], node: EvaluationNode, candi
       score -= 2; conflicts.push('sequence')
     }
   }
-  ;(['sample', 'material', 'die'] as const).forEach((field) => {
+  ;(['sample', 'die'] as const).forEach((field) => {
     const left = value(candidate.dimensions[field]); const right = value(dimensions[field])
     if (left && right && left === right) { score += .75; matches.push(String(field)) }
   })
@@ -214,7 +214,7 @@ export function suggestEvaluationRelation(memory: EvaluationMemory, candidate: E
   if (!best.stageMismatch && hasComparableSignature && best.score >= 3) {
     const relation = relationForEvaluationPurpose(candidate.purpose)
     const confidence = Math.min(.95, Math.max(.58, best.score / Math.max(6, best.knownWeight)))
-    const matched = best.matches.filter((item) => !['sample', 'material', 'die'].includes(item)).slice(0, 3)
+    const matched = best.matches.filter((item) => !['sample', 'die'].includes(item)).slice(0, 3)
     return {
       ...candidateBase, classification: 'existing-issue', relation, hypothesisId: best.node.hypothesisId,
       parentNodeId: best.node.id, confidence: Number(confidence.toFixed(2)),

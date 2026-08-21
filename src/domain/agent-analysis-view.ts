@@ -5,7 +5,7 @@ import type {
 
 const DIMENSIONS = new Set([
   'sample', 'temperature', 'temperatureCorner', 'mode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
-  'lot', 'material', 'die', 'socModel', 'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column',
+  'lot', 'material', 'die', 'socModel', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep', 'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column',
   'writeData', 'readData', 'timingSkewPs', 'grid', 'result', 'review', 'folder', 'run',
 ])
 const EVALUATION_AGGREGATIONS = new Set(['sample_count', 'grid_count', 'pass_count', 'fail_count', 'pass_fail', 'fail_rate'])
@@ -25,7 +25,7 @@ export const analysisContextLabel = (kind?: NativeAgentContextKind): string => k
 const axes = (value: unknown): NativeAgentAnalysisViewProposal['rowAxes'] => {
   if (!Array.isArray(value)) return []
   const used = new Set<string>()
-  return value.filter((item): item is NativeAgentAnalysisViewProposal['rowAxes'][number] => {
+  return value.map((item) => item === 'material' ? 'sample' : item).filter((item): item is NativeAgentAnalysisViewProposal['rowAxes'][number] => {
     if (typeof item !== 'string' || !DIMENSIONS.has(item) || used.has(item)) return false
     used.add(item)
     return true

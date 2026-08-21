@@ -191,7 +191,7 @@ describe('LPDDR agent tools', () => {
 
   it('extracts LPDDR conditions without swallowing adjacent tokens', () => {
     expect(extractLpddrFilenameDimensions(project.artifacts[0].relativePath)).toMatchObject({
-      skew: 'SS', timingSkewPs: 12, lot: 'A1', material: 'WAF12', sample: '01', temperatureC: 85,
+      skew: 'SS', timingSkewPs: 12, lot: 'A1', material: '01', sample: '01', temperatureC: 85,
       vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR', dq: '9', bl: '16', channel: '0', subChannel: '1', rank: '0', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14'
     })
     expect(extractLpddrFilenameDimensions(project.artifacts[1].relativePath).temperatureC).toBe(-20)

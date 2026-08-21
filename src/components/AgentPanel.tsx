@@ -252,7 +252,8 @@ export function shouldShowNativeAgentSuggestions(session: NativeAgentSessionView
 
 export function evaluationDimensionSummary(dimensions: EvaluationAgentSessionView['dimensions']): string[] {
   const values: Array<[string, unknown]> = [
-    ['SKEW', dimensions.skew], ['Sample', dimensions.sample], ['Die', dimensions.die], ['Grid', dimensions.gridId],
+    ['SKEW', dimensions.skew], ['자재 (Sample)', dimensions.sample ?? dimensions.material], ['Die', dimensions.die], ['Grid', dimensions.gridId],
+    ['실장기 채널', dimensions.equipmentChannel], ['ECC', dimensions.eccMode], ['사용자 조건', dimensions.customCondition], ['평가 Step', dimensions.evaluationStep],
     ['CH', dimensions.channel], ['Sub CH', dimensions.subChannel], ['CS', dimensions.chipSelect], ['Rank', dimensions.rank],
     ['BG', dimensions.bankGroup], ['Bank', dimensions.bank], ['Row', dimensions.row], ['Column', dimensions.column],
     ['DQ', dimensions.dq], ['BL', dimensions.bl], ['WR', dimensions.writeData], ['RD', dimensions.readData], ['Pattern', dimensions.pattern],
@@ -339,7 +340,7 @@ export function reusableNativeLaunchSessionId(
 }
 
 const ANALYSIS_DIMENSION_LABELS: Partial<Record<NativeAgentAnalysisViewProposal['rowAxes'][number], string>> = {
-  sample: 'Sample', skew: 'SKEW', temperature: '온도', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건',
+  sample: '자재 (Sample)', skew: 'SKEW', temperature: '온도', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건',
   conditionCorner: '4-Corner', frequencyMHz: '주파수', mode: 'Test Mode', pattern: 'Pattern', dq: 'DQ', bl: 'BL',
   channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank',
   row: 'Row', column: 'Column', grid: 'Grid', run: '반복 번호', folder: '평가 폴더', result: '판정 결과',

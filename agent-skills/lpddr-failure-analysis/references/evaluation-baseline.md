@@ -4,12 +4,24 @@
 
 - 프로젝트: 같은 제품·고객·개발 목표의 전체 이력이다.
 - 평가 폴더: 재현, 가속 조건, 개선 조건, Side effect, 안정성 확인 등 하나의 평가 목적을 담는다.
-- Sample: 실제 평가 자재다. Lot와 Die를 함께 보존한다.
+- Sample: 실제 평가 자재다. 이 시스템에서 `자재`와 `Sample`은 같은 식별자이며 별도 축으로 세지 않는다. Lot와 Die는 별도 값으로 함께 보존한다.
 - SKEW: 기본 corner는 TT, SS, SF, FS, FF다. 프로젝트에 따라 일부만 사용하거나 다른 표기를 사용할 수 있다.
 - Grid: 한 번 전원을 인가해 부팅, Training, 테스트를 수행하고 종료하는 단위다.
 - Sequence: Grid에서 실행할 명령 순서와 온도, VDD, 주파수, Test Mode를 정한다.
 
 SKEW별 Sample 수와 반복 횟수는 같다고 가정하지 않는다. 로그 파일과 Grid의 관계도 확인 없이 1:1로 가정하지 않는다.
+
+### 위치형 파일명
+
+`..._Ch8_SM8975_1_25_1.00_EVA_EN_DEFAULT_5333MHZ_COM74_DHCST-89_C_Pass.log` 형식은 다음처럼 읽는다.
+
+- `Ch8`: 실장기 채널. Hdiag 본문의 DRAM Fail Channel과 다르다.
+- `SM8975`: SoC, `1`: 평가 번호/Grid 후보, `25`: 온도, `1.00`: VDD
+- `EVA`: 내부 구분값으로 분석 축에서 제외, `EN`: ECC
+- `DEFAULT_5333MHZ`: 사용자 조건, `COM74`: PC 포트이므로 분석에서 제외
+- `DHCST-89`: 자재(Sample), `C`: 평가 Step, `Pass`: 결과
+
+파일명 마지막 결과는 Pass, HdiagReboot, MbeFail, Fail 등을 정규화하되, 로그 본문에 더 강한 실패 근거가 있으면 본문 판정을 우선한다.
 
 ## 2. Grid 조건
 
