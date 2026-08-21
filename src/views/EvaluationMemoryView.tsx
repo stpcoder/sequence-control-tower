@@ -451,7 +451,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
         <header><div><strong>평가 정리</strong><span>{selectedGroup?.label ?? '평가를 선택하세요'}</span></div></header>
         <>
           <div className="evaluation-memory-view__review-actions">
-            <button className="evaluation-memory-view__agent" disabled={!onAnalyzeEvaluation || !selectedGroup.logs.length} onClick={() => onAnalyzeEvaluation?.(evaluationAnalysisRequest(selectedGroup, latestNode))}><Sparkles size={14} />{latestNode ? 'Agent로 다시 분석' : 'Agent로 분석'}</button>
+            <button className="evaluation-memory-view__agent" disabled={!onAnalyzeEvaluation || !selectedGroup.logs.length} onClick={() => onAnalyzeEvaluation?.(evaluationAnalysisRequest(selectedGroup, latestNode))}><Sparkles size={14} />{latestNode ? '다시 분석' : '현재 평가 분석'}</button>
             <button className="evaluation-memory-view__edit" type="button" aria-expanded={manualOpen} onClick={() => setManualOpen((value) => !value)}><Pencil size={14} />직접 수정</button>
           </div>
           {manualOpen ? <div className="evaluation-memory-view__manual">

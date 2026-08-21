@@ -630,8 +630,6 @@ button:disabled {
   background: var(--blue);
 }
 
-.workbench-is-open .agent-fab { display: none; }
-
 .view {
   min-height: 100%;
   padding: 22px 26px 30px;

@@ -147,6 +147,28 @@ describe('planLpddrTools', () => {
     await expect(service.create('p', undefined, 'folder-a', ['s2'])).rejects.toThrow('평가 폴더 로그 범위')
   })
 
+  it('bounds long-log Agent initialization to 32 local source references', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-bounded-sources-')))
+    const artifacts = Array.from({ length: 48 }, (_, index) => ({
+      sourceId: `s-${index}`, rootId: 'folder-a', artifactId: `a-${index}`, relativePath: `${index}.log`,
+    }))
+    const execute = vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => ({
+      name: call.name, label: call.name, summary: call.name,
+      data: call.name === 'filename_dimensions_scan' ? { rows: [] }
+        : call.name === 'console_transcript_scan' ? { ambiguous: [] }
+          : call.name === 'engineer_workflow_memory_get' ? { confirmed: [] } : {},
+      evidenceSourceIds: sourceIds,
+    }))
+    const service = new NativeAgentService({
+      store, tools: { execute }, projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    await service.initialize()
+    await service.create('p', undefined, 'folder-a', artifacts.map((item) => item.sourceId))
+    expect(execute).toHaveBeenCalled()
+    expect(execute.mock.calls.every((call) => call[2].length === 32)).toBe(true)
+  })
+
   it('keeps menu context in one folder session and returns a typed, uncommitted Results Summary proposal', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-analysis-view-')))
     const result = (name: string, sourceIds: string[], data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: sourceIds })

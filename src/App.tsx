@@ -15,7 +15,7 @@ import { ResultsView } from './views/ResultsView'
 import { SettingsView } from './views/SettingsView'
 import { ProjectControl } from './components/ProjectControl'
 import { AgentPanel, type EvaluationAgentLaunchRequest, type NativeAgentLaunchRequest } from './components/AgentPanel'
-import type { AgentAnalysisContextRequest } from './domain/analysis-context'
+import { boundedAgentContextIds, type AgentAnalysisContextRequest } from './domain/analysis-context'
 import {
   artifactFiles,
   DEMO_LOGS,
@@ -696,7 +696,7 @@ export default function App() {
       projectId: activeProjectId,
       expectedRevision: snapshot.revision,
       recipeId,
-    }), '분석 규칙을 보관하지 못했습니다')
+    }), '분석 규칙을 삭제하지 못했습니다')
   }, [activeProjectId, enqueueEvaluation])
 
   const updateBatchResults = useCallback(async (resolution: PrecomputedBatchResolution) => {
@@ -843,7 +843,14 @@ export default function App() {
       notify('Agent에게 전달할 프로젝트 로그를 찾지 못했습니다.', 'error')
       return
     }
-    const selected = unique.slice(0, 100)
+    const preferredFile = selectedFileId ? filesRef.current.find((file) => file.id === selectedFileId) : undefined
+    const preferredSourceId = preferredFile ? resolveProjectSource(currentProject, preferredFile)?.sourceId : undefined
+    const selectedIds = boundedAgentContextIds(unique.map((source) => source.sourceId), preferredSourceId)
+    const selectedById = new Map(unique.map((source) => [source.sourceId, source]))
+    const selected = selectedIds.flatMap((sourceId) => {
+      const source = selectedById.get(sourceId)
+      return source ? [source] : []
+    })
     const roots = [...new Set(selected.map((source) => source.rootId))]
     const evaluationScopeId = roots.length === 1 ? roots[0] : undefined
     setSelectedEvaluationRootId(evaluationScopeId)
@@ -856,7 +863,7 @@ export default function App() {
       ...(evaluationScopeId ? { evaluationScopeId } : {}),
     })
     setAgentOpen(true)
-  }, [notify])
+  }, [notify, selectedFileId])
 
   const openProjectSource = useCallback((sourceId: string) => {
     const currentProject = projectRef.current
@@ -942,7 +949,6 @@ export default function App() {
       onApplyMetadataSuggestion={applyMetadataSuggestion}
       onImportProjectFolder={project ? importProjectFolder : undefined}
       onNotify={notify}
-      onOpenAgent={() => setAgentOpen(true)}
       onAnalyzeContext={launchAgentContext}
       projectId={project?.id ?? PROJECT_ID}
       projectSources={project?.artifacts ?? []}
@@ -982,11 +988,10 @@ export default function App() {
           {content}
         </div>
       </main>
-      {activePage !== 'history' || agentOpen ? <AgentPanel
+      <AgentPanel
         open={agentOpen}
         onOpen={() => setAgentOpen(true)}
         onClose={() => setAgentOpen(false)}
-        showLauncher={activePage !== 'patterns'}
         project={project}
         selectedFile={selectedFile}
         selectedEvaluationRootId={selectedEvaluationRootId}
@@ -1000,7 +1005,7 @@ export default function App() {
           setAgentAnalysisViewRequest(proposal)
           navigate('patterns')
         }}
-      /> : null}
+      />
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
         {toast.tone === 'error' ? <AlertCircle size={16} /> : toast.tone === 'info' ? <Info size={16} /> : <Check size={16} />}
         {toast.message}

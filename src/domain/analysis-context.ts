@@ -9,6 +9,20 @@ export interface AgentAnalysisContextRequest {
   contextKind: NativeAgentContextKind
 }
 
+/** Native Agent tools inspect logs locally. Keeping a turn to 32 source
+ * references avoids long folder scans and never sends raw log bodies to the
+ * configured LLM. */
+export const MAX_AGENT_CONTEXT_SOURCES = 32
+
+export function boundedAgentContextIds(
+  ids: readonly string[],
+  preferredId?: string,
+  limit = MAX_AGENT_CONTEXT_SOURCES,
+): string[] {
+  const ordered = preferredId ? [preferredId, ...ids] : [...ids]
+  return [...new Set(ordered.filter(Boolean))].slice(0, Math.max(0, limit))
+}
+
 export interface SearchAnalysisContextInput {
   query: string
   scopeLabel: string

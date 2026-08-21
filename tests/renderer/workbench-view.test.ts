@@ -39,6 +39,7 @@ import {
   groupWorkbenchFiles,
   lineWindowEdgeRequestKey,
   mergeLineWindow,
+  mergeAppliedFolderRules,
   mergeWorkbenchFiles,
   nextSearchHitIndex,
   omitFileCacheEntry,
@@ -49,6 +50,8 @@ import {
   occurrenceConditionForChoice,
   engineerWorkflowCheckKey,
   moveEngineerWorkflowCheck,
+  moveRecipeClause,
+  normalizeRecipeClauseOrder,
   toggleEngineerWorkflowCheck,
   reorderRuleClausesByObservationIds,
   successfulSearchCounts,
@@ -197,6 +200,20 @@ describe('Log Workbench UI data hardening', () => {
     expect(ordered.clauses.map((clause) => clause.sourceObservationId)).toEqual(['obs-b', 'obs-a'])
     expect(ordered.clauses[0].order).toBeUndefined()
     expect(ordered.clauses[1].order).toEqual({ afterClauseId: 'clause-b' })
+  })
+
+  it('keeps clause movement stable after rules are added, removed, or reopened', () => {
+    expect(normalizeRecipeClauseOrder(['stale', 'b', 'b'], ['a', 'b', 'c'])).toEqual(['b', 'a', 'c'])
+    expect(moveRecipeClause(['stale', 'b', 'b'], ['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
+    expect(moveRecipeClause(['b', 'a', 'c'], ['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('reapplies previous folder rules when a new exception rule is saved', () => {
+    const old = rule('old', 'SYSTEM_HALT', 'candidate')
+    const pass = rule('pass', 'PASS', 'candidate')
+    const revised = rule('revised', 'SYSTEM_REBOOT', 'candidate')
+    expect(mergeAppliedFolderRules([old, pass], new Set([old.id]), revised).map((item) => item.id)).toEqual(['pass', 'revised'])
+    expect(mergeAppliedFolderRules([old, pass], new Set(), pass)).toEqual([old, pass])
   })
 
   it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
@@ -406,10 +423,10 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).toContain('font-size: 13px')
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
     expect(workbenchSource).toContain("const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])")
-    expect(workbenchSource).toContain('const rules = [candidate]')
-    expect(workbenchSource).toContain('현재 폴더에 미리 적용')
-    expect(workbenchSource).not.toContain('전체에 미리 적용')
-    expect(workbenchSource).toContain('<Sparkles size={14} />Agent')
+    expect(workbenchSource).toContain('현재 폴더 규칙 모두 적용')
+    expect(workbenchSource).toContain('저장하고 현재 폴더 적용')
+    expect(workbenchSource).not.toContain('현재 폴더에 미리 적용')
+    expect(workbenchSource).not.toContain('<Sparkles size={14} />Agent')
   })
 
   it('resolves current, evaluation-folder, open-tab, and all-log scopes without crossing folders', () => {

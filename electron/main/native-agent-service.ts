@@ -19,6 +19,8 @@ import { NATIVE_AGENT_SYSTEM_PROMPT } from './native-agent-prompt'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 import { extractAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
 
+const MAX_AGENT_SOURCE_SCOPE = 32
+
 const safe = (value: unknown, max = 12_000): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
   : ''
@@ -289,7 +291,7 @@ export class NativeAgentService {
     const confirmedIntent = this.confirmedEvaluationIntent(project, scopeId)
     if (confirmedIntent) session = await this.deps.store.update(session.id, (draft) => { draft.evaluationIntent = confirmedIntent })
     if (requested.length) {
-      const sourceIds = requested.slice(0, 100)
+      const sourceIds = requested.slice(0, MAX_AGENT_SOURCE_SCOPE)
       try {
         const [filenames, statuses, workflows, boot, consoleScan] = await Promise.all([
           this.deps.tools.execute(project.id, { name: 'filename_dimensions_scan' }, sourceIds),
@@ -662,10 +664,10 @@ export class NativeAgentService {
     if (!project) throw new Error('프로젝트를 찾을 수 없습니다.')
     const scopeId = safe(evaluationScopeId, 160)
     const scoped = scopeId ? project.artifacts.filter((item) => item.rootId === scopeId) : project.artifacts
-    const wanted = requested?.length ? [...new Set(requested.map((item) => safe(item, 160)).filter(Boolean))] : scoped.slice(0, 100).map((item) => item.sourceId)
+    const wanted = requested?.length ? [...new Set(requested.map((item) => safe(item, 160)).filter(Boolean))] : scoped.slice(0, MAX_AGENT_SOURCE_SCOPE).map((item) => item.sourceId)
     const allowed = new Set(scoped.map((item) => item.sourceId))
     if (wanted.length > 100 || wanted.some((item) => !allowed.has(item))) throw new Error('프로젝트 로그 범위가 올바르지 않습니다.')
-    return wanted
+    return wanted.slice(0, MAX_AGENT_SOURCE_SCOPE)
   }
 
   private async require(sessionId: string): Promise<StoredNativeAgentSession> {

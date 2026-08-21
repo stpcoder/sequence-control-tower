@@ -348,7 +348,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
       </div>
 
       <footer className="data-pagination">
-        <div className="data-pagination-status"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>{selectedRows.length && onAnalyzeContext ? <button className="data-agent-action" type="button" onClick={() => onAnalyzeContext(resultRowsAgentContext(selectedRows))}><Sparkles size={15} />Agent로 비교</button> : null}</div>
+        <div className="data-pagination-status"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>{selectedRows.length && onAnalyzeContext ? <button className="data-agent-action" type="button" onClick={() => onAnalyzeContext(resultRowsAgentContext(selectedRows))}><Sparkles size={15} />선택 비교</button> : null}</div>
         <div><button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>이전</button><span>{currentPage} / {pageCount}</span><button onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={currentPage === pageCount}>다음</button></div>
       </footer>
       {editingCell && editingRow ? <MetadataReviewDialog

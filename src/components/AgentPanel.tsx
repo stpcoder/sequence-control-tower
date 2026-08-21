@@ -23,12 +23,12 @@ import { AgentMarkdown } from './AgentMarkdown'
 import { hasMeaningfulAgentMessage } from '../domain/agent-message'
 import { analysisContextLabel } from '../domain/agent-analysis-view'
 import { ANALYSIS_DATA_BASIS_LABELS, ANALYSIS_VISUALIZATION_LABELS } from '../domain/analysis-view'
+import { MAX_AGENT_CONTEXT_SOURCES } from '../domain/analysis-context'
 
 interface AgentPanelProps {
   open: boolean
   onClose: () => void
   onOpen: () => void
-  showLauncher?: boolean
   project: ProjectSnapshot | null
   selectedFile?: WorkbenchFile
   selectedEvaluationRootId?: string
@@ -428,7 +428,7 @@ function stageText(run: AgentRun): string {
   return ''
 }
 
-export function AgentPanel({ open, onClose, onOpen, showLauncher = true, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource, onApplyAnalysisViewProposal }: AgentPanelProps) {
+export function AgentPanel({ open, onClose, onOpen, project, selectedFile, selectedEvaluationRootId, evaluationSnapshot, onSnapshotSaved, onProjectUpdated, evaluationLaunchRequest, nativeLaunchRequest, onOpenSource, onApplyAnalysisViewProposal }: AgentPanelProps) {
   const [run, setRun] = useState<AgentRun | null>(null)
   const [evaluationRun, setEvaluationRun] = useState<EvaluationAgentSessionView | null>(null)
   const [evaluationRunScopeId, setEvaluationRunScopeId] = useState<string | undefined>()
@@ -695,8 +695,8 @@ export function AgentPanel({ open, onClose, onOpen, showLauncher = true, project
     const startedScope = projectScopeKey
     const requestedScopeId = request ? request.evaluationScopeId : evaluationScopeId
     const requestedSourceIds = request?.sourceIds?.length
-      ? [...new Set(request.sourceIds)].slice(0, 100)
-      : evaluationSources.slice(0, 100).map((source) => source.sourceId)
+      ? [...new Set(request.sourceIds)].slice(0, MAX_AGENT_CONTEXT_SOURCES)
+      : evaluationSources.slice(0, MAX_AGENT_CONTEXT_SOURCES).map((source) => source.sourceId)
     followLatestRef.current = true
     setBusy(true); setError(''); setSavedMessage(''); setNativeHistoryOpen(false)
     try {
@@ -741,12 +741,12 @@ export function AgentPanel({ open, onClose, onOpen, showLauncher = true, project
     setBusy(true); setError(''); setInput(''); setNativeHistoryOpen(false)
     try {
       const sourceIds = sourceOverride?.length
-        ? [...new Set(sourceOverride)].slice(0, 100)
+        ? [...new Set(sourceOverride)].slice(0, MAX_AGENT_CONTEXT_SOURCES)
         : mentionedSourceIds.length
           ? mentionedSourceIds
           : nativeContextSourceIds.length
             ? nativeContextSourceIds
-            : evaluationSources.slice(0, 100).map((source) => source.sourceId)
+            : evaluationSources.slice(0, MAX_AGENT_CONTEXT_SOURCES).map((source) => source.sourceId)
       const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: sourceIds.length ? sourceIds : undefined, contextKind: turnContextKind })
       if (projectScopeKeyRef.current === startedScope) {
         setNativeSession(next)
@@ -991,7 +991,7 @@ export function AgentPanel({ open, onClose, onOpen, showLauncher = true, project
     setMentionedSourceIds((current) => [...new Set([...current, sourceId])])
     window.setTimeout(() => composerRef.current?.focus(), 0)
   }
-  if (!open) return showLauncher ? <button className="agent-fab" onClick={onOpen}><Sparkles size={17} /><span>Agent에게 묻기</span></button> : null
+  if (!open) return <button className="agent-fab" onClick={onOpen}><Sparkles size={17} /><span>Agent에게 묻기</span></button>
 
   return <aside className="agent-panel" aria-label="Agent">
     <div className="agent-panel-head">

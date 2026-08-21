@@ -649,7 +649,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <details className="analysis-visualization-picker"><summary><VisualizationIcon size={16} /><b>{ANALYSIS_VISUALIZATION_LABELS[visualization]}</b><ChevronDown size={14} /></summary><div className="analysis-visualization-menu" role="radiogroup" aria-label="시각화 선택">
             {availableVisualizations.map((item) => { const Icon = VISUALIZATION_ICONS[item]; return <button type="button" role="radio" aria-checked={visualization === item} className={visualization === item ? 'active' : ''} key={item} onClick={(event) => { changeVisualization(item); closeShareMenu(event.currentTarget) }}><Icon size={17} /><span>{ANALYSIS_VISUALIZATION_LABELS[item]}</span></button> })}
           </div></details>
-          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />Agent에게 묻기</button> : null}
+          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />현재 표 분석</button> : null}
           <div className="pattern-metrics" aria-label="표시할 값">
           {primaryAggregations.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => changeAggregation(item.value)}>{item.label}</button>)}
           <details className="pattern-metric-more"><summary className={secondaryAggregation ? 'active' : ''}>{secondaryAggregation?.label ?? '기타'}<ChevronDown size={13} /></summary><div className="pattern-metric-menu" role="radiogroup" aria-label="다른 집계 방식">

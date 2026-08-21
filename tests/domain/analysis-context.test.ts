@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analysisViewAgentContext, pivotSelectionAgentContext, pivotSelectionsAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
+import { analysisViewAgentContext, boundedAgentContextIds, MAX_AGENT_CONTEXT_SOURCES, pivotSelectionAgentContext, pivotSelectionsAgentContext, resultRowsAgentContext, searchAgentContext } from '../../src/domain/analysis-context'
 import type { LogResultRecord } from '../../src/state/logRecords'
 
 function row(id: string, folder: string, result: LogResultRecord['result']): LogResultRecord {
@@ -13,6 +13,14 @@ function row(id: string, folder: string, result: LogResultRecord['result']): Log
 }
 
 describe('analysis selections handed to the native Agent', () => {
+  it('bounds long-log Agent context and keeps the active log first', () => {
+    const ids = Array.from({ length: 80 }, (_, index) => `log-${index}`)
+    const bounded = boundedAgentContextIds(ids, 'log-72')
+    expect(bounded).toHaveLength(MAX_AGENT_CONTEXT_SOURCES)
+    expect(bounded[0]).toBe('log-72')
+    expect(new Set(bounded).size).toBe(bounded.length)
+  })
+
   it('preserves the engineer search operation without treating it as a confirmed rule', () => {
     const request = searchAgentContext({
       query: '@FAIL', scopeLabel: '현재 평가', matchCount: 12, fileIds: ['a', 'a', 'b'],
