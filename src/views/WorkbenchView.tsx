@@ -91,7 +91,6 @@ import {
   type LogDraft,
 } from '../state/logDraft'
 import '../workbench.css'
-import { engineerStageLabel } from '../domain/engineer-behavior'
 import { resolveProjectSource } from '../state/sourceIdentity'
 
 export type WorkbenchDecision = ResultLabel
@@ -226,6 +225,18 @@ export function compactIncrementalSearchObservations(observations: readonly Sear
     if (incrementalDraft) return [...result.slice(0, -1), observation]
     return [...result, observation]
   }, [])
+}
+
+/** Keep an engineer's explicit condition choices. On a first decision there is
+ * no prior choice, so every Enter-executed search starts selected instead of
+ * forcing the same searches to be picked a second time. */
+export function defaultRuleObservationIds(
+  existingIds: readonly string[],
+  observations: readonly SearchObservation[],
+): string[] {
+  const available = new Set(observations.map((observation) => observation.id))
+  const existing = existingIds.filter((id) => available.has(id))
+  return existing.length ? existing : observations.map((observation) => observation.id)
 }
 
 /** Most-recent-first Ctrl-F terms for the active log. Searches are deliberately
@@ -1398,7 +1409,6 @@ export function WorkbenchView({
   const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
   const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
   const workflowChecks = workflowReview ? workflowCheckDrafts[workflowReview.id] ?? workflowReview.checks : []
-  const workflowStages = [...new Set(workflowChecks.map((check) => check.stage))]
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeSourceLines = useMemo(() => {
     if (!activeFile) return []
@@ -2876,7 +2886,25 @@ export function WorkbenchView({
   }
 
   const finishDecisionInteraction = (nextDecision: WorkbenchDecision) => {
-    setRecipeVisible(nextDecision !== 'UNKNOWN' && recipeObservations.length > 0)
+    const shouldOpenRule = nextDecision !== 'UNKNOWN' && recipeObservations.length > 0
+    if (shouldOpenRule && activeFile) {
+      const selectedIds = defaultRuleObservationIds(
+        selectedObservationIdsByFile[activeFile.id] ?? [],
+        recipeObservations,
+      )
+      setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
+      setRecipeClauseOrderByFile((current) => ({
+        ...current,
+        [activeFile.id]: normalizeRecipeClauseOrder(current[activeFile.id] ?? [], selectedIds),
+      }))
+      setOccurrenceByObservationId((current) => ({
+        ...current,
+        ...Object.fromEntries(recipeObservations
+          .filter((observation) => selectedIds.includes(observation.id) && !current[observation.id])
+          .map((observation) => [observation.id, observation.matched ? { kind: 'atLeast' as const } : { kind: 'zero' as const }])),
+      }))
+    }
+    setRecipeVisible(shouldOpenRule)
     setRecipeSaved(false)
     setBatchPreview({ status: 'idle', matched: 0, exceptions: 0 })
     setShowBatchExceptions(false)
@@ -3481,17 +3509,20 @@ export function WorkbenchView({
               </section>
 
               {workflowReview ? (
-                <section className="workflow-confirmation" aria-label="검색 절차 저장">
-                  <div><strong>검색 절차 저장</strong><span>{workflowStages.map(engineerStageLabel).join(' → ') || '검색 선택 필요'}</span></div>
-                  <div className="workflow-checks" aria-label="판정에 사용할 검색 순서">
-                    <span>판정에 사용할 검색 순서</span>
+                <section className="workflow-confirmation recipe-suggestion" aria-label="판정 규칙 만들기">
+                  <div className="recipe-title">
+                    <div><strong>판정 규칙</strong><span>검색 조건 선택</span></div>
+                  </div>
+                  <div className="recipe-observations workflow-checks" aria-label="판정에 사용할 검색 조건">
                     {workflowReview.checks.map((check) => {
                       const key = engineerWorkflowCheckKey(check)
                       const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
                       const selected = selectedIndex >= 0
                       return <div className={selected ? 'selected' : ''} key={key}>
-                        <button type="button" aria-pressed={selected} onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))}><i aria-hidden="true">{selected ? <Check size={11} /> : null}</i><code>{check.query}</code><small>{check.matchCount > 0 ? `${check.matchCount}회` : '없음'}</small></button>
-                        {selected ? <span><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}><ArrowUp size={13} /></button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}><ArrowDown size={13} /></button></span> : null}
+                        <div className="recipe-observation-row">
+                          <button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i aria-hidden="true">{selected ? <Check size={11} /> : null}</i><code>{check.query}</code><small>{check.matchCount > 0 ? `${check.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button>
+                          {selected ? <span className="workflow-check-order"><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}><ArrowUp size={13} /></button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}><ArrowDown size={13} /></button></span> : <span />}
+                        </div>
                       </div>
                     })}
                   </div>
@@ -3502,7 +3533,7 @@ export function WorkbenchView({
                     ))}
                   </div>
                   <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
-                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <Check size={13} />}절차 저장</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>저장하지 않음</button></div>
+                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <ChevronRight size={13} />}다음</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
                 </section>
               ) : null}
 

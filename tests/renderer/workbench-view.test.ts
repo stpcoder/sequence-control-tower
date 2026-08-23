@@ -27,6 +27,7 @@ import {
   clampSearchHitIndex,
   clampWorkbenchPaneWidth,
   compactIncrementalSearchObservations,
+  defaultRuleObservationIds,
   deferredSearchHitIndex,
   DEFAULT_WORKBENCH_PANE_WIDTHS,
   clauseSpecKey,
@@ -139,9 +140,12 @@ describe('Log Workbench UI data hardening', () => {
 
   it('collapses legacy A to AB to ABC live-search drafts before rule creation', () => {
     const observation = (id: string, query: string) => ({ id, sourceId: 'log-a', query, matcherKind: 'literal' as const, target: 'content' as const, caseSensitive: false, matched: true, matchCount: 1, role: 'search_history' as const, excerpts: [] })
-    expect(compactIncrementalSearchObservations([
+    const compacted = compactIncrementalSearchObservations([
       observation('a', 'A'), observation('ab', 'AB'), observation('abcdef', 'ABCDEF'), observation('pass', '@PASS'),
-    ]).map((item) => item.query)).toEqual(['ABCDEF', '@PASS'])
+    ])
+    expect(compacted.map((item) => item.query)).toEqual(['ABCDEF', '@PASS'])
+    expect(defaultRuleObservationIds([], compacted)).toEqual(['abcdef', 'pass'])
+    expect(defaultRuleObservationIds(['pass'], compacted)).toEqual(['pass'])
   })
 
   it('groups workspace matches by file while preserving navigation indexes', () => {
