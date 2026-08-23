@@ -3099,7 +3099,7 @@ export function WorkbenchView({
       return
     }
     const { matched, exceptions, conflicts } = applied.resolution
-    onNotify?.(`현재 평가 폴더를 분류했습니다. 분류 ${matched}개 · 예외 ${exceptions}개${conflicts ? ` · 규칙 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
+    onNotify?.(`현재 평가 폴더 판정 완료 · 판정 완료 ${matched}개 · 확인 필요 ${exceptions}개${conflicts ? ` · 규칙 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
   }
 
   const addSavedRecipe = async (recipe: EvaluationRecipeRevision) => {
@@ -3176,7 +3176,7 @@ export function WorkbenchView({
         const preserved = existingDecision && existingDecision !== decision
           ? ` 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
           : ''
-        onNotify?.(`규칙을 저장하고 현재 평가 폴더를 분류했습니다. 분류 ${applied.resolution.matched}개 · 예외 ${applied.resolution.exceptions}개.${preserved}`, applied.resolution.exceptions ? 'info' : 'success')
+        onNotify?.(`규칙을 저장하고 현재 평가 폴더를 판정했습니다. 판정 완료 ${applied.resolution.matched}개 · 확인 필요 ${applied.resolution.exceptions}개.${preserved}`, applied.resolution.exceptions ? 'info' : 'success')
       } else if (applied && !applied.ok) {
         // The rule itself is already stored, but keep the action available so
         // the engineer can retry after a transient desktop/IPC failure.
@@ -3701,13 +3701,13 @@ export function WorkbenchView({
 
               {batchPreview.status === 'running' ? (
                 <section className="batch-summary batch-summary-running" aria-live="polite">
-                  <div><LoaderCircle className="wb-spin" size={15} /><span><strong>현재 폴더에 규칙 적용 중</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
+                  <div><LoaderCircle className="wb-spin" size={15} /><span><strong>현재 폴더 판정 중</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
                 </section>
               ) : batchPreview.status === 'done' ? (
                 <section className="batch-summary">
-                  <div><Check size={15} /><span><strong>분류 완료</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
-                  <p>분류 {batchPreview.matched}개 · 예외 {batchPreview.exceptions}개</p>
-                  {batchPreview.exceptions > 0 && !showBatchExceptions ? <button onClick={openBatchExceptions}><AlertTriangle size={13} /><span>매핑되지 않은 로그 확인</span><ChevronRight size={13} /></button> : null}
+                  <div><Check size={15} /><span><strong>현재 폴더 판정 완료</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
+                  <p>판정 완료 {batchPreview.matched}개 · 확인 필요 {batchPreview.exceptions}개</p>
+                  {batchPreview.exceptions > 0 && !showBatchExceptions ? <button onClick={openBatchExceptions}><AlertTriangle size={13} /><span>확인 필요한 로그</span><ChevronRight size={13} /></button> : null}
                 </section>
               ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
             </>
@@ -3722,7 +3722,7 @@ export function WorkbenchView({
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
                   <div className="recipe-manager-item" key={recipe.recipeId}>
                     <button className="recipe-manager-copy" type="button" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></button>
-                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />적용됨</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'} title="현재 평가 폴더에 추가 적용"><Play size={12} />폴더 적용</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
+                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />현재 폴더 적용됨</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'} title="현재 평가 폴더에 추가 적용"><Play size={12} />현재 폴더 적용</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
                   </div>
                 )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
               </div>

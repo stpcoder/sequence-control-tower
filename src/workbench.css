@@ -539,7 +539,7 @@
 .recipe-manager-copy strong { font-size: var(--wb-type-body); font-weight: 600; }
 .recipe-manager-copy span { color: var(--wb-dim); font: var(--wb-type-secondary)/1.35 'SFMono-Regular', Consolas, monospace; }
 .recipe-manager-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
-.recipe-manager-item-actions button, .recipe-applied { display: flex; min-height: 30px; align-items: center; gap: 4px; padding: 0 7px; border-radius: 6px; color: var(--wb-muted); font-size: var(--wb-type-secondary); }
+.recipe-manager-item-actions button, .recipe-applied { display: flex; min-height: 30px; align-items: center; gap: 4px; padding: 0 7px; border-radius: 6px; color: var(--wb-muted); font-size: var(--wb-type-secondary); white-space: nowrap; }
 .recipe-manager-item-actions button:hover:not(:disabled) { color: var(--wb-text); background: var(--wb-hover); }
 .recipe-manager-item-actions .recipe-add { color: #c8dcf7; background: var(--wb-blue-soft); }
 .recipe-manager-item-actions .recipe-delete { color: var(--wb-orange); }

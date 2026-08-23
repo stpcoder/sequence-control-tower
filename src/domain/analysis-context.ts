@@ -46,7 +46,7 @@ const resultCounts = (rows: readonly LogResultRecord[]): string => {
 }
 
 const dimensionLabel = (dimension: PivotDimension): string => ({
-  sample: '자재 (Sample)', temperature: '온도', grid: 'Grid', skew: 'SKEW', frequencyMHz: '주파수', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner', testMode: 'Test Mode', pattern: 'Pattern', material: '자재 (Sample)', lot: 'Lot', die: 'Die', socModel: '실장기 SoC', equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '사용자 조건', evaluationStep: '평가 Step', dq: 'DQ', bl: 'BL', channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank', row: 'Row', column: 'Column', writeData: 'WR', readData: 'RD', timingSkewPs: 'Timing SKEW', result: '판정 결과', review: '검토 상태', folder: '평가 폴더', run: '반복 번호',
+  sample: '자재 (Sample)', temperature: '온도', grid: 'Grid', skew: 'SKEW', frequencyMHz: '주파수', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner', testMode: 'Test Mode', pattern: 'Pattern', material: '자재 (Sample)', lot: 'Lot', die: 'Die', socModel: '실장기 SoC', equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '사용자 조건', evaluationStep: '평가 Step', dq: 'DQ', bl: 'BL', channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank', row: 'Row', column: 'Column', writeData: 'WR', readData: 'RD', timingSkewPs: 'Timing SKEW', result: '판정 결과', review: '판정 상태', folder: '평가 폴더', run: '반복 번호',
 })[dimension]
 
 const aggregationLabel = (aggregation: PivotAggregation): string => ({

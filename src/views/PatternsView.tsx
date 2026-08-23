@@ -118,7 +118,7 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
   { value: 'readData', label: 'RD', group: 'Fail 위치' },
   { value: 'grid', label: 'Grid', group: '결과·범위' },
   { value: 'result', label: '판정 결과', group: '결과·범위' },
-  { value: 'review', label: '검토 상태', group: '결과·범위' },
+  { value: 'review', label: '판정 상태', group: '결과·범위' },
   { value: 'folder', label: '평가 폴더', group: '결과·범위' },
   { value: 'run', label: '반복 번호', group: '결과·범위' },
 ]
@@ -707,7 +707,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
 
       <details className="pattern-section marked-rows" open={hasSelection || rawDetailsOpen} onToggle={(event) => setRawDetailsOpen(event.currentTarget.open)}>
         <summary><span>{hasSelection ? `선택 로그 ${visibleRows.length.toLocaleString()}개` : `전체 로그 ${visibleRows.length.toLocaleString()}개`}</span><ChevronDown size={15} /></summary>
-        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>확인 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '확정' : '검토 필요'}</td></tr>)}</tbody></table></div>
+        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>판정 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '판정 완료' : '확인 필요'}</td></tr>)}</tbody></table></div>
       </details>
     </>}
   </div>

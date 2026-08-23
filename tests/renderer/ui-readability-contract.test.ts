@@ -161,7 +161,7 @@ describe('UI readability contract', () => {
     expect(results).toContain('RESULT_STAGE_GROUP_LABEL')
     expect(results).not.toContain('폴더 범위')
     expect(results).toContain('FAIL만')
-    expect(results).toContain('검토 필요만')
+    expect(results).toContain('확인 필요만')
     expect(patterns).not.toContain('className="stage-summary"')
     expect(patterns).not.toContain('미승인 후보로 계산한 미리보기입니다')
     expect(memory).toContain('groupEvaluationFolders')

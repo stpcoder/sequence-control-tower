@@ -1106,7 +1106,7 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'grid_state', label: 'Grid 상태', section: 'result' },
   { key: 'result', label: '결과', section: 'result' },
   { key: 'result_source', label: '결과 출처', section: 'result' },
-  { key: 'review', label: '검토', section: 'result' },
+  { key: 'review', label: '판정 상태', section: 'result' },
   { key: 'stage_results', label: '단계별 결과', section: 'result' },
   { key: 'evidence_count', label: '자동 판정 신호 수', group: 'evidence', section: 'evidence' },
   { key: 'selected_evidence_count', label: '직접 선택한 근거 줄 수', group: 'evidence', section: 'evidence' },
