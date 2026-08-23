@@ -27,7 +27,7 @@ export const DEFAULT_PATTERN_LAYOUT: PatternLayout = {
 }
 
 const DIMENSIONS = new Set<PivotDimension>([
-  'sample', 'temperature', 'temperatureCorner', 'mode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
+  'sample', 'temperature', 'temperatureCorner', 'testMode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
   'lot', 'material', 'die', 'socModel', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep',
   'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'timingSkewPs',
   'grid', 'result', 'review', 'folder', 'run',

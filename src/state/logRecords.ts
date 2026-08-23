@@ -9,7 +9,7 @@ import type { ArtifactFailureAddressEvent, ArtifactFailureAddressFields, Project
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
 export type ResultSource = 'engineer' | 'rule' | 'candidate' | 'unreviewed'
-export type PatternAxis = 'sample' | 'temperature' | 'mode' | 'grid'
+export type PatternAxis = 'sample' | 'temperature' | 'vdd' | 'grid'
 export type EvaluationStage = 'power' | 'pbl' | 'xbl' | 'abl' | 'uefi' | 'lk' | 'lk2' | 'boot' | 'training' | 'diag' | 'hdiag' | 'test' | 'os'
 export type EvaluationStageStatus = 'pass' | 'fail' | 'reached'
 export type ResultStageGroup = 'firmware' | 'os' | 'test'
@@ -52,7 +52,7 @@ export interface LogResultRecord {
   run?: string
   sample: CandidateValue
   temperature: CandidateValue
-  mode: CandidateValue
+  vdd: CandidateValue
   grid: CandidateValue
   /** Deterministic filename dimensions shared with the native LPDDR Agent. */
   dimensions?: ProjectEvaluationDimensions
@@ -75,9 +75,9 @@ export interface LogRecordFilters {
   folder?: string | 'all'
 }
 
-export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
+export type EngineeringPivotDimension = 'skew' | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'frequencyMHz' | 'temperatureCorner' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'testMode' | 'pattern'
   | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank' | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs'
-export type PivotDimension = 'sample' | 'temperature' | 'mode' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
+export type PivotDimension = 'sample' | 'temperature' | 'grid' | 'result' | 'review' | 'folder' | 'run' | EngineeringPivotDimension
 export type PivotAggregation = 'count' | 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'evidence_count'
   | 'fail_event_count' | 'fail_source_count' | 'fail_event_share'
 
@@ -147,7 +147,7 @@ export function isPivotSelectionValid(
   return [...selectedSourceIds].every((sourceId) => availableIds.has(sourceId))
 }
 
-export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'mode' | 'grid' | 'stageResults' | 'result' | 'review' | 'evidenceCount'
+export type LogRecordSortKey = 'fileName' | 'folder' | 'sample' | 'temperature' | 'vdd' | 'grid' | 'stageResults' | 'result' | 'review' | 'evidenceCount'
 export type SortDirection = 'asc' | 'desc'
 
 export interface PatternMatrixRow {
@@ -247,7 +247,7 @@ const TREND_DIMENSIONS: readonly PivotDimension[] = [
   'sample',
   'temperature',
   'temperatureCorner',
-  'mode',
+  'testMode',
   'skew',
   'frequencyMHz',
   'vdd',
@@ -332,7 +332,6 @@ export function aggregateRecordTrends(rows: readonly LogResultRecord[]): Aggrega
 export const DEFAULT_METADATA_FIELDS: readonly MetadataFieldDefinition[] = [
   { key: 'sample', label: 'Sample', target: 'file_name', pattern: '(?:^|[_.-])(?:SAMPLE|SMP|S)[=_-]?(?:(?:SAMPLE|SMP)[=_-])?(?<value>[A-Z0-9-]+?)(?=[_.-])', captureGroup: 'value' },
   { key: 'temperature', label: 'Temperature', target: 'file_name', pattern: '(?:TEMP[=_-]?)?(?<value>-?\\d+(?:[p.]\\d+)?)C(?=[_.-]|$)', captureGroup: 'value' },
-  { key: 'mode', label: 'Mode', target: 'file_name', pattern: '(?:MODE[=_-]?)?(?<value>DIAG|TEST|TRAINING|STRESS|NORMAL|UEFI)(?=[_.-]|$)', captureGroup: 'value' },
   { key: 'grid', label: 'Grid', target: 'file_name', pattern: '(?:^|[_.+@-])(?:(?:GRID|MATRIX)[=_-]?|G[=_-])(?<value>[A-Z0-9][A-Z0-9xX*-]*?)(?=[_.-]|$)', captureGroup: 'value' },
 ] as const
 
@@ -431,7 +430,6 @@ function uniqueMatches(text: string, pattern: RegExp, normalize: (value: string)
 function canonicalFilenameCandidate(key: string, value: string): string {
   const upper = value.toUpperCase()
   if (key === 'sample') return upper.replace(/^(?:SMP|SAMPLE)[=_-]/, '')
-  if (key === 'mode') return upper
   return value
 }
 
@@ -452,8 +450,8 @@ function fallbackFromContent(file: WorkbenchFile, key: PatternAxis): CandidateVa
   if (!text) return { value: null, state: 'missing' }
   const pattern = key === 'temperature'
     ? /temperature\s*=\s*(?<value>-?\d+(?:\.\d+)?)\s*C/giu
-    : key === 'mode'
-      ? /mode\s*:\s*(?<value>[A-Z][A-Z0-9_-]*)/giu
+    : key === 'vdd'
+      ? /\bvdd\s*[:=]\s*(?<value>\d+(?:\.\d+)?)\s*V?\b/giu
       : key === 'grid'
         ? /(?:grid|matrix|test\s+grid)\s*[:=]\s*(?<value>[A-Z0-9][A-Z0-9xX*-]*)/giu
         : /sample\s*[:=]\s*(?<value>[A-Z0-9_-]+)/giu
@@ -462,6 +460,13 @@ function fallbackFromContent(file: WorkbenchFile, key: PatternAxis): CandidateVa
 }
 
 function metadataCandidate(file: WorkbenchFile, key: PatternAxis): CandidateValue {
+  if (isMalformedName(file.name)) return { value: null, state: 'malformed' }
+  if (key === 'vdd') {
+    const parsedVdd = extractLpddrFilenameDimensions(file.relativePath ?? file.name).vdd
+    return parsedVdd !== undefined
+      ? { value: String(parsedVdd), state: 'candidate' }
+      : fallbackFromContent(file, key)
+  }
   const parsed = parseFilenameMetadata(file.name)[key]
   if (parsed.state === 'extracted') return { value: parsed.value, state: 'candidate' }
   if (parsed.state === 'conflict') return { value: null, state: 'malformed' }
@@ -637,12 +642,12 @@ export function projectLogRecords(
     const temperatureCandidate = positionalFilename && filenameDimensions.temperatureC !== undefined
       ? { value: String(filenameDimensions.temperatureC), state: 'candidate' as const }
       : metadataCandidate(file, 'temperature')
-    const modeCandidate = filenameDimensions.testMode !== undefined && /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)/i.test(file.name)
-      ? { value: String(filenameDimensions.testMode), state: 'candidate' as const }
-      : metadataCandidate(file, 'mode')
+    const vddCandidate = filenameDimensions.vdd !== undefined
+      ? { value: String(filenameDimensions.vdd), state: 'candidate' as const }
+      : metadataCandidate(file, 'vdd')
     const sample = applyMetadataApproval(sampleCandidate, approvals.sample)
     const temperature = applyMetadataApproval(temperatureCandidate, approvals.temperature)
-    const mode = applyMetadataApproval(modeCandidate, approvals.mode)
+    const vdd = applyMetadataApproval(vddCandidate, approvals.vdd)
     const gridCandidate = positionalFilename && filenameDimensions.gridId !== undefined
       ? { value: String(filenameDimensions.gridId), state: 'candidate' as const }
       : metadataCandidate(file, 'grid')
@@ -671,7 +676,7 @@ export function projectLogRecords(
       ...(run ? { run } : {}),
       sample,
       temperature,
-      mode,
+      vdd,
       grid,
       dimensions: {
         ...filenameDimensions,
@@ -679,7 +684,7 @@ export function projectLogRecords(
         // A user correction in Results must update both legacy contract aliases.
         ...(sample.value !== null ? { sample: sample.value, material: sample.value } : {}),
         ...(temperature.value !== null && Number.isFinite(Number(temperature.value)) ? { temperatureC: Number(temperature.value) } : {}),
-        ...(mode.value !== null ? { testMode: mode.value } : {}),
+        ...(vdd.value !== null && Number.isFinite(Number(vdd.value)) ? { vdd: Number(vdd.value) } : {}),
       },
       result,
       resultSource,
@@ -708,7 +713,7 @@ export function filterLogRecords(rows: readonly LogResultRecord[], filters: LogR
     if (filters.result !== 'all' && row.result !== filters.result) return false
     if (filters.review !== 'all' && row.review !== filters.review) return false
     if (!query) return true
-    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.mode.value, row.grid.value, ...Object.values(row.dimensions ?? {}), row.result, row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]} ${item.status}`).join(' ')]
+    return [row.fileName, row.folder, row.relativePath, row.sample.value, row.temperature.value, row.vdd.value, row.grid.value, ...Object.values(row.dimensions ?? {}), row.result, row.stageResults.map((item) => `${STAGE_LABEL_KO[item.stage]} ${item.status}`).join(' ')]
       .some((value) => normalized(value).includes(query))
   })
 }
@@ -727,7 +732,7 @@ function pivotDimensionValue(row: LogResultRecord, dimension: PivotDimension, ev
     const value = event.fields[dimension as keyof ArtifactFailureAddressFields]
     return value === undefined || value === null || value === '' ? PIVOT_UNKNOWN : String(value)
   }
-  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') {
+  if (dimension === 'sample' || dimension === 'temperature' || dimension === 'vdd' || dimension === 'grid') {
     return row[dimension].value ?? PIVOT_UNKNOWN
   }
   if (dimension === 'run') return row.run ?? PIVOT_UNKNOWN
@@ -931,7 +936,7 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
 }
 
 function sortableValue(row: LogResultRecord, key: LogRecordSortKey): string | number {
-  if (key === 'sample' || key === 'temperature' || key === 'mode' || key === 'grid') return row[key].value ?? ''
+  if (key === 'sample' || key === 'temperature' || key === 'vdd' || key === 'grid') return row[key].value ?? ''
   if (key === 'stageResults') return row.stageResults.map((item) => `${item.stage}:${item.status}`).join('|')
   return row[key]
 }
@@ -1031,8 +1036,8 @@ const BASE_EXPORT_HEADER = [
   'sample_state',
   'temperature_value',
   'temperature_state',
-  'mode_value',
-  'mode_state',
+  'vdd',
+  'vdd_state',
   'grid_value',
   'grid_state',
   'result',
@@ -1042,7 +1047,7 @@ const BASE_EXPORT_HEADER = [
 ] as const
 
 export const ENGINEERING_EXPORT_COLUMNS = [
-  'skew', 'lot', 'material', 'die', 'soc_model', 'equipment_channel', 'ecc_mode', 'custom_condition', 'evaluation_step', 'temperature_corner', 'frequency_mhz', 'vdd', 'vdd_corner', 'condition_corner', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
+  'skew', 'lot', 'material', 'die', 'soc_model', 'equipment_channel', 'ecc_mode', 'custom_condition', 'evaluation_step', 'temperature_corner', 'frequency_mhz', 'vdd_corner', 'condition_corner', 'test_mode', 'pattern', 'dq', 'bl', 'channel', 'sub_channel',
   'chip_select', 'rank', 'bank_group', 'bank', 'row', 'column', 'write_data', 'read_data', 'timing_skew_ps',
 ] as const
 export const EVIDENCE_EXPORT_COLUMNS = ['evidence_count', 'selected_evidence_count'] as const
@@ -1075,7 +1080,7 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'sample_value', label: '자재 (Sample)', section: 'condition' },
   { key: 'temperature_value', label: '온도 (°C)', section: 'condition' },
   { key: 'temperature_corner', label: '온도 조건', section: 'condition' },
-  { key: 'mode_value', label: 'Mode', section: 'condition' },
+  { key: 'test_mode', label: 'Test Mode', section: 'condition' },
   { key: 'frequency_mhz', label: '주파수 (MHz)', section: 'condition' },
   { key: 'vdd', label: 'VDD (V)', section: 'condition' },
   { key: 'vdd_corner', label: 'VDD 조건', section: 'condition' },
@@ -1097,7 +1102,7 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'grid_value', label: 'Grid', section: 'condition' },
   { key: 'sample_state', label: 'Sample 상태', section: 'result' },
   { key: 'temperature_state', label: '온도 상태', section: 'result' },
-  { key: 'mode_state', label: 'Mode 상태', section: 'result' },
+  { key: 'vdd_state', label: 'VDD 상태', section: 'result' },
   { key: 'grid_state', label: 'Grid 상태', section: 'result' },
   { key: 'result', label: '결과', section: 'result' },
   { key: 'result_source', label: '결과 출처', section: 'result' },
@@ -1135,6 +1140,7 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     vdd: row.dimensions?.vdd ?? '',
     vdd_corner: row.dimensions?.vddCorner ?? '',
     condition_corner: row.dimensions?.conditionCorner ?? '',
+    test_mode: row.dimensions?.testMode ?? '',
     pattern: row.dimensions?.pattern ?? '',
     dq: row.dimensions?.dq ?? '',
     bl: row.dimensions?.bl ?? '',
@@ -1153,8 +1159,7 @@ function exportRowValues(row: LogResultRecord): Record<LogRecordExportColumn, un
     sample_state: row.sample.state,
     temperature_value: row.temperature.value ?? '',
     temperature_state: row.temperature.state,
-    mode_value: row.mode.value ?? '',
-    mode_state: row.mode.state,
+    vdd_state: row.vdd.state,
     grid_value: row.grid.value ?? '',
     grid_state: row.grid.state,
     result: row.result,
@@ -1211,7 +1216,7 @@ export function serializeFailureAddressEventsCsv(rows: readonly LogResultRecord[
         vdd: record.dimensions?.vdd ?? '',
         vdd_corner: record.dimensions?.vddCorner ?? '',
         frequency_mhz: record.dimensions?.frequencyMHz ?? '',
-        test_mode: record.mode.value ?? record.dimensions?.testMode ?? '',
+        test_mode: record.dimensions?.testMode ?? '',
         pattern: record.dimensions?.pattern ?? '',
         soc_model: record.dimensions?.socModel ?? '',
         equipment_channel: record.dimensions?.equipmentChannel ?? '',
@@ -1326,7 +1331,7 @@ export function initLogRecordExportPreview(
     ...row,
     sample: Object.freeze({ ...row.sample }),
     temperature: Object.freeze({ ...row.temperature }),
-    mode: Object.freeze({ ...row.mode }),
+    vdd: Object.freeze({ ...row.vdd }),
     grid: Object.freeze({ ...row.grid }),
     ...(row.dimensions ? { dimensions: Object.freeze({ ...row.dimensions }) } : {}),
   }))

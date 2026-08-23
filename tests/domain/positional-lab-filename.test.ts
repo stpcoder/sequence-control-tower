@@ -53,6 +53,7 @@ describe('underscore-delimited lab filename', () => {
     expect(row).toMatchObject({
       sample: { value: 'DHCST-89', state: 'candidate' },
       temperature: { value: '25', state: 'candidate' },
+      vdd: { value: '1', state: 'candidate' },
       grid: { value: '1', state: 'candidate' },
       result: 'PASS',
       dimensions: { material: 'DHCST-89', evaluationStep: 'C', equipmentChannel: '8', eccMode: 'EN' },
@@ -77,6 +78,15 @@ describe('underscore-delimited lab filename', () => {
     expect(row.sample).toEqual({ value: 'DHCST-90', state: 'approved' })
     expect(row.dimensions?.sample).toBe('DHCST-90')
     expect(row.dimensions?.material).toBe('DHCST-90')
+  })
+
+  it('lets the engineer correct and approve the positional VDD candidate', () => {
+    const [row] = projectLogRecords([{ id: 'lab-1', name, text: '' }], {}, {
+      'lab-1': { vdd: { approval: 'approved', candidateValue: '1', approvedValue: '1.025' } },
+    })
+    expect(row.vdd).toEqual({ value: '1.025', state: 'approved' })
+    expect(row.dimensions?.vdd).toBe(1.025)
+    expect(serializeLogRecordsCsv([row], ['vdd'])).toContain('"1.025"')
   })
 
   it.each(['CHAE-1', 'DHBCT-4', 'LOT7-A03'])(

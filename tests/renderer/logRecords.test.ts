@@ -84,7 +84,7 @@ describe('renderer log result projection', () => {
       id: 'pass',
       sample: { value: '01', state: 'candidate' },
       temperature: { value: '85', state: 'candidate' },
-      mode: { value: 'DIAG', state: 'candidate' },
+      vdd: { value: null, state: 'missing' },
       result: 'PASS',
       resultSource: 'engineer',
       review: 'confirmed',
@@ -110,7 +110,7 @@ describe('renderer log result projection', () => {
     expect(row).toMatchObject({ result: 'TEST_FAIL', resultSource: 'rule', review: 'confirmed' })
   })
 
-  it('parses deterministic sample prefixes and common filename modes without weakening ambiguity handling', () => {
+  it('parses deterministic sample prefixes without treating bare words as result metadata', () => {
     const rows = projectLogRecords([
       { id: 'hyphen', name: 'SMP-A17_85C_NORMAL.log', text: '' },
       { id: 'underscore', name: 'SMP_A17_85C_UEFI.log', text: '' },
@@ -118,11 +118,12 @@ describe('renderer log result projection', () => {
       { id: 'ambiguous', name: 'SMP-A17-SMP-B18_85C_NORMAL.log', text: '' },
     ])
 
-    expect(rows.slice(0, 3).map((row) => [row.sample, row.mode])).toEqual([
-      [{ value: 'A17', state: 'candidate' }, { value: 'NORMAL', state: 'candidate' }],
-      [{ value: 'A17', state: 'candidate' }, { value: 'UEFI', state: 'candidate' }],
-      [{ value: 'A17', state: 'candidate' }, { value: 'UEFI', state: 'candidate' }],
+    expect(rows.slice(0, 3).map((row) => row.sample)).toEqual([
+      { value: 'A17', state: 'candidate' },
+      { value: 'A17', state: 'candidate' },
+      { value: 'A17', state: 'candidate' },
     ])
+    expect(rows[2].dimensions?.testMode).toBe('UEFI')
     expect(rows[3].sample).toEqual({ value: null, state: 'malformed' })
   })
 
@@ -147,13 +148,9 @@ describe('renderer log result projection', () => {
       { id: 'equivalent', name: 'smp-a17_sample=a17_85c_uefi.log', text: '' },
     ])
 
-    expect(rows.map((row) => [row.sample.value, row.mode.value])).toEqual([
-      ['A17', 'NORMAL'],
-      ['A17', 'UEFI'],
-      ['A17', 'UEFI'],
-      ['A17', 'UEFI'],
-      ['A17', 'UEFI'],
-    ])
+    expect(rows.map((row) => row.sample.value)).toEqual(['A17', 'A17', 'A17', 'A17', 'A17'])
+    expect(rows[2].dimensions?.testMode).toBe('UEFI')
+    expect(rows[3].dimensions?.testMode).toBe('UEFI')
   })
 
   it('fails visibly for malformed filenames instead of inventing metadata', () => {
@@ -161,7 +158,7 @@ describe('renderer log result projection', () => {
 
     expect(row.sample).toEqual({ value: null, state: 'malformed' })
     expect(row.temperature).toEqual({ value: null, state: 'malformed' })
-    expect(row.mode).toEqual({ value: null, state: 'malformed' })
+    expect(row.vdd).toEqual({ value: null, state: 'malformed' })
     expect(row.review).toBe('needs_review')
   })
 
@@ -239,10 +236,10 @@ describe('renderer log result projection', () => {
   })
 
   it('builds bounded pivots with explicit unknown buckets, zero cells, and source tracing', () => {
-    const rows = projectLogRecords(files)
+    const rows = projectLogRecords(files).map((row) => ({ ...row, dimensions: { ...row.dimensions, testMode: 'DIAG' } }))
     const grid = buildPivotGrid(rows, {
       rows: ['temperature'],
-      columns: ['mode', 'result'],
+      columns: ['testMode', 'result'],
       aggregation: 'count',
       filters: { query: '', result: 'all', review: 'all' },
     })
@@ -276,8 +273,8 @@ describe('renderer log result projection', () => {
     ]
     const rows = projectLogRecords(engineeringFiles)
     expect(rows[0]).toMatchObject({
-      mode: { value: 'HDIAG' },
-      dimensions: { skew: 'SS', frequencyMHz: 9600, vdd: 1.275, pattern: 'WR', dq: '9', bl: '16', channel: '0', subChannel: '1', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14' },
+      vdd: { value: '1.275' },
+      dimensions: { skew: 'SS', frequencyMHz: 9600, vdd: 1.275, testMode: 'HDIAG', pattern: 'WR', dq: '9', bl: '16', channel: '0', subChannel: '1', bankGroup: '2', bank: '5', row: '0x2A', column: '0x14' },
     })
     const grid = buildPivotGrid(rows, { rows: ['frequencyMHz'], columns: ['dq'], aggregation: 'fail_count', filters: { query: '', result: 'all', review: 'all' } })
     expect(grid.rows.map((row) => row.label)).toEqual(['8533', '9600'])
@@ -374,11 +371,11 @@ describe('renderer log result projection', () => {
   it('supports three-level pivots, rejects deeper axes, and keeps export preview immutable and formula-safe', () => {
     const rows = projectLogRecords(files)
     expect(() => buildPivotGrid(rows, {
-      rows: ['sample', 'temperature', 'mode'], columns: [], aggregation: 'count',
+      rows: ['sample', 'temperature', 'testMode'], columns: [], aggregation: 'count',
       filters: { query: '', result: 'all', review: 'all' },
     })).not.toThrow()
     expect(() => buildPivotGrid(rows, {
-      rows: ['sample', 'temperature', 'mode', 'result'], columns: [], aggregation: 'count',
+      rows: ['sample', 'temperature', 'testMode', 'result'], columns: [], aggregation: 'count',
       filters: { query: '', result: 'all', review: 'all' },
     })).toThrow(RangeError)
 
@@ -454,7 +451,7 @@ describe('renderer log result projection', () => {
     const tsv = serializeLogRecordsTsv(projectLogRecords(duplicateNameFiles))
 
     expect(tsv).toBe([
-      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tmode_value\tmode_state\tgrid_value\tgrid_state\tresult\tresult_source\treview\tstage_results',
+      '\uFEFFsource_id\tartifact_id\tsource_key\trelative_path\trun\tfilename\tfolder\tsample_value\tsample_state\ttemperature_value\ttemperature_state\tvdd\tvdd_state\tgrid_value\tgrid_state\tresult\tresult_source\treview\tstage_results',
       'source-a\tartifact-a\troot:root-a\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot A\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tPASS\tcandidate\tneeds_review\tTest:PASS',
       'source-b\tartifact-b\troot:root-b\u001flogs/duplicate.log\tlogs/duplicate.log\t\tduplicate.log\tRoot B\t\tmissing\t\tmissing\t\tmissing\t\tmissing\tUNKNOWN\tunreviewed\tneeds_review\t',
     ].join('\r\n'))
@@ -462,8 +459,8 @@ describe('renderer log result projection', () => {
 
   it('exports approved, rejected, missing, and malformed metadata states', () => {
     const metadataFiles: WorkbenchFile[] = [
-      { id: 'approved', name: 'LOT_S01_85C_DIAG_run007.log', text: '@PASS' },
-      { id: 'rejected', name: 'LOT_S02_85C_DIAG.log', text: '@PASS' },
+      { id: 'approved', name: 'LOT_S01_85C_VDD1p00_run007.log', text: '@PASS' },
+      { id: 'rejected', name: 'LOT_S02_85C_VDD1p00.log', text: '@PASS' },
       { id: 'missing', name: 'plain.log', text: '' },
       { id: 'malformed', name: 'broken.txt', text: '@PASS' },
     ]
@@ -482,22 +479,22 @@ describe('renderer log result projection', () => {
       row.sample.state,
       row.temperature.value,
       row.temperature.state,
-      row.mode.value,
-      row.mode.state,
+      row.vdd.value,
+      row.vdd.state,
       row.evidenceCount,
     ])).toEqual([
-      ['007', 'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', 0],
-      [undefined, '02', 'candidate', '85', 'rejected', 'DIAG', 'candidate', 1],
+      ['007', 'S-APPROVED', 'approved', '85', 'candidate', '1', 'candidate', 0],
+      [undefined, '02', 'candidate', '85', 'rejected', '1', 'candidate', 1],
       [undefined, null, 'missing', null, 'missing', null, 'missing', 0],
       [undefined, null, 'malformed', null, 'malformed', null, 'malformed', 1],
     ])
 
     const lines = serializeLogRecordsTsv(rows).split('\r\n')
     expect(lines[1].split('\t').slice(0, 18)).toEqual([
-      'approved', '', '', 'LOT_S01_85C_DIAG_run007.log', '007', 'LOT_S01_85C_DIAG_run007.log', 'Imported logs',
-      'S-APPROVED', 'approved', '85', 'candidate', 'DIAG', 'candidate', '', 'missing', 'PASS', 'candidate', 'needs_review',
+      'approved', '', '', 'LOT_S01_85C_VDD1p00_run007.log', '007', 'LOT_S01_85C_VDD1p00_run007.log', 'Imported logs',
+      'S-APPROVED', 'approved', '85', 'candidate', '1', 'candidate', '', 'missing', 'PASS', 'candidate', 'needs_review',
     ])
-    expect(lines[2].split('\t').slice(7, 13)).toEqual(['02', 'candidate', '85', 'rejected', 'DIAG', 'candidate'])
+    expect(lines[2].split('\t').slice(7, 13)).toEqual(['02', 'candidate', '85', 'rejected', '1', 'candidate'])
     expect(lines[3].split('\t').slice(7, 13)).toEqual(['', 'missing', '', 'missing', '', 'missing'])
     expect(lines[4].split('\t').slice(7, 13)).toEqual(['', 'malformed', '', 'malformed', '', 'malformed'])
   })

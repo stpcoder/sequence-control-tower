@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { aggregateRecordTrends, projectLogRecords, type LogResultRecord } from '../../src/state/logRecords'
 
-function record(id: string, mode: string, result: LogResultRecord['result']): LogResultRecord {
+function record(id: string, testMode: string, result: LogResultRecord['result']): LogResultRecord {
   return {
     id,
     fileName: `${id}.log`,
@@ -9,8 +9,9 @@ function record(id: string, mode: string, result: LogResultRecord['result']): Lo
     relativePath: `${id}.log`,
     sample: { value: 'S1', state: 'candidate' },
     temperature: { value: '25', state: 'candidate' },
-    mode: { value: mode, state: 'candidate' },
+    vdd: { value: '1.0', state: 'candidate' },
     grid: { value: 'G1', state: 'candidate' },
+    dimensions: { testMode },
     result,
     resultSource: 'engineer',
     stageResults: [],
@@ -54,7 +55,7 @@ describe('deterministic aggregate trends', () => {
       record('10', 'TEST', 'PASS'),
     ]
     expect(aggregateRecordTrends(rows).trends).toContainEqual(expect.objectContaining({
-      dimension: 'mode', value: 'DIAG', outcome: 'fail', count: 4, total: 5, percentage: 0.8,
+      dimension: 'testMode', value: 'DIAG', outcome: 'fail', count: 4, total: 5, percentage: 0.8,
     }))
   })
 
@@ -65,7 +66,7 @@ describe('deterministic aggregate trends', () => {
       record('6', 'TEST', 'PASS'), record('7', 'TEST', 'PASS'), record('8', 'TEST', 'PASS'),
       record('9', 'TEST', 'PASS'), record('10', 'TEST', 'PASS'),
     ]
-    const filtered = rows.filter((row) => row.mode.value === 'DIAG')
+    const filtered = rows.filter((row) => row.dimensions?.testMode === 'DIAG')
     expect(aggregateRecordTrends(filtered)).toEqual({ total: 5, trends: [] })
   })
 })

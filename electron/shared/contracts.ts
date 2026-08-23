@@ -896,7 +896,7 @@ export type NativeAgentSessionStatus = 'idle' | 'queued' | 'running' | 'paused' 
 export type NativeAgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
 export type NativeAgentContextKind = 'free_chat' | 'log_search' | 'results' | 'analysis_view' | 'evaluation_history' | 'project_compare'
 export type NativeAgentAnalysisDimension =
-  | 'sample' | 'temperature' | 'temperatureCorner' | 'mode' | 'skew' | 'frequencyMHz' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
+  | 'sample' | 'temperature' | 'temperatureCorner' | 'testMode' | 'skew' | 'frequencyMHz' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
   | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank'
   | 'row' | 'column' | 'writeData' | 'readData' | 'timingSkewPs' | 'grid' | 'result' | 'review' | 'folder' | 'run'
 export type NativeAgentAnalysisAggregation = 'sample_count' | 'grid_count' | 'pass_count' | 'fail_count' | 'pass_fail' | 'fail_rate' | 'fail_event_count' | 'fail_source_count' | 'fail_event_share'

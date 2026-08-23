@@ -6,7 +6,8 @@ function row(id: string, folder: string, result: LogResultRecord['result']): Log
   return {
     id, fileName: `${id}.log`, folder, relativePath: `${folder}/${id}.log`,
     sample: { value: id, state: 'candidate' }, temperature: { value: '85', state: 'candidate' },
-    mode: { value: 'VPERI', state: 'candidate' }, grid: { value: 'G1', state: 'candidate' },
+    vdd: { value: '1.295', state: 'candidate' },
+    grid: { value: 'G1', state: 'candidate' },
     dimensions: { skew: 'SS', vdd: 1.295, frequencyMHz: 9600, dq: 9, channel: 0 },
     result, resultSource: 'engineer', stageResults: [], review: 'confirmed', evidenceCount: 2, selectedEvidenceCount: 2,
   }

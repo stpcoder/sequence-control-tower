@@ -4,7 +4,7 @@ import type {
 } from '../../electron/shared/contracts'
 
 const DIMENSIONS = new Set([
-  'sample', 'temperature', 'temperatureCorner', 'mode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
+  'sample', 'temperature', 'temperatureCorner', 'testMode', 'skew', 'frequencyMHz', 'vdd', 'vddCorner', 'conditionCorner', 'pattern',
   'lot', 'material', 'die', 'socModel', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep', 'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column',
   'writeData', 'readData', 'timingSkewPs', 'grid', 'result', 'review', 'folder', 'run',
 ])

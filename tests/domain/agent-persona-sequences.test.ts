@@ -7,7 +7,8 @@ import type { LogResultRecord } from '../../src/state/logRecords'
 const record = (id: string, folder: string, result: LogResultRecord['result'], dimensions: NonNullable<LogResultRecord['dimensions']>): LogResultRecord => ({
   id, fileName: `${id}.log`, folder, relativePath: `${folder}/${id}.log`,
   sample: { value: 'SMP-01', state: 'candidate' }, temperature: { value: String(dimensions.temperatureC ?? 25), state: 'candidate' },
-  mode: { value: String(dimensions.testMode ?? 'VPERI'), state: 'candidate' }, grid: { value: 'G1', state: 'candidate' }, dimensions,
+  vdd: { value: String(dimensions.vdd ?? 1.0), state: 'candidate' },
+  grid: { value: 'G1', state: 'candidate' }, dimensions,
   result, resultSource: 'candidate', stageResults: [], review: 'needs_review', evidenceCount: 2, selectedEvidenceCount: 2,
 })
 

@@ -43,6 +43,7 @@ import type {
   ArtifactStageScanInput,
   ArtifactFailureAddressScanInput,
   NativeAgentAnalysisViewProposal,
+  MetadataSuggestionField,
 } from '../electron/shared/contracts'
 import { getActiveEvaluationRecipeRevisions } from '../electron/shared/contracts'
 import type { RecipeRule } from './domain/workbench'
@@ -347,7 +348,7 @@ export function availableEvaluationLogs(records: readonly LogResultRecord[], fil
         : file?.origin ? { rootId: file.origin, folderName: file.origin } : {}),
       ...(record.sample.value ? { sample: record.sample.value } : {}),
       ...(Number.isFinite(temperature) ? { temperatureC: temperature } : {}),
-      ...(record.mode.value ? { mode: record.mode.value } : {}),
+      ...(record.dimensions?.testMode ? { mode: record.dimensions.testMode } : {}),
       ...(record.grid.value ? { grid: record.grid.value } : {}),
     }]
   })
@@ -791,7 +792,7 @@ export default function App() {
     }, '일괄 판정 결과를 저장하지 못했습니다')
   }, [activeProjectId, enqueueEvaluation, files])
 
-  const approveMetadata = useCallback(async (record: LogResultRecord, field: PatternAxis, value: string) => {
+  const approveMetadata = useCallback(async (record: LogResultRecord, field: PatternAxis | MetadataSuggestionField, value: string) => {
     const file = files.find((item) => item.id === record.id)
     if (!file?.artifactId) {
       setPreviewMetadataApprovals((current) => ({
@@ -851,7 +852,7 @@ export default function App() {
     }
   }, [activeProjectId, enqueueEvaluation, files, notify])
 
-  const applyMetadataSuggestion = useCallback(async (fileId: string, field: PatternAxis, value: string) => {
+  const applyMetadataSuggestion = useCallback(async (fileId: string, field: MetadataSuggestionField, value: string) => {
     const record = records.find((item) => item.id === fileId)
     if (!record) {
       notify('LLM metadata 후보를 적용할 로그를 찾지 못했습니다.', 'error')

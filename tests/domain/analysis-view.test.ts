@@ -5,7 +5,8 @@ import { buildPivotGrid, type LogResultRecord } from '../../src/state/logRecords
 const row = (id: string, sample: string, temperature: string, result: LogResultRecord['result']): LogResultRecord => ({
   id, fileName: `${id}.log`, folder: 'evaluation-a', relativePath: `${id}.log`,
   sample: { value: sample, state: 'approved' }, temperature: { value: temperature, state: 'approved' },
-  mode: { value: 'VPERI', state: 'approved' }, grid: { value: 'G1', state: 'approved' },
+  vdd: { value: '1.0', state: 'approved' },
+  grid: { value: 'G1', state: 'approved' },
   result, resultSource: 'engineer', stageResults: [], review: 'confirmed', evidenceCount: 1, selectedEvidenceCount: 1,
 })
 

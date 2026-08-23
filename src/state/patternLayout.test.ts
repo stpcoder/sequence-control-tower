@@ -31,14 +31,14 @@ describe('pattern layout persistence', () => {
   })
 
   it('writes one reserved JSON preset identity with the complete layout', () => {
-    const preset = patternLayoutPreset({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['mode', 'run'], failOnly: true })
+    const preset = patternLayoutPreset({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['testMode', 'run'], failOnly: true })
     expect(preset).toMatchObject({ id: PATTERN_LAYOUT_PRESET_ID, name: PATTERN_LAYOUT_PRESET_NAME, format: 'json' })
-    expect(preset.options).toMatchObject({ rowAxes: ['mode', 'run'], failOnly: true })
+    expect(preset.options).toMatchObject({ rowAxes: ['testMode', 'run'], failOnly: true })
   })
 
   it('retains DRAM and operating-condition axes', () => {
     expect(normalizePatternLayout({
-      rowAxes: ['frequencyMHz', 'vdd', 'pattern', 'mode'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate',
+      rowAxes: ['frequencyMHz', 'vdd', 'pattern', 'testMode'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate',
     })).toMatchObject({ rowAxes: ['frequencyMHz', 'vdd', 'pattern'], columnAxes: ['dq', 'subChannel'], aggregation: 'fail_rate' })
   })
 

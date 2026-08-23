@@ -137,7 +137,8 @@ describe('project UI state updates', () => {
     const row: LogResultRecord = {
       id: 'source-a', fileName: 'VPERI_DQ9.log', folder: 'logs', relativePath: 'VPERI_DQ9.log',
       sample: { value: 'S01', state: 'approved' }, temperature: { value: '85', state: 'approved' },
-      mode: { value: 'VPERI', state: 'approved' }, grid: { value: 'DQ9', state: 'candidate' },
+      vdd: { value: '1.295', state: 'approved' },
+      grid: { value: 'DQ9', state: 'candidate' }, dimensions: { testMode: 'VPERI', vdd: 1.295 },
       result: 'TEST_FAIL', resultSource: 'engineer', stageResults: [], review: 'confirmed', evidenceCount: 1, selectedEvidenceCount: 1,
     }
     const projectWithSource = { ...project('p1', ['root-a']), artifacts: [{ sourceId: 'durable-source-a', rootId: 'root-a', artifactId: 'artifact-a', relativePath: 'VPERI_DQ9.log' }] }

@@ -95,7 +95,7 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
   { value: 'vdd', label: 'VDD (V)', group: '평가 조건' },
   { value: 'vddCorner', label: 'VDD 조건', group: '평가 조건' },
   { value: 'conditionCorner', label: '4-Corner', group: '평가 조건' },
-  { value: 'mode', label: 'Test Mode', group: '평가 조건' },
+  { value: 'testMode', label: 'Test Mode', group: '평가 조건' },
   { value: 'frequencyMHz', label: '주파수 (MHz)', group: '평가 조건' },
   { value: 'pattern', label: 'Pattern', group: '평가 조건' },
   { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: '평가 조건' },
@@ -126,8 +126,8 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
 const DIMENSION_LABEL = Object.fromEntries(DIMENSIONS.map((item) => [item.value, item.label])) as Record<PivotDimension, string>
 const FAILURE_ADDRESS_DIMENSIONS = new Set<PivotDimension>(['dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData'])
 const DIMENSION_EXPORT_COLUMN: Record<PivotDimension, LogRecordExportColumn> = {
-  sample: 'sample_value', temperature: 'temperature_value', mode: 'mode_value', grid: 'grid_value',
-  skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model', equipmentChannel: 'equipment_channel', eccMode: 'ecc_mode', customCondition: 'custom_condition', evaluationStep: 'evaluation_step',
+  sample: 'sample_value', temperature: 'temperature_value', grid: 'grid_value',
+  skew: 'skew', frequencyMHz: 'frequency_mhz', temperatureCorner: 'temperature_corner', vdd: 'vdd', vddCorner: 'vdd_corner', conditionCorner: 'condition_corner', testMode: 'test_mode', pattern: 'pattern', material: 'material', lot: 'lot', die: 'die', socModel: 'soc_model', equipmentChannel: 'equipment_channel', eccMode: 'ecc_mode', customCondition: 'custom_condition', evaluationStep: 'evaluation_step',
   dq: 'dq', bl: 'bl', channel: 'channel', subChannel: 'sub_channel', chipSelect: 'chip_select', rank: 'rank', bankGroup: 'bank_group', bank: 'bank', row: 'row', column: 'column', writeData: 'write_data', readData: 'read_data', timingSkewPs: 'timing_skew_ps',
   result: 'result', review: 'review', folder: 'folder', run: 'run',
 }
@@ -395,7 +395,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const filters = useMemo<LogRecordFilters>(() => ({ query: '', result: resultFilter, review: 'all', folder: folderFilter }), [folderFilter, resultFilter])
   const scopedRecords = useMemo(() => filterLogRecords(records, filters).filter((row) => {
     if (failOnly && !FAIL_RESULTS.has(row.result)) return false
-    if (unknownMetadataOnly && ![row.sample, row.temperature, row.mode, row.grid].some((value) => value.value === null)) return false
+    if (unknownMetadataOnly && ![row.sample, row.temperature, row.vdd, row.grid].some((value) => value.value === null)) return false
     return true
   }), [failOnly, filters, records, unknownMetadataOnly])
   const activeDimensions = [...rowAxes, ...columnAxes]
@@ -447,7 +447,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         return value !== undefined && value !== null && value !== ''
       })
     }
-    if (dimension === 'sample' || dimension === 'temperature' || dimension === 'mode' || dimension === 'grid') return !row[dimension].value
+    if (dimension === 'sample' || dimension === 'temperature' || dimension === 'grid') return !row[dimension].value
     if (dimension === 'result' || dimension === 'review' || dimension === 'folder') return false
     const value = row.dimensions?.[dimension]
     return value === undefined || value === null || value === ''

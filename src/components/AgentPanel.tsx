@@ -342,7 +342,7 @@ export function reusableNativeLaunchSessionId(
 
 const ANALYSIS_DIMENSION_LABELS: Partial<Record<NativeAgentAnalysisViewProposal['rowAxes'][number], string>> = {
   sample: '자재 (Sample)', skew: 'SKEW', temperature: '온도', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건',
-  conditionCorner: '4-Corner', frequencyMHz: '주파수', mode: 'Test Mode', pattern: 'Pattern', dq: 'DQ', bl: 'BL',
+  conditionCorner: '4-Corner', frequencyMHz: '주파수', testMode: 'Test Mode', pattern: 'Pattern', dq: 'DQ', bl: 'BL',
   channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank',
   row: 'Row', column: 'Column', grid: 'Grid', run: '반복 번호', folder: '평가 폴더', result: '판정 결과',
 }

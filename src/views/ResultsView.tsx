@@ -57,7 +57,7 @@ const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'folder', label: '폴더' },
   { key: 'sample', label: '자재 (Sample)' },
   { key: 'temperature', label: '온도' },
-  { key: 'mode', label: 'Mode' },
+  { key: 'vdd', label: 'VDD' },
   { key: 'grid', label: 'Grid' },
   { key: 'stageResults', label: '진행 단계' },
   { key: 'result', label: '결과' },
@@ -82,7 +82,16 @@ const EXPORT_SECTIONS = [
   { key: 'result' as const, label: '판정' },
 ] as const
 
-const METADATA_LABEL: Record<PatternAxis, string> = { sample: '자재 (Sample)', temperature: '온도', mode: 'Mode', grid: 'Grid' }
+const METADATA_LABEL: Record<PatternAxis, string> = { sample: '자재 (Sample)', temperature: '온도', vdd: 'VDD', grid: 'Grid' }
+
+export function normalizedMetadataEdit(field: PatternAxis, input: string): string | null {
+  const value = input.trim()
+  if (!value) return null
+  if (field !== 'vdd') return value
+  const normalized = value.replace(/[vV]\s*$/, '').replace(/[pP]/g, '.').trim()
+  const numeric = Number(normalized)
+  return Number.isFinite(numeric) && numeric > 0 ? normalized : null
+}
 
 function candidateLabel(field: CandidateValue, suffix = '', onOpen?: () => void) {
   if (!field.value) return onOpen
@@ -125,7 +134,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     if (stage !== 'all' && !checkpoints.some((item) => item.group === stage && (stageStatus === 'all' || item.status === stageStatus))) return false
     if (stage === 'all' && stageStatus !== 'all' && !checkpoints.some((item) => item.status === stageStatus)) return false
     if (preset === 'fail') return new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT']).has(row.result)
-    if (preset === 'needs_review') return row.review === 'needs_review' || [row.sample, row.temperature, row.mode, row.grid].some((field) => field.state === 'missing' || field.state === 'malformed')
+    if (preset === 'needs_review') return row.review === 'needs_review' || [row.sample, row.temperature, row.vdd, row.grid].some((field) => field.state === 'missing' || field.state === 'malformed')
     return true
   }), sortKey, sortDirection), [folder, query, records, result, review, stage, stageStatus, preset, sortDirection, sortKey])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -205,9 +214,9 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     if (!editingCell || !onEditMetadata) return
     const row = records.find((item) => item.id === editingCell.rowId)
     if (!row) return
-    const value = editingValue.trim()
+    const value = normalizedMetadataEdit(editingCell.field, editingValue)
     if (!value) {
-      onNotify?.('metadata 값은 비워 둘 수 없습니다.', 'error')
+      onNotify?.(editingCell.field === 'vdd' ? 'VDD를 숫자로 입력하세요.' : 'metadata 값은 비워 둘 수 없습니다.', 'error')
       return
     }
     setSavingMetadata(true)
@@ -220,7 +229,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const approveCandidate = async () => {
     if (!editingCell || !onApproveMetadata) return
     const row = records.find((item) => item.id === editingCell.rowId)
-    const value = editingValue.trim()
+    const value = normalizedMetadataEdit(editingCell.field, editingValue)
     if (!row || !value) return
     setSavingMetadata(true)
     try { await onApproveMetadata(row, editingCell.field, value); setEditingCell(null) }
@@ -333,8 +342,8 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
                 <td className="selection-cell"><input type="checkbox" checked={selectedIds.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={() => setSelectedIds((current) => toggleLogRecordSelection(current, row.id))} aria-label={`${row.fileName} 선택`} /></td>
                 <td><button className="file-link" onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }} title={row.relativePath}>{row.fileName}</button></td>
                 <td title={row.folder}>{row.folder}</td>
-                {(['sample', 'temperature', 'mode', 'grid'] as const).map((field) => <td key={field}>
-                  {candidateLabel(row[field], field === 'temperature' ? '°C' : '', onEditMetadata || onApproveMetadata ? () => beginEdit(row, field) : undefined)}
+                {(['sample', 'temperature', 'vdd', 'grid'] as const).map((field) => <td key={field}>
+                  {candidateLabel(row[field], field === 'temperature' ? '°C' : field === 'vdd' ? 'V' : '', onEditMetadata || onApproveMetadata ? () => beginEdit(row, field) : undefined)}
                 </td>)}
                 <td><div className="stage-results">{resultStageCheckpoints(row.stageResults, row.fileName, row.result).length ? resultStageCheckpoints(row.stageResults, row.fileName, row.result).map((item) => <span className={`stage-result ${item.status}`} key={item.group}>{item.label} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
                 <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span>{row.resultSource === 'candidate' ? <small className="row-note">후보</small> : null}</td>

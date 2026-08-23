@@ -44,7 +44,7 @@ export const ANALYSIS_VIEW_PRESETS: readonly AnalysisViewPreset[] = [
   { id: 'condition-overview', label: '조건별 판정', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['skew', 'sample'], columnAxes: ['temperature', 'vdd'], aggregation: 'pass_fail' },
   { id: 'reproduction', label: '재현 비교', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['skew', 'sample'], columnAxes: ['run'], aggregation: 'pass_fail' },
   { id: 'acceleration', label: '가속 조건', basis: 'evaluation', visualization: 'cross_table', rowAxes: ['frequencyMHz'], columnAxes: ['temperatureCorner', 'vddCorner'], aggregation: 'fail_rate' },
-  { id: 'tm-comparison', label: 'TM 개선 비교', basis: 'evaluation', visualization: 'stacked_bar', rowAxes: ['mode'], columnAxes: [], aggregation: 'pass_fail' },
+  { id: 'tm-comparison', label: 'TM 개선 비교', basis: 'evaluation', visualization: 'stacked_bar', rowAxes: ['testMode'], columnAxes: [], aggregation: 'pass_fail' },
   { id: 'corner-comparison', label: '4-Corner 비교', basis: 'evaluation', visualization: 'bar', rowAxes: ['conditionCorner'], columnAxes: ['skew'], aggregation: 'fail_rate' },
   { id: 'failure-dq-bl', label: 'DQ · BL 집중', basis: 'failure_address', visualization: 'heatmap', rowAxes: ['dq'], columnAxes: ['bl'], aggregation: 'fail_event_count' },
   { id: 'failure-bank-dq', label: 'Bank · DQ 집중', basis: 'failure_address', visualization: 'heatmap', rowAxes: ['bankGroup', 'bank'], columnAxes: ['dq'], aggregation: 'fail_event_count' },
