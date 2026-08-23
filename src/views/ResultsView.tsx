@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
 import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
@@ -41,9 +41,8 @@ import { resultRowsAgentContext, type AgentAnalysisContextRequest } from '../dom
 interface ResultsViewProps {
   records: readonly LogResultRecord[]
   onOpenFile: (fileId: string) => void
-  onApproveMetadata?: (record: LogResultRecord, field: PatternAxis, value: string) => void | Promise<void>
   onEditMetadata?: (record: LogResultRecord, field: PatternAxis, value: string) => void | Promise<void>
-  onResetMetadata?: (record: LogResultRecord, field: PatternAxis) => void | Promise<void>
+  onApproveSelectedMetadata?: (records: readonly LogResultRecord[]) => Promise<number>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   project: ProjectSnapshot | null
   onProjectUpdated: (project: ProjectSnapshot) => void
@@ -93,16 +92,16 @@ export function normalizedMetadataEdit(field: PatternAxis, input: string): strin
   return Number.isFinite(numeric) && numeric > 0 ? normalized : null
 }
 
-function candidateLabel(field: CandidateValue, suffix = '', onOpen?: () => void) {
+function metadataValue(field: CandidateValue, suffix = '', onOpen?: () => void) {
   if (!field.value) return onOpen
-    ? <button className={`candidate-value candidate-action ${field.state}`} title="값 검토" onClick={(event) => { event.stopPropagation(); onOpen() }}>미확인</button>
+    ? <button className={`candidate-value candidate-action ${field.state}`} title="클릭하여 수정" onClick={(event) => { event.stopPropagation(); onOpen() }}>미확인</button>
     : <span className={`candidate-value ${field.state}`}>미확인</span>
-  const content = <>{field.value}{suffix}<small>{field.state === 'approved' ? '승인' : field.state === 'rejected' ? '거절' : '후보'}</small></>
+  const content = <>{field.value}{suffix}</>
   if (!onOpen) return <span className={`candidate-value ${field.state}`}>{content}</span>
-  return <button className={`candidate-value candidate-action ${field.state}`} title="값 검토" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
+  return <button className={`candidate-value candidate-action ${field.state}`} title="클릭하여 수정" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
 }
 
-export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMetadata, onResetMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext }: ResultsViewProps) {
+export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSelectedMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext }: ResultsViewProps) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<ResultLabel | 'all'>('all')
   const [review, setReview] = useState<ReviewState | 'all'>('all')
@@ -121,6 +120,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: PatternAxis } | null>(null)
   const [editingValue, setEditingValue] = useState('')
   const [savingMetadata, setSavingMetadata] = useState(false)
+  const [approvingSelection, setApprovingSelection] = useState(false)
   const [savingExportLayout, setSavingExportLayout] = useState(false)
 
   useEffect(() => {
@@ -143,6 +143,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
   const selectedFilteredCount = filtered.reduce((count, row) => count + (selectedIds.has(row.id) ? 1 : 0), 0)
   const allFilteredSelected = filtered.length > 0 && selectedFilteredCount === filtered.length
   const selectedRows = selectedLogRecords(filtered, selectedIds)
+  const selectedCandidateCount = selectedRows.reduce((count, row) => count + ([row.sample, row.temperature, row.vdd, row.grid].filter((field) => field.state === 'candidate' && field.value).length), 0)
   const exportRows = exportableLogRecords(filtered, selectedIds)
   const exportColumns = useMemo(
     () => EXPORT_COLUMN_DEFINITIONS.filter((column) => selectedExportColumnKeys.has(column.key)).map((column) => column.key),
@@ -226,23 +227,15 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
     } finally { setSavingMetadata(false) }
   }
 
-  const approveCandidate = async () => {
-    if (!editingCell || !onApproveMetadata) return
-    const row = records.find((item) => item.id === editingCell.rowId)
-    const value = normalizedMetadataEdit(editingCell.field, editingValue)
-    if (!row || !value) return
-    setSavingMetadata(true)
-    try { await onApproveMetadata(row, editingCell.field, value); setEditingCell(null) }
-    finally { setSavingMetadata(false) }
-  }
-
-  const resetApproval = async () => {
-    if (!editingCell || !onResetMetadata) return
-    const row = records.find((item) => item.id === editingCell.rowId)
-    if (!row) return
-    setSavingMetadata(true)
-    try { await onResetMetadata(row, editingCell.field); setEditingCell(null) }
-    finally { setSavingMetadata(false) }
+  const approveSelection = async () => {
+    if (!onApproveSelectedMetadata || !selectedRows.length || !selectedCandidateCount) return
+    setApprovingSelection(true)
+    try {
+      const count = await onApproveSelectedMetadata(selectedRows)
+      onNotify?.(`${selectedRows.length.toLocaleString()}개 로그의 값 ${count.toLocaleString()}개를 저장했습니다.`, 'success')
+    } catch {
+      // The app-level durable queue reports the detailed persistence error.
+    } finally { setApprovingSelection(false) }
   }
 
   const toggleAllFiltered = () => {
@@ -294,6 +287,7 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
       <header className="data-view-header">
         <div><h1>결과</h1></div>
         <div className="data-actions">
+          <button type="button" onClick={() => void approveSelection()} disabled={!selectedCandidateCount || approvingSelection} title="선택한 로그의 추출값을 한 번에 저장"><Check size={16} />{approvingSelection ? '저장 중…' : '선택 승인'}</button>
           <details className="export-columns">
             <summary><SlidersHorizontal size={15} />열 선택<ChevronDown size={14} /></summary>
             <div className="export-columns-menu">
@@ -343,10 +337,10 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
                 <td><button className="file-link" onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }} title={row.relativePath}>{row.fileName}</button></td>
                 <td title={row.folder}>{row.folder}</td>
                 {(['sample', 'temperature', 'vdd', 'grid'] as const).map((field) => <td key={field}>
-                  {candidateLabel(row[field], field === 'temperature' ? '°C' : field === 'vdd' ? 'V' : '', onEditMetadata || onApproveMetadata ? () => beginEdit(row, field) : undefined)}
+                  {metadataValue(row[field], field === 'temperature' ? '°C' : field === 'vdd' ? 'V' : '', onEditMetadata ? () => beginEdit(row, field) : undefined)}
                 </td>)}
                 <td><div className="stage-results">{resultStageCheckpoints(row.stageResults, row.fileName, row.result).length ? resultStageCheckpoints(row.stageResults, row.fileName, row.result).map((item) => <span className={`stage-result ${item.status}`} key={item.group}>{item.label} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
-                <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span>{row.resultSource === 'candidate' ? <small className="row-note">후보</small> : null}</td>
+                <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td>
                 <td><span className={`review-label ${row.review}`}>{row.review === 'confirmed' ? '확정' : '검토 필요'}</span></td>
                 <td title="PASS·FAIL·Halt·Reboot 등 현재 판정에 사용된 로그 줄 수"><span className="evidence-count">{row.evidenceCount}</span>{row.selectedEvidenceCount ? <small className="row-note">직접 선택</small> : null}</td>
               </tr>
@@ -367,27 +361,22 @@ export function ResultsView({ records, onOpenFile, onApproveMetadata, onEditMeta
         busy={savingMetadata}
         onValueChange={setEditingValue}
         onClose={() => setEditingCell(null)}
-        onApprove={() => void approveCandidate()}
         onSave={() => void saveEdit()}
-        onReset={onResetMetadata ? () => void resetApproval() : undefined}
       /> : null}
       {exportPreview ? <ExportPreviewModal preview={exportPreview} onClose={() => setExportPreview(null)} onCopy={copyTsv} onCsv={exportCsv} /> : null}
     </div>
   )
 }
 
-function MetadataReviewDialog({ row, field, value, busy, onValueChange, onClose, onApprove, onSave, onReset }: {
+function MetadataReviewDialog({ field, value, busy, onValueChange, onClose, onSave }: {
   row: LogResultRecord
   field: PatternAxis
   value: string
   busy: boolean
   onValueChange: (value: string) => void
   onClose: () => void
-  onApprove: () => void
   onSave: () => void
-  onReset?: () => void
 }) {
-  const current = row[field]
   const canSubmit = Boolean(value.trim()) && !busy
   const dialogRef = useRef<HTMLFormElement>(null)
   useEffect(() => {
@@ -397,14 +386,13 @@ function MetadataReviewDialog({ row, field, value, busy, onValueChange, onClose,
   }, [busy, onClose])
   return <div className="export-preview-modal metadata-review-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-review-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
     <form ref={dialogRef} className="export-preview-dialog metadata-review-dialog" onSubmit={(event) => { event.preventDefault(); onSave() }}>
-      <header><div><h2 id="metadata-review-title">{METADATA_LABEL[field]} 검토</h2></div><button type="button" onClick={onClose} aria-label="닫기"><X size={16} /></button></header>
+      <header><div><h2 id="metadata-review-title">{METADATA_LABEL[field]} 수정</h2></div><button type="button" onClick={onClose} aria-label="닫기"><X size={16} /></button></header>
       <div className="metadata-review-body">
         <label><span>값</span><input autoFocus value={value} onChange={(event) => onValueChange(event.target.value)} placeholder="값 입력" /></label>
-        <p>{current.state === 'approved' ? '엔지니어가 승인한 값입니다.' : current.value ? '로그에서 찾은 후보입니다.' : '값을 찾지 못했습니다. 직접 입력할 수 있습니다.'}</p>
       </div>
       <footer>
-        {current.state === 'approved' && onReset ? <button type="button" className="metadata-reset" disabled={busy} onClick={onReset}><RotateCcw size={14} />승인 취소</button> : <span />}
-        <div><button type="button" disabled={busy} onClick={onClose}>닫기</button>{current.state === 'candidate' && value.trim() === current.value ? <button type="button" className="is-primary" disabled={!canSubmit} onClick={onApprove}><Check size={14} />후보 승인</button> : <button type="submit" className="is-primary" disabled={!canSubmit}>수정 후 승인</button>}</div>
+        <span />
+        <div><button type="button" disabled={busy} onClick={onClose}>닫기</button><button type="submit" className="is-primary" disabled={!canSubmit}><Check size={14} />저장</button></div>
       </footer>
     </form>
   </div>

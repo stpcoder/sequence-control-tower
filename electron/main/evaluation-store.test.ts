@@ -255,6 +255,25 @@ describe('EvaluationStore', () => {
     expect(restarted.metadataApprovals).toHaveLength(3)
   })
 
+  it('approves thousands-ready metadata selections in one atomic project revision', async () => {
+    const root = await tempRoot()
+    const store = new EvaluationStore(root)
+    const saved = await store.approveMetadataBatch({
+      projectId: PROJECT,
+      expectedRevision: 0,
+      approvals: [
+        { source: source(SHA_A, 'source-a'), fieldKey: 'temperature', candidateValue: '85', approvedValue: '85' },
+        { source: source(SHA_A, 'source-a'), fieldKey: 'vdd', candidateValue: '1.295', approvedValue: '1.295' },
+        { source: source(SHA_B, 'source-b'), fieldKey: 'temperature', candidateValue: '-20', approvedValue: '-20' },
+      ],
+    })
+
+    expect(saved.snapshot.revision).toBe(1)
+    expect(saved.metadataApprovals).toHaveLength(3)
+    expect(saved.metadataApprovals.every((item) => item.approval === 'approved' && item.approvedBy === 'engineer')).toBe(true)
+    expect((await store.snapshot(PROJECT)).metadataApprovals).toHaveLength(3)
+  })
+
   it('archives the latest recipe as an immutable empty-rule revision and excludes it from active recipes', async () => {
     const root = await tempRoot()
     const store = new EvaluationStore(root)

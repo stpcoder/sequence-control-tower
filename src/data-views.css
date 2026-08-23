@@ -508,17 +508,21 @@
 
 .candidate-action {
   min-height: 40px;
+  margin: 0 -5px;
+  padding: 0 5px;
+  border-radius: 5px;
   color: #d7dce4 !important;
   text-align: left;
 }
 
 .candidate-action:hover {
   color: #8ab4ff !important;
+  background: var(--sct-hover);
 }
 
-.candidate-value.approved { color: #dce8ff !important; }
-.candidate-value.approved small { color: #79a7ff; }
-.candidate-value.rejected { color: #e19a91; text-decoration: line-through; }
+.candidate-value.approved,
+.candidate-value.candidate { color: #d7dce4 !important; }
+.candidate-value.rejected { color: #e19a91; }
 
 .candidate-value small,
 .row-note,

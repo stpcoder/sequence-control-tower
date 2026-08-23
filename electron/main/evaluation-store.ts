@@ -3,6 +3,7 @@ import { readFile, rename } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
   EvaluationApproveMetadataInput,
+  EvaluationApproveMetadataBatchInput,
   EvaluationArchiveRecipeInput,
   EvaluationBatchOutcome,
   EvaluationBatchOutcomeInput,
@@ -12,6 +13,7 @@ import type {
   EvaluationDecisionSaveResult,
   EvaluationEvidenceRef,
   EvaluationMetadataApprovalRevision,
+  EvaluationMetadataBatchSaveResult,
   EvaluationMetadataSaveResult,
   EvaluationProjectSnapshot,
   EvaluationRecipeClause,
@@ -72,6 +74,7 @@ const MAX_BATCH_OUTCOMES = 100_000
 const MAX_RULES_PER_RECIPE = 2_000
 const MAX_CLAUSES_PER_RULE = 1_000
 const MAX_EVIDENCE_REFS = 2_000
+const MAX_METADATA_APPROVALS_PER_BATCH = 50_000
 const FORBIDDEN_KEYS = new Set([
   'rawlog',
   'rawlogtext',
@@ -594,6 +597,55 @@ export class EvaluationStore {
       project.metadataApprovals.push(saved)
     })
     return { snapshot, metadataApproval: saved }
+  }
+
+  async approveMetadataBatch(input: EvaluationApproveMetadataBatchInput): Promise<EvaluationMetadataBatchSaveResult> {
+    rejectSensitivePayload(input)
+    if (!Array.isArray(input.approvals) || !input.approvals.length || input.approvals.length > MAX_METADATA_APPROVALS_PER_BATCH) {
+      throw new Error('일괄 승인할 metadata 개수가 올바르지 않습니다.')
+    }
+    const normalized = input.approvals.map((item) => {
+      if (!isRecord(item)) throw new Error('metadata 일괄 승인 항목이 올바르지 않습니다.')
+      const source = sourceRef(item.source)
+      const fieldKey = safeIdentifier(item.fieldKey, 'fieldKey', 100)
+      const candidateValue = safeOptionalText(item.candidateValue, 'candidateValue')
+      const approvedValue = safeOptionalText(item.approvedValue, 'approvedValue')
+      const extractorId = safeOptionalText(item.extractorId, 'extractorId', 160)
+      if (candidateValue === undefined && approvedValue === undefined) throw new Error('승인할 metadata 값이 필요합니다.')
+      if (approvedValue === '미확인') throw new Error('미확인은 approvedValue로 저장할 수 없습니다.')
+      return { source, fieldKey, candidateValue, approvedValue, extractorId }
+    })
+    const unique = [...new Map(normalized.map((item) => [
+      `${item.source.sourceId}\0${item.source.artifactId}\0${item.fieldKey}`,
+      item,
+    ])).values()]
+    let saved: EvaluationMetadataApprovalRevision[] = []
+    const snapshot = await this.mutate(input.projectId, input.expectedRevision, (project) => {
+      const latest = new Map<string, EvaluationMetadataApprovalRevision>()
+      project.metadataApprovals.forEach((item) => latest.set(`${item.source.sourceId}\0${item.source.artifactId}\0${item.fieldKey}`, item))
+      const createdAt = this.now().toISOString()
+      saved = unique.map((item) => {
+        const key = `${item.source.sourceId}\0${item.source.artifactId}\0${item.fieldKey}`
+        const previous = latest.get(key)
+        const revision: EvaluationMetadataApprovalRevision = {
+          id: this.makeId(),
+          revision: (previous?.revision ?? 0) + 1,
+          source: item.source,
+          fieldKey: item.fieldKey,
+          ...(item.candidateValue === undefined ? {} : { candidateValue: item.candidateValue }),
+          ...(item.approvedValue === undefined ? {} : { approvedValue: item.approvedValue }),
+          ...(item.extractorId === undefined ? {} : { extractorId: item.extractorId }),
+          approval: 'approved',
+          approvedBy: 'engineer',
+          createdAt,
+          ...(previous ? { supersedesId: previous.id } : {}),
+        }
+        latest.set(key, revision)
+        return revision
+      })
+      project.metadataApprovals.push(...saved)
+    })
+    return { snapshot, metadataApprovals: saved }
   }
 
   private batchOutcome(value: EvaluationBatchOutcomeInput): EvaluationBatchOutcome {

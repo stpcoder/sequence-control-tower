@@ -69,6 +69,7 @@ const importFolders = vi.fn((folderPaths: string[], options: unknown) => new Pro
 }))
 const saveRecipeAndBatch = vi.fn(async (input: unknown) => ({ input }))
 const archiveRecipe = vi.fn(async (input: unknown) => ({ input }))
+const approveMetadataBatch = vi.fn(async (input: unknown) => ({ input }))
 const lineWindow = vi.fn(async () => ({}))
 const saveLlm = vi.fn(async () => ({}))
 const agentStart = vi.fn(async () => ({ id: 'run-1', status: 'queued' }))
@@ -91,7 +92,7 @@ const services = {
     importFolders,
     lineWindow
   },
-  evaluations: { saveRecipeAndBatch, archiveRecipe },
+  evaluations: { saveRecipeAndBatch, archiveRecipe, approveMetadataBatch },
   llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() },
   agent: { start: agentStart, get: agentGet, answer: vi.fn(), message: vi.fn(), confirm: vi.fn(), cancel: agentCancel, onUpdate: agentOnUpdate, cancelAll: agentCancelAll },
   evaluationAgent: { start: evaluationAgentStart, get: evaluationAgentGet, resume: evaluationAgentResume, memorySavePayload: evaluationAgentMemory }
@@ -130,6 +131,7 @@ beforeEach(() => {
   importFolders.mockClear()
   saveRecipeAndBatch.mockClear()
   archiveRecipe.mockClear()
+  approveMetadataBatch.mockClear()
   lineWindow.mockClear()
   saveLlm.mockClear()
   agentStart.mockClear()
@@ -433,5 +435,12 @@ describe('evaluation IPC persistence', () => {
     expect(archiveRecipe).toHaveBeenCalledOnce()
     expect(archiveRecipe).toHaveBeenCalledWith(input)
     expect(handlers.has('evaluation:archive-recipe-unknown')).toBe(false)
+  })
+
+  it('routes metadata selection approval as one IPC operation', async () => {
+    const input = { projectId: 'project', expectedRevision: 4, approvals: [{ fieldKey: 'vdd' }] }
+    await expect(invoke(IPC_CHANNELS.evaluationApproveMetadataBatch, input)).resolves.toEqual({ input })
+    expect(approveMetadataBatch).toHaveBeenCalledOnce()
+    expect(approveMetadataBatch).toHaveBeenCalledWith(input)
   })
 })

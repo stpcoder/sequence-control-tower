@@ -18,6 +18,7 @@ import type {
   ArtifactSearchInput,
   EvaluationArchiveRecipeInput,
   EvaluationApproveMetadataInput,
+  EvaluationApproveMetadataBatchInput,
   EvaluationProjectRequest,
   EvaluationSaveBatchInput,
   EvaluationSaveDecisionInput,
@@ -447,6 +448,9 @@ export function registerIpc(services: Services): void {
   )
   handle(IPC_CHANNELS.evaluationApproveMetadata, (_event, input) =>
     services.evaluations.approveMetadata(input as EvaluationApproveMetadataInput)
+  )
+  handle(IPC_CHANNELS.evaluationApproveMetadataBatch, (_event, input) =>
+    services.evaluations.approveMetadataBatch(input as EvaluationApproveMetadataBatchInput)
   )
 
   handle(IPC_CHANNELS.analysisStart, (_event, input) =>

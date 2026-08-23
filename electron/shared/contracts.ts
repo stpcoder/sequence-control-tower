@@ -634,6 +634,19 @@ export interface EvaluationApproveMetadataInput extends EvaluationProjectRequest
   approval: 'approved' | 'rejected' | 'reset'
 }
 
+export interface EvaluationMetadataApprovalBatchItem {
+  source: EvaluationSourceInput
+  fieldKey: string
+  candidateValue: string
+  approvedValue?: string
+  extractorId?: string
+}
+
+export interface EvaluationApproveMetadataBatchInput extends EvaluationProjectRequest {
+  expectedRevision: number
+  approvals: EvaluationMetadataApprovalBatchItem[]
+}
+
 export interface EvaluationDecisionSaveResult {
   snapshot: EvaluationProjectSnapshot
   decision: EvaluationDecisionRevision
@@ -658,6 +671,11 @@ export interface EvaluationRecipeAndBatchSaveResult {
 export interface EvaluationMetadataSaveResult {
   snapshot: EvaluationProjectSnapshot
   metadataApproval: EvaluationMetadataApprovalRevision
+}
+
+export interface EvaluationMetadataBatchSaveResult {
+  snapshot: EvaluationProjectSnapshot
+  metadataApprovals: EvaluationMetadataApprovalRevision[]
 }
 
 export interface AppStatus {
@@ -1128,6 +1146,7 @@ export interface SequenceIntelligenceApi {
     saveBatch(input: EvaluationSaveBatchInput): Promise<EvaluationBatchSaveResult>
     saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult>
     approveMetadata(input: EvaluationApproveMetadataInput): Promise<EvaluationMetadataSaveResult>
+    approveMetadataBatch(input: EvaluationApproveMetadataBatchInput): Promise<EvaluationMetadataBatchSaveResult>
   }
   projects: SequenceIntelligenceProjectsApi
 }
@@ -1167,6 +1186,7 @@ export const IPC_CHANNELS = {
   evaluationSaveBatch: 'evaluation:save-batch',
   evaluationSaveRecipeAndBatch: 'evaluation:save-recipe-and-batch',
   evaluationApproveMetadata: 'evaluation:approve-metadata',
+  evaluationApproveMetadataBatch: 'evaluation:approve-metadata-batch',
   projectCreate: 'project:create', projectList: 'project:list', projectGet: 'project:get', projectSave: 'project:save',
   projectArchive: 'project:archive', projectLoad: 'project:load', projectAttachFolder: 'project:attach-folder',
   projectDetachFolder: 'project:detach-folder', projectValidateFolders: 'project:validate-folders',

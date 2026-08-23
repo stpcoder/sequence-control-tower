@@ -802,7 +802,7 @@ export default function App() {
           [field]: { approval: 'approved', candidateValue: value, approvedValue: value },
         },
       }))
-      notify(`웹 미리보기에서 ${field} 후보를 승인했습니다.`, 'info')
+      notify('값을 저장했습니다.', 'info')
       return
     }
     const generation = lifecycleRef.current.generation
@@ -816,46 +816,58 @@ export default function App() {
         approvedValue: value,
         extractorId: `default-filename-${field}-v1`,
         approval: 'approved',
-      }), '메타데이터 후보를 승인하지 못했습니다')
-      notify(`${record.fileName}의 ${field} 후보를 승인했습니다.`, 'success', generation)
+      }), '값을 저장하지 못했습니다')
+      notify(`${record.fileName}의 값을 저장했습니다.`, 'success', generation)
     } catch {
       // enqueueEvaluation already surfaced the durable-store failure.
     }
   }, [activeProjectId, enqueueEvaluation, files, notify])
 
-  const resetMetadataApproval = useCallback(async (record: LogResultRecord, field: PatternAxis) => {
-    const file = files.find((item) => item.id === record.id)
-    if (!file?.artifactId) {
-      setPreviewMetadataApprovals((current) => ({
-        ...current,
-        [record.id]: {
-          ...(current[record.id] ?? {}),
-          [field]: { approval: 'reset' },
-        },
-      }))
-      notify('승인을 취소하고 원래 후보로 되돌렸습니다.', 'info')
-      return
-    }
-    const generation = lifecycleRef.current.generation
-    try {
-      await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadata({
+  const approveSelectedMetadata = useCallback(async (selectedRecords: readonly LogResultRecord[]): Promise<number> => {
+    const fields: readonly PatternAxis[] = ['sample', 'temperature', 'vdd', 'grid']
+    const fileById = new Map(files.map((file) => [file.id, file]))
+    const previewUpdates: Record<string, Record<string, { approval: 'approved'; candidateValue: string; approvedValue: string }>> = {}
+    const approvals = selectedRecords.flatMap((record) => fields.flatMap((field) => {
+      const candidate = record[field]
+      if (candidate.state !== 'candidate' || !candidate.value) return []
+      const file = fileById.get(record.id)
+      if (!file?.artifactId) {
+        previewUpdates[record.id] ??= {}
+        previewUpdates[record.id][field] = { approval: 'approved', candidateValue: candidate.value, approvedValue: candidate.value }
+        return []
+      }
+      return [{
+        source: { sourceId: file.id, artifactId: file.artifactId, sourceKey: file.sourceKey ?? file.id },
+        fieldKey: field,
+        candidateValue: candidate.value,
+        approvedValue: candidate.value,
+        extractorId: `default-filename-${field}-v1`,
+      }]
+    }))
+    if (approvals.length) {
+      await enqueueEvaluation((snapshot) => window.sequenceIntelligence!.evaluations.approveMetadataBatch({
         projectId: activeProjectId,
         expectedRevision: snapshot.revision,
-        source: { sourceId: file.id, artifactId: file.artifactId!, sourceKey: file.sourceKey ?? file.id },
-        fieldKey: field,
-        extractorId: `default-filename-${field}-v1`,
-        approval: 'reset',
-      }), '메타데이터 승인을 취소하지 못했습니다')
-      notify(`${record.fileName}의 승인을 취소했습니다.`, 'info', generation)
-    } catch {
-      // enqueueEvaluation already surfaced the durable-store failure.
+        approvals,
+      }), '선택한 값을 저장하지 못했습니다')
     }
-  }, [activeProjectId, enqueueEvaluation, files, notify])
+    const previewCount = Object.values(previewUpdates).reduce((count, values) => count + Object.keys(values).length, 0)
+    if (previewCount) {
+      setPreviewMetadataApprovals((current) => {
+        const next = { ...current }
+        for (const [sourceId, values] of Object.entries(previewUpdates)) {
+          next[sourceId] = { ...(current[sourceId] ?? {}), ...values }
+        }
+        return next
+      })
+    }
+    return approvals.length + previewCount
+  }, [activeProjectId, enqueueEvaluation, files])
 
   const applyMetadataSuggestion = useCallback(async (fileId: string, field: MetadataSuggestionField, value: string) => {
     const record = records.find((item) => item.id === fileId)
     if (!record) {
-      notify('LLM metadata 후보를 적용할 로그를 찾지 못했습니다.', 'error')
+      notify('LLM이 제안한 값을 적용할 로그를 찾지 못했습니다.', 'error')
       return
     }
     await approveMetadata(record, field, value)
@@ -996,7 +1008,7 @@ export default function App() {
       projectSources={project?.artifacts ?? []}
     />
   ) : activePage === 'results' ? (
-    <ResultsView records={records} onOpenFile={openFile} onApproveMetadata={approveMetadata} onEditMetadata={approveMetadata} onResetMetadata={resetMetadataApproval} onNotify={notify} project={project} onProjectUpdated={projectUpdated} onAnalyzeContext={launchAgentContext} />
+    <ResultsView records={records} onOpenFile={openFile} onEditMetadata={approveMetadata} onApproveSelectedMetadata={approveSelectedMetadata} onNotify={notify} project={project} onProjectUpdated={projectUpdated} onAnalyzeContext={launchAgentContext} />
   ) : activePage === 'patterns' ? (
     <PatternsView records={records} onOpenFile={openFile} project={project} onProjectUpdated={setProject} onNotify={notify} onAnalyzeContext={launchAgentContext} agentViewRequest={agentAnalysisViewRequest} onAgentViewRequestConsumed={() => setAgentAnalysisViewRequest(null)} />
   ) : activePage === 'history' ? (
