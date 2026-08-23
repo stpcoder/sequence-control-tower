@@ -26,6 +26,7 @@ import {
   chooseNextTabId,
   clampSearchHitIndex,
   clampWorkbenchPaneWidth,
+  compactIncrementalSearchObservations,
   deferredSearchHitIndex,
   DEFAULT_WORKBENCH_PANE_WIDTHS,
   clauseSpecKey,
@@ -134,6 +135,13 @@ describe('Log Workbench UI data hardening', () => {
       observation('c', '@pass'),
       observation('d', 'reboot_reason'),
     ])).toEqual(['reboot_reason', '@pass', '@FAIL'])
+  })
+
+  it('collapses legacy A to AB to ABC live-search drafts before rule creation', () => {
+    const observation = (id: string, query: string) => ({ id, sourceId: 'log-a', query, matcherKind: 'literal' as const, target: 'content' as const, caseSensitive: false, matched: true, matchCount: 1, role: 'search_history' as const, excerpts: [] })
+    expect(compactIncrementalSearchObservations([
+      observation('a', 'A'), observation('ab', 'AB'), observation('abcdef', 'ABCDEF'), observation('pass', '@PASS'),
+    ]).map((item) => item.query)).toEqual(['ABCDEF', '@PASS'])
   })
 
   it('groups workspace matches by file while preserving navigation indexes', () => {
@@ -427,9 +435,13 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
     expect(workbenchSource).toContain("const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])")
     expect(workbenchSource).toContain("recipeSaved ? '저장 완료' : '규칙 저장'")
-    expect(workbenchSource).toContain('<Play size={12} />사용')
-    expect(workbenchSource).toContain('<Check size={12} />사용 중')
+    expect(workbenchSource).toContain('<Play size={12} />폴더 적용')
+    expect(workbenchSource).toContain('<Check size={12} />적용됨')
     expect(workbenchSource).toContain('<Trash2 size={12} />삭제')
+    expect(workbenchSource).toContain('className="recipe-observation-delete"')
+    expect(workbenchSource).toContain('submitCurrentSearch()')
+    expect(workbenchSource).not.toContain('observationTimer')
+    expect(workbenchSource).toContain('prepareRuleFromWorkflow(workflowChecks)')
     expect(workbenchSource).not.toContain('다시 분류')
     expect(workbenchSource).not.toContain('r${recipe.revision}')
     expect(workbenchSource).not.toContain('>보관<')
@@ -598,7 +610,7 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('// Reset synchronously with result invalidation so an Enter pressed before')
     expect(workbenchSource).toContain('setCurrentHit(0)\n    searchHasNavigatedRef.current = false')
     expect(workbenchSource).toContain('detailOffset: backendDetailOffset')
-    expect(workbenchSource).toContain('if (event.key === \'Enter\') {\n      event.preventDefault()\n      moveToHit(event.shiftKey ? -1 : 1)')
+    expect(workbenchSource).toContain('if (event.key === \'Enter\') {\n      event.preventDefault()\n      submitCurrentSearch()\n      moveToHit(event.shiftKey ? -1 : 1)')
   })
 
   it('bounds persisted pane widths and keeps fallback messages short', () => {

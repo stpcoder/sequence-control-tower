@@ -86,7 +86,7 @@ describe('UI readability contract', () => {
     expect(workbench).not.toContain('그러면 <b>')
     expect(workbench).toContain('<strong>검색 절차 저장</strong>')
     expect(workbench).toContain('A rule is the deterministic automation')
-    expect(workbench).toContain('<strong>판정 규칙</strong><span>판정에 사용할 검색을 선택하세요</span>')
+    expect(workbench).toContain('<strong>판정 규칙</strong><span>검색 조건 선택</span>')
     expect(workbench).toContain('줄 바꿈 <kbd>Alt Z</kbd>')
     expect(workbench).toContain('줄 이동 <kbd>Ctrl G</kbd>')
     expect(workbench).toContain('!workflowReview && !recipeVisible')

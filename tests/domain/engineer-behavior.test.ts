@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildEngineerWorkflowCandidate, classifyEngineerSearchStage, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
+import { buildEngineerWorkflowCandidate, classifyEngineerSearchStage, compactIncrementalSearchEvents, compactIncrementalWorkflowChecks, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
 
 describe('engineer behavior workflow', () => {
   it('keeps the engineer search order and models a zero-match check as absence', () => {
@@ -19,6 +19,23 @@ describe('engineer behavior workflow', () => {
     expect(buildEngineerWorkflowCandidate([
       { query: '@FAIL', mode: 'literal', caseSensitive: false, matchCount: 0, occurredAt: '2026-08-09T01:00:00Z' },
     ], 'PASS')).toBeNull()
+  })
+
+  it('keeps only the submitted term from legacy incremental live-search drafts', () => {
+    const compacted = compactIncrementalSearchEvents([
+      { query: 'A', mode: 'literal', caseSensitive: false, matchCount: 10, occurredAt: '2026-08-09T01:00:00.000Z' },
+      { query: 'AB', mode: 'literal', caseSensitive: false, matchCount: 5, occurredAt: '2026-08-09T01:00:00.400Z' },
+      { query: 'ABCDEF', mode: 'literal', caseSensitive: false, matchCount: 1, occurredAt: '2026-08-09T01:00:01.000Z' },
+      { query: '@PASS', mode: 'literal', caseSensitive: false, matchCount: 1, occurredAt: '2026-08-09T01:00:20.000Z' },
+    ])
+    expect(compacted.map((item) => item.query)).toEqual(['ABCDEF', '@PASS'])
+    expect(buildEngineerWorkflowCandidate(compacted, 'PASS')?.checks.map((item) => item.query)).toEqual(['ABCDEF', '@PASS'])
+    expect(compactIncrementalWorkflowChecks([
+      { query: 'A', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 10, stage: 'unknown', order: 1 },
+      { query: 'AB', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 5, stage: 'unknown', order: 2 },
+      { query: 'ABCDEF', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'unknown', order: 3 },
+      { query: '@PASS', mode: 'literal', caseSensitive: false, expected: 'present', matchCount: 1, stage: 'memory-test', order: 4 },
+    ]).map((item) => [item.query, item.order])).toEqual([['ABCDEF', 1], ['@PASS', 2]])
   })
 
   it('recognizes Qualcomm-style evaluation stages and scores similar procedures', () => {

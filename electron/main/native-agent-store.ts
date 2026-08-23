@@ -7,7 +7,7 @@ import type {
   NativeAgentToolTraceView, ProjectEvaluationDimensions
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
-import { buildEngineerWorkflowCandidate, engineerWorkflowContextCompatibility, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
+import { buildEngineerWorkflowCandidate, compactIncrementalWorkflowChecks, engineerWorkflowContextCompatibility, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 import { normalizeAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
 
@@ -90,6 +90,16 @@ export class NativeAgentStore {
       database.commandKnowledge = legacy.commandKnowledge && typeof legacy.commandKnowledge === 'object' ? legacy.commandKnowledge : {}
       database.profileBindings = legacy.profileBindings && typeof legacy.profileBindings === 'object' ? legacy.profileBindings : {}
       database.consolePromptRules = legacy.consolePromptRules && typeof legacy.consolePromptRules === 'object' ? legacy.consolePromptRules : {}
+      for (const reviews of Object.values(database.reviews)) {
+        for (const review of reviews) {
+          const checks = compactIncrementalWorkflowChecks(review.checks)
+          if (checks.length === review.checks.length) continue
+          review.checks = checks
+          review.stages = [...new Set(checks.map((check) => check.stage))]
+          review.fingerprint = createHash('sha256').update(engineerWorkflowSignature(checks, review.result)).digest('hex')
+          if (checks.length < 2 && review.state === 'pending') review.state = 'dismissed'
+        }
+      }
       for (const session of Object.values(database.sessions)) {
         if (session.status === 'queued' || session.status === 'running') {
           session.status = 'paused'

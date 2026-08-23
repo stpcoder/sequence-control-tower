@@ -206,18 +206,44 @@ export function groupWorkspaceSearchHits(hits: readonly SearchHit[], limit = 80)
   return [...groups.values()]
 }
 
+/** Remove legacy live-search drafts such as A -> AB -> ABC while preserving
+ * explicit evidence and unrelated searches. New searches are recorded only on
+ * Enter, but this keeps projects created by older versions usable. */
+export function compactIncrementalSearchObservations(observations: readonly SearchObservation[]): SearchObservation[] {
+  return observations.reduce<SearchObservation[]>((result, observation) => {
+    const previous = result.at(-1)
+    const previousQuery = previous?.query.trim() ?? ''
+    const nextQuery = observation.query.trim()
+    const sameMatcher = previous?.sourceId === observation.sourceId
+      && previous.matcherKind === observation.matcherKind
+      && previous.target === observation.target
+      && previous.caseSensitive === observation.caseSensitive
+    const incrementalDraft = previous?.role === 'search_history'
+      && observation.role === 'search_history'
+      && sameMatcher
+      && nextQuery.length > previousQuery.length
+      && (observation.caseSensitive ? nextQuery.startsWith(previousQuery) : nextQuery.toLocaleLowerCase('ko-KR').startsWith(previousQuery.toLocaleLowerCase('ko-KR')))
+    if (incrementalDraft) return [...result.slice(0, -1), observation]
+    return [...result, observation]
+  }, [])
+}
+
 /** Most-recent-first Ctrl-F terms for the active log. Searches are deliberately
  * kept per log here; cross-folder reuse only happens after the engineer saves a
  * compatible search procedure. */
 export function recentSearchQueries(observations: readonly SearchObservation[]): string[] {
   const seen = new Set<string>()
-  return [...observations].reverse().flatMap((observation) => {
+  return compactIncrementalSearchObservations(observations).reverse().flatMap((observation) => {
     const query = observation.query.trim()
     const key = query.toLocaleLowerCase('ko-KR')
     if (!query || seen.has(key)) return []
     seen.add(key)
     return [query]
   })
+}
+
+function omitObservationKeys<T>(record: Record<string, T>, keys: ReadonlySet<string>): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.has(key)))
 }
 
 interface LoadedLineWindow {
@@ -1203,8 +1229,11 @@ export function WorkbenchView({
   const splitterDragRef = useRef<{ pane: keyof WorkbenchPaneWidths; startX: number; startWidth: number } | null>(null)
   const searchHasNavigatedRef = useRef(false)
   const pendingSearchDirectionRef = useRef<1 | -1 | null>(null)
-  const observationTimer = useRef<number | undefined>(undefined)
   const observationPersistTimer = useRef<number | undefined>(undefined)
+  const pendingSearchCommitRef = useRef<{ key: string; observedAt: string; completion: Promise<void>; resolve: () => void } | null>(null)
+  const completedSearchRef = useRef<{ key: string; counts: Record<string, number> } | null>(null)
+  const lastSubmittedSearchKeyRef = useRef('')
+  const searchRecordTasksRef = useRef(new Set<Promise<void>>())
   const searchRequest = useRef(0)
   const mountedRef = useRef(false)
   const lineWindowGenerations = useRef(new Map<string, number>())
@@ -1382,6 +1411,15 @@ export function WorkbenchView({
   })), [activeFile, activeSourceLines, logDraft])
   const searchFiles = useMemo(() => resolveSearchScopeFiles(searchScope, files, activeFileId, openFileIds), [activeFileId, files, openFileIds, searchScope])
   const searchFileIdsKey = useMemo(() => searchFiles.map((file) => file.id).join('\u0000'), [searchFiles])
+  const searchCommitKey = useMemo(() => [
+    activeFileId,
+    searchScope,
+    searchFileIdsKey,
+    options.caseSensitive ? 'case' : 'nocase',
+    options.wholeWord ? 'word' : 'partial',
+    options.regex ? 'regex' : 'literal',
+    query.trim(),
+  ].join('\u001f'), [activeFileId, options, query, searchFileIdsKey, searchScope])
   const memoryHits = useMemo(() => collectHits(searchFiles, query, options), [options, query, searchFiles])
   const hits = useMemo(() => backendDetailOffset > 0 ? backendHits : [...memoryHits, ...backendHits], [backendDetailOffset, backendHits, memoryHits])
   const activeHit = hits[currentHit]
@@ -1429,6 +1467,95 @@ export function WorkbenchView({
     || patternReview.status === 'running'
     || patternReview.status === 'cancelling'
   const patternReviewAvailable = Boolean(activeFile?.artifactId && electronApi()?.analysis)
+
+  const recordCommittedSearch = useCallback(async (counts: Record<string, number>, observedAt: string): Promise<void> => {
+    if (!activeFile || !query.trim() || !createSearchPattern(query, options)) return
+    const compiled = backendQuery(query, options)
+    const activeCount = activeFile.artifactId
+      ? counts[activeFile.id]
+      : collectHits([activeFile], query, options).length
+    if (activeCount === undefined) return
+
+    setSearchHistory((current) => ({
+      ...current,
+      [activeFile.id]: recordObservation(current[activeFile.id] ?? [], {
+        sourceId: activeFile.id,
+        query: compiled.query,
+        matcherKind: compiled.mode,
+        caseSensitive: options.caseSensitive,
+        matched: activeCount > 0,
+        matchCount: activeCount,
+        role: 'search_history',
+      }),
+    }))
+
+    const api = electronApi()
+    const activeSource = resolveProjectSource({ artifacts: projectSources }, activeFile)
+    if (!api?.nativeAgent || projectId === 'log-workbench' || !activeSource) return
+    const scopedSearchRows = searchFiles.flatMap((file) => {
+      const source = resolveProjectSource({ artifacts: projectSources }, file)
+      if (!source || source.rootId !== activeSource.rootId) return []
+      return [{ file, source }]
+    })
+    const sourceIds = [...new Set(scopedSearchRows.map(({ source }) => source.sourceId))]
+    if (!sourceIds.length) return
+    const matchedSourceIds = [...new Set(scopedSearchRows.flatMap(({ file, source }) => (
+      (counts[file.id] ?? (file.artifactId ? 0 : collectHits([file], query, options).length)) > 0 ? [source.sourceId] : []
+    )))]
+    const matchCount = scopedSearchRows.reduce((sum, { file }) => (
+      sum + (counts[file.id] ?? (file.artifactId ? 0 : collectHits([file], query, options).length))
+    ), 0)
+    await api.nativeAgent.recordSearch({
+      projectId,
+      sourceIds,
+      query: compiled.query,
+      mode: compiled.mode,
+      caseSensitive: options.caseSensitive,
+      scope: searchScope === 'file' ? 'current' : searchScope === 'folder' ? 'folder' : searchScope === 'open' ? 'open' : 'project',
+      matchCount,
+      observedAt,
+      evaluationScopeId: activeSource.rootId,
+      activeSourceId: activeSource.sourceId,
+      activeMatchCount: activeCount,
+      matchedSourceIds,
+    })
+  }, [activeFile, options, projectId, projectSources, query, searchFiles, searchScope])
+
+  const trackSearchRecord = useCallback((task: Promise<void>): Promise<void> => {
+    const tracked = task.catch(() => undefined)
+    searchRecordTasksRef.current.add(tracked)
+    void tracked.finally(() => searchRecordTasksRef.current.delete(tracked))
+    return tracked
+  }, [])
+
+  const waitForCommittedSearches = useCallback(async (): Promise<void> => {
+    const pending = pendingSearchCommitRef.current?.completion
+    if (pending) await pending
+    await Promise.all([...searchRecordTasksRef.current])
+  }, [])
+
+  const submitCurrentSearch = useCallback(() => {
+    if (!activeFile || !query.trim() || !createSearchPattern(query, options)) return
+    // Enter advances through matches after the first submission; it must not
+    // create another behavior record for every next-match navigation.
+    if (lastSubmittedSearchKeyRef.current === searchCommitKey) return
+    lastSubmittedSearchKeyRef.current = searchCommitKey
+    const observedAt = new Date().toISOString()
+    if (!activeFile.artifactId) {
+      trackSearchRecord(recordCommittedSearch({}, observedAt))
+      return
+    }
+    const completed = completedSearchRef.current
+    if (completed?.key === searchCommitKey) {
+      trackSearchRecord(recordCommittedSearch(completed.counts, observedAt))
+      return
+    }
+    // Enter can arrive before a large-file search returns. Keep the explicit
+    // submission and record it when that exact request completes.
+    let resolve: () => void = () => {}
+    const completion = new Promise<void>((done) => { resolve = done })
+    pendingSearchCommitRef.current = { key: searchCommitKey, observedAt, completion, resolve }
+  }, [activeFile, options, query, recordCommittedSearch, searchCommitKey, trackSearchRecord])
 
   const paneStorageKey = `sequence-control-tower:workbench-widths:${projectId}`
   const updatePaneWidth = useCallback((pane: keyof WorkbenchPaneWidths, value: number) => {
@@ -1499,7 +1626,7 @@ export function WorkbenchView({
     const observations = searchHistory[activeFile.id] ?? []
     const latest = new Map<string, SearchObservation>()
     observations.forEach((item) => latest.set(`${item.matcherKind}:${item.caseSensitive}:${item.query}`, item))
-    return [...latest.values()]
+    return compactIncrementalSearchObservations([...latest.values()])
   }, [activeFile, searchHistory])
 
   const selectedRecipeObservations = useMemo(() => {
@@ -1585,6 +1712,45 @@ export function WorkbenchView({
       }),
     }))
     if (activeFile.artifactId) setUnresolvedRecipeClauseIds((current) => new Set([...current, observationId]))
+    setRecipeSaved(false)
+  }
+
+  const deleteRecipeObservation = (observationId: string) => {
+    if (!activeFile) return
+    const keys = new Set([observationId])
+    setSearchHistory((current) => ({
+      ...current,
+      [activeFile.id]: (current[activeFile.id] ?? []).filter((observation) => observation.id !== observationId),
+    }))
+    setSelectedObservationIdsByFile((current) => ({
+      ...current,
+      [activeFile.id]: (current[activeFile.id] ?? []).filter((id) => id !== observationId),
+    }))
+    setRecipeClauseOrderByFile((current) => ({
+      ...current,
+      [activeFile.id]: (current[activeFile.id] ?? []).filter((id) => id !== observationId),
+    }))
+    setOccurrenceByObservationId((current) => omitObservationKeys(current, keys))
+    setExactCountDraftByObservationId((current) => omitObservationKeys(current, keys))
+    setUnresolvedRecipeClauseIds((current) => {
+      const next = new Set(current)
+      next.delete(observationId)
+      return next
+    })
+    setRecipeSaved(false)
+  }
+
+  const clearRecipeObservations = () => {
+    if (!activeFile || !recipeObservations.length || !window.confirm('현재 로그의 검색 기록을 모두 삭제할까요?')) return
+    const keys = new Set((searchHistory[activeFile.id] ?? []).map((observation) => observation.id))
+    setSearchHistory((current) => ({ ...current, [activeFile.id]: [] }))
+    setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: [] }))
+    setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: [] }))
+    setOccurrenceByObservationId((current) => omitObservationKeys(current, keys))
+    setExactCountDraftByObservationId((current) => omitObservationKeys(current, keys))
+    setUnresolvedRecipeClauseIds(new Set())
+    setClauseOrderOpen(false)
+    setRecipeVisible(false)
     setRecipeSaved(false)
   }
 
@@ -1778,6 +1944,8 @@ export function WorkbenchView({
       revealGeneration.current += 1
       patternReviewGeneration.current += 1
       patternReviewJobIdRef.current = ''
+      pendingSearchCommitRef.current?.resolve()
+      pendingSearchCommitRef.current = null
       animationFrameIds.current.forEach((frameId) => window.cancelAnimationFrame(frameId))
       animationFrameIds.current.clear()
       if (scrollFrameId.current !== undefined) window.cancelAnimationFrame(scrollFrameId.current)
@@ -2308,6 +2476,14 @@ export function WorkbenchView({
   }, [options, query, resetSearchNavigation])
 
   useEffect(() => {
+    lastSubmittedSearchKeyRef.current = ''
+    if (pendingSearchCommitRef.current?.key !== searchCommitKey) {
+      pendingSearchCommitRef.current?.resolve()
+      pendingSearchCommitRef.current = null
+    }
+  }, [searchCommitKey])
+
+  useEffect(() => {
     setBackendDetailOffset(0)
     resetSearchNavigation()
   }, [resetSearchNavigation, searchFileIdsKey])
@@ -2339,7 +2515,6 @@ export function WorkbenchView({
       }
     }
     setSearching(true)
-    const observedAt = new Date().toISOString()
     const timer = window.setTimeout(() => {
       const compiled = backendQuery(query, options)
       void searchArtifactsBatched(api, artifactIds, {
@@ -2365,37 +2540,24 @@ export function WorkbenchView({
         }))))
         const successfulCounts = successfulSearchCounts(searchFiles, result)
         setBackendCounts(successfulCounts)
+        completedSearchRef.current = { key: searchCommitKey, counts: successfulCounts }
         const total = Object.values(successfulCounts).reduce((sum, count) => sum + count, 0)
         setBackendTotal(total)
-        const activeSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
-        const scopedSearchRows = searchFiles.flatMap((file) => {
-          const source = resolveProjectSource({ artifacts: projectSources }, file)
-          if (!source || (activeSource && source.rootId !== activeSource.rootId)) return []
-          return [{ file, source }]
-        })
-        const sourceIds = scopedSearchRows.map(({ source }) => source.sourceId)
-        const matchedSourceIds = scopedSearchRows.flatMap(({ file, source }) => {
-          if ((successfulCounts[file.id] ?? 0) < 1) return []
-          return [source.sourceId]
-        })
-        const scopedMatchCount = scopedSearchRows.reduce((sum, { file }) => sum + (successfulCounts[file.id] ?? 0), 0)
-        if (backendDetailOffset === 0 && api.nativeAgent && projectId !== 'log-workbench' && sourceIds.length) {
-          const evaluationScopeId = activeSource?.rootId
-          void api.nativeAgent.recordSearch({
-            projectId, sourceIds: [...new Set(sourceIds)], query: compiled.query, mode: compiled.mode,
-            caseSensitive: options.caseSensitive,
-            scope: searchScope === 'file' ? 'current' : searchScope === 'folder' ? 'folder' : searchScope === 'open' ? 'open' : 'project',
-            matchCount: scopedMatchCount,
-            observedAt,
-            ...(evaluationScopeId ? { evaluationScopeId } : {}),
-            ...(activeSource ? { activeSourceId: activeSource.sourceId, activeMatchCount: successfulCounts[activeFile!.id] ?? 0 } : {}),
-            matchedSourceIds: [...new Set(matchedSourceIds)],
-          }).catch(() => undefined)
+        const pendingCommit = pendingSearchCommitRef.current
+        if (backendDetailOffset === 0 && pendingCommit?.key === searchCommitKey) {
+          pendingSearchCommitRef.current = null
+          const task = trackSearchRecord(recordCommittedSearch(successfulCounts, pendingCommit.observedAt))
+          void task.finally(pendingCommit.resolve)
         }
         const failure = result.files.find((file) => file.error)?.error
         setSearchError(failure ?? '')
       }).catch((error) => {
         if (!canApplySearchResult(mountedRef.current, searchRequest.current, requestId)) return
+        const pendingCommit = pendingSearchCommitRef.current
+        if (pendingCommit?.key === searchCommitKey) {
+          pendingSearchCommitRef.current = null
+          pendingCommit.resolve()
+        }
         setSearchError(error instanceof Error ? error.message : '검색하지 못했습니다.')
       }).finally(() => {
         if (canApplySearchResult(mountedRef.current, searchRequest.current, requestId)) setSearching(false)
@@ -2407,30 +2569,7 @@ export function WorkbenchView({
         searchRequest.current = advanceSearchRequestGeneration(searchRequest.current)
       }
     }
-  }, [activeFile, backendDetailOffset, invalidPattern, options, projectId, projectSources, query, searchFiles, searchScope])
-
-  useEffect(() => {
-    if (!query.trim() || invalidPattern || !activeFile || searching) return undefined
-    window.clearTimeout(observationTimer.current)
-    observationTimer.current = window.setTimeout(() => {
-      const compiled = backendQuery(query, options)
-      if (activeFile.artifactId && !Object.prototype.hasOwnProperty.call(backendCounts, activeFile.id)) return
-      const count = activeFile.artifactId ? backendCounts[activeFile.id] : collectHits([activeFile], query, options).length
-      setSearchHistory((current) => ({
-        ...current,
-        [activeFile.id]: recordObservation(current[activeFile.id] ?? [], {
-          sourceId: activeFile.id,
-          query: compiled.query,
-          matcherKind: compiled.mode,
-          caseSensitive: options.caseSensitive,
-          matched: count > 0,
-          matchCount: count,
-          role: 'search_history',
-        }),
-      }))
-    }, 650)
-    return () => window.clearTimeout(observationTimer.current)
-  }, [activeFile, backendCounts, invalidPattern, options, query, searching])
+  }, [activeFile, backendDetailOffset, invalidPattern, options, projectId, projectSources, query, recordCommittedSearch, searchCommitKey, searchFiles, searchScope, trackSearchRecord])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2631,15 +2770,16 @@ export function WorkbenchView({
       const api = electronApi()
       const source = resolveProjectSource({ artifacts: projectSources }, activeFile)
       if (api?.nativeAgent && source && projectId !== 'log-workbench') {
-        void api.nativeAgent.completeEvaluation({
-          projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
-          ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
-          ...(selectedRecipeObservations.length >= 2 ? { workflowSelection: selectedRecipeObservations.map((observation) => ({
-            query: observation.query,
-            mode: observation.matcherKind,
-            caseSensitive: observation.caseSensitive,
-          })) } : {}),
-        }).then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
+        void waitForCommittedSearches().then(() => api.nativeAgent.completeEvaluation({
+            projectId, sourceId: source.sourceId, result: nextDecision, evidenceLines,
+            ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
+            ...(selectedRecipeObservations.length >= 2 ? { workflowSelection: selectedRecipeObservations.map((observation) => ({
+              query: observation.query,
+              mode: observation.matcherKind,
+              caseSensitive: observation.caseSensitive,
+            })) } : {}),
+          }))
+          .then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
       }
       return true
     } catch (error) {
@@ -2650,6 +2790,48 @@ export function WorkbenchView({
     }
   }
 
+  const prepareRuleFromWorkflow = (checks: readonly EngineerWorkflowCheckView[]) => {
+    if (!activeFile || !checks.length) return
+    const signature = (query: string, mode: SearchObservation['matcherKind'], caseSensitive: boolean) => (
+      `${mode}:${caseSensitive ? '1' : '0'}:${query.trim().toLocaleLowerCase('ko-KR')}`
+    )
+    let nextHistory = searchHistory[activeFile.id] ?? []
+    checks.forEach((check) => {
+      nextHistory = recordObservation(nextHistory, {
+        sourceId: activeFile.id,
+        query: check.query,
+        matcherKind: check.mode,
+        target: 'content',
+        caseSensitive: check.caseSensitive,
+        matched: check.expected === 'present',
+        matchCount: check.matchCount,
+        role: 'search_history',
+      })
+    })
+    const observationBySignature = new Map(nextHistory.map((observation) => [
+      signature(observation.query, observation.matcherKind, observation.caseSensitive), observation,
+    ]))
+    const selected = checks.flatMap((check) => {
+      const observation = observationBySignature.get(signature(check.query, check.mode, check.caseSensitive))
+      return observation ? [observation] : []
+    })
+    const selectedIds = selected.map((observation) => observation.id)
+    setSearchHistory((current) => ({ ...current, [activeFile.id]: nextHistory }))
+    setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
+    setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
+    setOccurrenceByObservationId((current) => ({
+      ...current,
+      ...Object.fromEntries(checks.flatMap((check) => {
+        const observation = observationBySignature.get(signature(check.query, check.mode, check.caseSensitive))
+        return observation ? [[observation.id, check.expected === 'absent' ? { kind: 'zero' as const } : { kind: 'atLeast' as const }]] : []
+      })),
+    }))
+    setRequireMarkerOrder(selectedIds.length > 1 && checks.every((check) => check.expected === 'present'))
+    if (activeFile.artifactId) setUnresolvedRecipeClauseIds(new Set(selectedIds))
+    setRecipeSaved(false)
+    setRecipeVisible(true)
+  }
+
   const confirmWorkflow = async () => {
     const api = electronApi()
     if (!api?.nativeAgent || !workflowReview || !workflowPurpose.trim()) return
@@ -2658,6 +2840,7 @@ export function WorkbenchView({
       const memory = await api.nativeAgent.confirmWorkflow({
         projectId, reviewId: workflowReview.id, purpose: workflowPurpose.trim(), checks: workflowChecks,
       })
+      prepareRuleFromWorkflow(workflowChecks)
       setWorkflowReviews((current) => {
         const next = { ...current }; delete next[workflowReview.sourceId]; return next
       })
@@ -2667,7 +2850,6 @@ export function WorkbenchView({
       setWorkflowCheckDrafts((current) => {
         const next = { ...current }; delete next[workflowReview.id]; return next
       })
-      setRecipeVisible(false)
       onNotify?.(`분석 절차 저장 · ${memory.purpose}`, 'success')
     } catch (error) {
       onNotify?.(error instanceof Error ? error.message : '분석 절차를 저장하지 못했습니다.', 'error')
@@ -2680,6 +2862,7 @@ export function WorkbenchView({
     const api = electronApi()
     if (!workflowReview) return
     const reviewId = workflowReview.id
+    prepareRuleFromWorkflow(workflowChecks)
     setWorkflowReviews((current) => {
       const next = { ...current }; delete next[workflowReview.sourceId]; return next
     })
@@ -2689,7 +2872,6 @@ export function WorkbenchView({
     setWorkflowCheckDrafts((current) => {
       const next = { ...current }; delete next[reviewId]; return next
     })
-    setRecipeVisible(false)
     if (api?.nativeAgent) void api.nativeAgent.dismissWorkflow({ projectId, reviewId }).catch(() => undefined)
   }
 
@@ -2946,18 +3128,19 @@ export function WorkbenchView({
       const api = electronApi()
       const source = resolveProjectSource({ artifacts: projectSources }, activeFile)
       if (api?.nativeAgent && source && projectId !== 'log-workbench' && selectedRecipeObservations.length >= 2) {
-        void api.nativeAgent.completeEvaluation({
-          projectId,
-          sourceId: source.sourceId,
-          result: (existingDecision ?? decision) as WorkbenchDecision,
-          evidenceLines,
-          ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
-          workflowSelection: selectedRecipeObservations.map((observation) => ({
-            query: observation.query,
-            mode: observation.matcherKind,
-            caseSensitive: observation.caseSensitive,
-          })),
-        }).then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
+        void waitForCommittedSearches().then(() => api.nativeAgent.completeEvaluation({
+            projectId,
+            sourceId: source.sourceId,
+            result: (existingDecision ?? decision) as WorkbenchDecision,
+            evidenceLines,
+            ...(source.rootId ? { evaluationScopeId: source.rootId } : {}),
+            workflowSelection: selectedRecipeObservations.map((observation) => ({
+              query: observation.query,
+              mode: observation.matcherKind,
+              caseSensitive: observation.caseSensitive,
+            })),
+          }))
+          .then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
       }
     } catch (error) {
       onNotify?.(error instanceof Error ? `분석 규칙을 저장하지 못했습니다: ${error.message}` : '분석 규칙을 저장하지 못했습니다.', 'error')
@@ -3038,6 +3221,7 @@ export function WorkbenchView({
     }
     if (event.key === 'Enter') {
       event.preventDefault()
+      submitCurrentSearch()
       moveToHit(event.shiftKey ? -1 : 1)
     }
     if (event.key === 'Escape') {
@@ -3403,13 +3587,13 @@ export function WorkbenchView({
 
               {!workflowReview && recipeVisible && draft ? (
                 <section className="recipe-suggestion">
-                  <div className="recipe-title"><div><strong>판정 규칙</strong><span>판정에 사용할 검색을 선택하세요</span></div><button onClick={() => setRecipeVisible(false)} aria-label="제안 닫기"><X size={15} /></button></div>
+                  <div className="recipe-title"><div><strong>판정 규칙</strong><span>검색 조건 선택</span></div><button type="button" className="recipe-clear-observations" onClick={clearRecipeObservations}><Trash2 size={13} />전체 삭제</button><button onClick={() => setRecipeVisible(false)} aria-label="규칙 만들기 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
                     {recipeObservations.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]
                       return <div className={selected ? 'selected' : ''} key={observation.id}>
-                        <button type="button" className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i>{selected ? <Check size={12} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button>
+                        <div className="recipe-observation-row"><button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i>{selected ? <Check size={12} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button><button type="button" className="recipe-observation-delete" onClick={() => deleteRecipeObservation(observation.id)} aria-label={`${observation.query} 검색 기록 삭제`} title="검색 기록 삭제"><Trash2 size={13} /></button></div>
                         {selected ? <div className="recipe-condition-editor">
                           <label><span>검색어</span><input aria-label={`${observation.query} 검색 조건`} value={observation.query} onChange={(event) => updateRecipeObservation(observation.id, { query: event.target.value })} /></label>
                           <label><span>발생</span><span className="recipe-inline-controls"><select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
@@ -3464,12 +3648,12 @@ export function WorkbenchView({
         {recipeManagerOpen ? (
           <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecipeManagerOpen(false) }}>
             <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
-              <div className="recipe-manager-heading"><strong id="recipe-manager-title">저장 규칙</strong><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
+              <div className="recipe-manager-heading"><strong id="recipe-manager-title">프로젝트 규칙</strong><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="프로젝트 규칙 닫기"><X size={16} /></button></div>
               <div className="recipe-manager-list">
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
                   <div className="recipe-manager-item" key={recipe.recipeId}>
                     <button className="recipe-manager-copy" type="button" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></button>
-                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />사용 중</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'}><Play size={12} />사용</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
+                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />적용됨</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'} title="현재 평가 폴더에 추가 적용"><Play size={12} />폴더 적용</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
                   </div>
                 )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
               </div>

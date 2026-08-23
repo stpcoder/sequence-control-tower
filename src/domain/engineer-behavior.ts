@@ -58,6 +58,43 @@ export function classifyEngineerSearchStage(query: string): EngineerEvaluationSt
   return STAGES.find((item) => item.pattern.test(query))?.stage ?? 'unknown'
 }
 
+/** Older renderer versions persisted each live-search draft. Collapse only a
+ * short, adjacent prefix chain so A -> AB -> ABCDEF becomes one deliberate
+ * search without merging independent engineering checks. */
+export function compactIncrementalSearchEvents(events: readonly EngineerSearchEvent[]): EngineerSearchEvent[] {
+  return [...events]
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+    .reduce<EngineerSearchEvent[]>((result, event) => {
+      const previous = result.at(-1)
+      const elapsed = previous ? Date.parse(event.occurredAt) - Date.parse(previous.occurredAt) : Number.POSITIVE_INFINITY
+      const previousQuery = previous?.query.trim() ?? ''
+      const nextQuery = event.query.trim()
+      const sameMatcher = previous?.mode === event.mode && previous.caseSensitive === event.caseSensitive
+      const incrementalDraft = sameMatcher
+        && elapsed >= 0 && elapsed <= 8_000
+        && nextQuery.length > previousQuery.length
+        && (event.caseSensitive ? nextQuery.startsWith(previousQuery) : nextQuery.toLowerCase().startsWith(previousQuery.toLowerCase()))
+      return incrementalDraft ? [...result.slice(0, -1), event] : [...result, event]
+    }, [])
+}
+
+export function compactIncrementalWorkflowChecks(checks: readonly EngineerWorkflowCheckView[]): EngineerWorkflowCheckView[] {
+  return [...checks]
+    .sort((left, right) => left.order - right.order)
+    .reduce<EngineerWorkflowCheckView[]>((result, check) => {
+      const previous = result.at(-1)
+      const previousQuery = previous?.query.trim() ?? ''
+      const nextQuery = check.query.trim()
+      const incrementalDraft = previous?.mode === check.mode
+        && previous.caseSensitive === check.caseSensitive
+        && nextQuery.length > previousQuery.length
+        && (check.caseSensitive ? nextQuery.startsWith(previousQuery) : nextQuery.toLowerCase().startsWith(previousQuery.toLowerCase()))
+      const next = incrementalDraft ? [...result.slice(0, -1), check] : [...result, check]
+      return next
+    }, [])
+    .map((check, index) => ({ ...check, order: index + 1 }))
+}
+
 export function engineerStageLabel(stage: EngineerEvaluationStage): string {
   const labels: Record<EngineerEvaluationStage, string> = {
     'power-on': '전원 인가', pbl: 'PBL', xbl: 'XBL', abl: 'ABL', uefi: 'UEFI', 'exit-boot': '부팅 전환',
@@ -94,9 +131,8 @@ export function buildEngineerWorkflowCandidate(
   dimensions?: Partial<ProjectEvaluationDimensions>,
 ): EngineerWorkflowCandidate | null {
   const seen = new Set<string>()
-  const checks = events
+  const checks = compactIncrementalSearchEvents(events)
     .slice(-20)
-    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
     .flatMap((event) => {
       const query = event.query.trim().slice(0, 500)
       const key = `${event.mode}:${event.caseSensitive ? '1' : '0'}:${normalized(query)}`

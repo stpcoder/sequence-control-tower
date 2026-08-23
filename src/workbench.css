@@ -508,15 +508,20 @@
 .recipe-title span { color: var(--wb-dim); font-size: var(--wb-type-secondary); line-height: 1.45; }
 .recipe-title button { width: 40px; height: 40px; border-radius: 7px; color: var(--wb-dim); }
 .recipe-title button:hover { color: var(--wb-text); background: var(--wb-hover); }
+.recipe-title .recipe-clear-observations { display: flex; width: auto; height: 32px; align-items: center; gap: 5px; margin-right: 2px; padding: 0 7px; color: var(--wb-dim); font-size: var(--wb-type-secondary); }
+.recipe-title .recipe-clear-observations:hover { color: var(--wb-orange); }
 .recipe-observations { display: grid; gap: 0; padding: 12px 0 4px; }
 .recipe-observations > span { margin-bottom: 4px; color: var(--wb-dim); font-size: var(--wb-type-secondary); }
 .recipe-observations > div { border-bottom: 1px solid var(--wb-line-soft); }
-.recipe-observations > div > button { display: grid; grid-template-columns: 20px minmax(0,1fr) auto 18px; width: 100%; min-height: 42px; align-items: center; gap: 7px; padding: 0 3px; border-radius: 0; color: var(--wb-muted); text-align: left; }
-.recipe-observations > div > button:hover { color: var(--wb-text); background: rgba(255,255,255,.018); }
-.recipe-observations > div > button.selected { color: var(--wb-text); }
-.recipe-observations > div > button i,
+.recipe-observation-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; }
+.recipe-observation-toggle { display: grid; grid-template-columns: 20px minmax(0,1fr) auto 18px; min-width: 0; min-height: 42px; align-items: center; gap: 7px; padding: 0 3px; border-radius: 0; color: var(--wb-muted); text-align: left; }
+.recipe-observation-toggle:hover { color: var(--wb-text); background: rgba(255,255,255,.018); }
+.recipe-observation-toggle.selected { color: var(--wb-text); }
+.recipe-observation-delete { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 6px; color: var(--wb-dim); }
+.recipe-observation-delete:hover { color: var(--wb-orange); background: var(--wb-hover); }
+.recipe-observation-toggle i,
 .recipe-order i { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid #555d69; border-radius: 5px; color: #fff; font-style: normal; }
-.recipe-observations > div > button.selected i,
+.recipe-observation-toggle.selected i,
 .recipe-order.active i { border-color: #6d9fe9; background: #3d6fae; }
 .recipe-observations code { overflow: hidden; font: var(--wb-type-code)/1.35 'SFMono-Regular', Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .recipe-observations small { color: var(--wb-dim); font-size: var(--wb-type-secondary); }
