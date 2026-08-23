@@ -27,9 +27,7 @@ import {
   LoaderCircle,
   Pencil,
   Play,
-  Plus,
   Regex,
-  RotateCcw,
   Search,
   SearchCode,
   SlidersHorizontal,
@@ -1645,7 +1643,7 @@ export function WorkbenchView({
     setRecipeSaved(false)
     setRecipeVisible(true)
     setRecipeManagerOpen(false)
-    onNotify?.(`${recipe.name} r${recipe.revision}을 불러왔습니다. 조건을 수정한 뒤 저장하고 현재 폴더에 적용하세요.`, 'info')
+    onNotify?.(`${recipe.name} 규칙을 불러왔습니다.`, 'info')
   }
 
   const archiveRecipe = async (recipeId: string) => {
@@ -3432,7 +3430,7 @@ export function WorkbenchView({
                     <p className="recipe-result"><ArrowRight size={13} /><span>결과 <b>{draft.decision}</b></span></p>
                   </div>
                   <div className="recipe-actions">
-                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Play size={14} />}{batchPreview.status === 'running' ? '현재 폴더 적용 중' : recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장·적용 완료' : '저장하고 현재 폴더 적용'}</button>
+                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Play size={14} />}{batchPreview.status === 'running' ? '규칙 저장 중' : recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장 완료' : '규칙 저장'}</button>
                   </div>
                 </section>
               ) : null}
@@ -3468,11 +3466,10 @@ export function WorkbenchView({
             <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
               <div className="recipe-manager-heading"><strong id="recipe-manager-title">저장 규칙</strong><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
               <div className="recipe-manager-list">
-                {activeFolderRules.length ? <div className="recipe-manager-current"><span>현재 평가에 {activeFolderRules.length}개 적용</span><button type="button" onClick={() => void applyRuleSet(activeFolderRules, `${workbenchFolderLabel(activeFile!)} 규칙`)} disabled={!activeFile || batchPreview.status === 'running'}><RotateCcw size={13} />다시 분류</button></div> : null}
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
                   <div className="recipe-manager-item" key={recipe.recipeId}>
                     <button className="recipe-manager-copy" type="button" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></button>
-                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />적용됨</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'}><Plus size={12} />추가</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
+                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />사용 중</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'}><Play size={12} />사용</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
                   </div>
                 )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
               </div>

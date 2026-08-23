@@ -562,9 +562,6 @@
 .recipe-manager-heading button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 6px; color: var(--wb-dim); }
 .recipe-manager-heading button:hover { color: var(--wb-text); background: var(--wb-hover); }
 .recipe-manager-list { min-height: 0; overflow: auto; padding: 0 14px 8px; }
-.recipe-manager-current { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--wb-line-soft); color: var(--wb-muted); font-size: var(--wb-type-secondary); }
-.recipe-manager-current button { display: flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted); font-size: var(--wb-type-secondary); }
-.recipe-manager-current button:hover:not(:disabled) { color: var(--wb-text); background: var(--wb-hover); }
 .recipe-manager-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; border-bottom: 1px solid var(--wb-line-soft); }
 .recipe-manager-item:last-child { border-bottom: 0; }
 .recipe-manager-copy { display: grid; min-width: 0; gap: 4px; padding: 9px 0; color: var(--wb-text); text-align: left; }
