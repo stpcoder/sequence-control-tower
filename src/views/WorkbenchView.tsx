@@ -27,7 +27,9 @@ import {
   LoaderCircle,
   Pencil,
   Play,
+  Plus,
   Regex,
+  RotateCcw,
   Search,
   SearchCode,
   SlidersHorizontal,
@@ -111,7 +113,7 @@ export interface WorkbenchFile {
   size?: number
   truncated?: boolean
   decision?: WorkbenchDecision
-  /** Deterministic batch result. It remains a candidate until an engineer confirms it. */
+  /** Deterministic result applied by the active folder rule set. */
   ruleResult?: WorkbenchDecision
   ruleNeedsReview?: boolean
 }
@@ -131,6 +133,8 @@ export interface WorkbenchViewProps {
   /** Main-process EvaluationStore rules. Desktop uses these as authority. */
   durableRules?: readonly RecipeRule[]
   durableRecipes?: readonly EvaluationRecipeRevision[]
+  /** Last complete rule set applied to each evaluation-folder key. */
+  appliedRulesByFolder?: Readonly<Record<string, readonly RecipeRule[]>>
   selectedFileId?: string
   selectedFolderRootId?: string
   onFilesChange?: (files: WorkbenchFile[]) => void
@@ -422,11 +426,12 @@ export function moveRecipeClause(
 export function mergeAppliedFolderRules(
   currentRules: readonly RecipeRule[],
   replacedRuleIds: ReadonlySet<string>,
-  nextRule: RecipeRule,
+  nextRules: RecipeRule | readonly RecipeRule[],
 ): RecipeRule[] {
+  const additions = Array.isArray(nextRules) ? nextRules : [nextRules]
   return [...new Map([
     ...currentRules.filter((rule) => !replacedRuleIds.has(rule.id)),
-    nextRule,
+    ...additions,
   ].map((rule) => [rule.id, rule])).values()]
 }
 
@@ -1011,6 +1016,20 @@ function exceptionLabel(code: string): string {
   return labels[code] ?? code
 }
 
+export function recipeRuleSummary(rule: RecipeRule): string {
+  const conditions = rule.clauses.map((clause) => {
+    const count = clause.occurrence?.kind === 'exact'
+      ? clause.occurrence.count === 0 ? '없음' : `${clause.occurrence.count}회`
+      : `${clause.occurrence?.count ?? 1}회 이상`
+    const target = clause.matcher.target === 'content' ? '' : clause.matcher.target === 'file_name' ? ' · 파일명' : ' · 경로'
+    return `${clause.matcher.pattern} ${count}${target}`
+  })
+  const visible = conditions.slice(0, 2).join(' + ')
+  const rest = conditions.length > 2 ? ` 외 ${conditions.length - 2}개` : ''
+  const result = DECISIONS.find((item) => item.value === rule.label)?.label ?? rule.label
+  return `${visible}${rest} → ${result}`
+}
+
 function renderHighlightedLine(
   line: string,
   lineNumber: number,
@@ -1096,6 +1115,7 @@ export function WorkbenchView({
   files: controlledFiles,
   durableRules,
   durableRecipes,
+  appliedRulesByFolder,
   selectedFileId,
   selectedFolderRootId,
   onFilesChange,
@@ -1154,6 +1174,7 @@ export function WorkbenchView({
   const [candidateDecisions, setCandidateDecisions] = useState<Record<string, ResultLabel>>({})
   const [savedDecisions, setSavedDecisions] = useState<Record<string, ResultLabel>>({})
   const [savedRecipes, setSavedRecipes] = useState<LogWorkbenchRecipe[]>([])
+  const [sessionAppliedRulesByFolder, setSessionAppliedRulesByFolder] = useState<Record<string, RecipeRule[]>>({})
   const [recipeVisible, setRecipeVisible] = useState(false)
   const [recipeSaved, setRecipeSaved] = useState(false)
   const [editingRecipeId, setEditingRecipeId] = useState<string | undefined>(undefined)
@@ -1335,11 +1356,17 @@ export function WorkbenchView({
     const folderSourceIds = new Set(files
       .filter((file) => workbenchRootGroupKey(file) === folderKey)
       .map((file) => file.id))
-    const rules = activeRecipeRevisions
+    const createdHere = activeRecipeRevisions
       .flatMap((recipe) => recipe.rules as RecipeRule[])
       .filter((rule) => rule.createdFromSourceIds.some((sourceId) => folderSourceIds.has(sourceId)))
+    const rules = [
+      ...(appliedRulesByFolder?.[folderKey] ?? []),
+      ...(sessionAppliedRulesByFolder[folderKey] ?? []),
+      ...createdHere,
+    ]
     return [...new Map(rules.map((rule) => [rule.id, rule])).values()]
-  }, [activeFile, activeRecipeRevisions, files])
+  }, [activeFile, activeRecipeRevisions, appliedRulesByFolder, files, sessionAppliedRulesByFolder])
+  const activeFolderRuleIds = useMemo(() => new Set(activeFolderRules.map((rule) => rule.id)), [activeFolderRules])
   const activeProjectSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
   const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
   const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
@@ -1385,6 +1412,7 @@ export function WorkbenchView({
   useEffect(() => {
     setWorkflowReviews({})
     setWorkflowPurposes({})
+    setSessionAppliedRulesByFolder({})
   }, [projectId])
   const searchTotal = memoryHits.length + backendTotal
   const searchPosition = hits.length
@@ -1622,7 +1650,8 @@ export function WorkbenchView({
 
   const archiveRecipe = async (recipeId: string) => {
     const recipe = activeRecipeRevisions.find((item) => item.recipeId === recipeId)
-    if (!recipe || !window.confirm(`“${recipe.name} r${recipe.revision}”을 저장 규칙에서 삭제할까요?`)) return
+    if (!recipe || !window.confirm(`“${recipe.name}” 규칙을 삭제할까요?`)) return
+    const deletedRuleIds = new Set(recipe.rules.map((rule) => rule.id))
     setArchivedRecipeIds((current) => new Set(current).add(recipeId))
     try {
       if (onArchiveRecipe) {
@@ -1638,6 +1667,13 @@ export function WorkbenchView({
         setRecipeVisible(false)
         setClauseOrderOpen(false)
         setRecipeSaved(false)
+      }
+      if (activeFile) {
+        const folderKey = workbenchRootGroupKey(activeFile)
+        setSessionAppliedRulesByFolder((current) => ({
+          ...current,
+          [folderKey]: (current[folderKey] ?? []).filter((rule) => !deletedRuleIds.has(rule.id)),
+        }))
       }
       onNotify?.(`${recipe.name} 규칙을 삭제했습니다.`, 'success')
     } catch (error) {
@@ -2798,6 +2834,8 @@ export function WorkbenchView({
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return null
       await onBatchResults?.(resolved)
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return null
+      const folderKey = workbenchRootGroupKey(activeFile)
+      setSessionAppliedRulesByFolder((current) => ({ ...current, [folderKey]: uniqueRules }))
       setBatchPreview({ status: 'done', ...resolved, ruleName })
       setRecipeVisible(false)
       return { ok: true, resolution: resolved }
@@ -2809,7 +2847,7 @@ export function WorkbenchView({
     }
   }
 
-  const applySavedRules = async (rules: readonly RecipeRule[], ruleName: string) => {
+  const applyRuleSet = async (rules: readonly RecipeRule[], ruleName: string) => {
     setRecipeManagerOpen(false)
     const applied = await applyRulesToCurrentFolder(rules, ruleName)
     if (!applied) return
@@ -2818,7 +2856,12 @@ export function WorkbenchView({
       return
     }
     const { matched, exceptions, conflicts } = applied.resolution
-    onNotify?.(`현재 평가 폴더에 규칙을 적용했습니다. 결과 후보 ${matched}개 · 예외 ${exceptions}개${conflicts ? ` · 판정 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
+    onNotify?.(`현재 평가 폴더를 분류했습니다. 분류 ${matched}개 · 예외 ${exceptions}개${conflicts ? ` · 규칙 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
+  }
+
+  const addSavedRecipe = async (recipe: EvaluationRecipeRevision) => {
+    const combined = mergeAppliedFolderRules(activeFolderRules, new Set(), recipe.rules as RecipeRule[])
+    await applyRuleSet(combined, `${workbenchFolderLabel(activeFile!)} 규칙`)
   }
 
   const saveRecipe = async () => {
@@ -2890,7 +2933,7 @@ export function WorkbenchView({
         const preserved = existingDecision && existingDecision !== decision
           ? ` 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
           : ''
-        onNotify?.(`규칙을 저장하고 현재 평가 폴더에 적용했습니다. 결과 후보 ${applied.resolution.matched}개 · 예외 ${applied.resolution.exceptions}개.${preserved}`, applied.resolution.exceptions ? 'info' : 'success')
+        onNotify?.(`규칙을 저장하고 현재 평가 폴더를 분류했습니다. 분류 ${applied.resolution.matched}개 · 예외 ${applied.resolution.exceptions}개.${preserved}`, applied.resolution.exceptions ? 'info' : 'success')
       } else if (applied && !applied.ok) {
         // The rule itself is already stored, but keep the action available so
         // the engineer can retry after a transient desktop/IPC failure.
@@ -3241,7 +3284,7 @@ export function WorkbenchView({
         <header>
           <strong>판정</strong>
           <button className="recipe-manager-trigger" type="button" onClick={() => setRecipeManagerOpen(true)} aria-haspopup="dialog" aria-expanded={recipeManagerOpen}>
-            <Braces size={14} /> 규칙 <span>{activeRecipeRevisions.length}</span>
+            <Braces size={14} /> 규칙
           </button>
         </header>
 
@@ -3251,7 +3294,7 @@ export function WorkbenchView({
               <section className="decision-picker" aria-label="결과 선택">
                 <div className="section-label"><label htmlFor="decision-select">결과</label></div>
                 <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
-                {!activeFile.decision && activeFile.ruleResult && activeFile.ruleResult !== 'UNKNOWN' ? <div className="rule-applied-result"><span>규칙 결과 후보</span><b>{activeFile.ruleResult}</b></div> : null}
+                {!activeFile.decision && activeFile.ruleResult && activeFile.ruleResult !== 'UNKNOWN' ? <div className="rule-applied-result"><span>규칙 적용 결과</span><b>{activeFile.ruleResult}</b></div> : null}
                 {activeFile.decision && candidateDecisions[activeFile.id] && candidateDecisions[activeFile.id] !== activeFile.decision ? <button className="confirm-decision-revision" onClick={() => void confirmDecisionRevision()}>기존 {activeFile.decision} → {candidateDecisions[activeFile.id]} 변경 확정</button> : null}
               </section>
 
@@ -3411,8 +3454,8 @@ export function WorkbenchView({
                 </section>
               ) : batchPreview.status === 'done' ? (
                 <section className="batch-summary">
-                  <div><Check size={15} /><span><strong>규칙 적용 완료</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
-                  <p>결과 후보 {batchPreview.matched}개 · 예외 {batchPreview.exceptions}개</p>
+                  <div><Check size={15} /><span><strong>분류 완료</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
+                  <p>분류 {batchPreview.matched}개 · 예외 {batchPreview.exceptions}개</p>
                   {batchPreview.exceptions > 0 && !showBatchExceptions ? <button onClick={openBatchExceptions}><AlertTriangle size={13} /><span>매핑되지 않은 로그 확인</span><ChevronRight size={13} /></button> : null}
                 </section>
               ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
@@ -3423,17 +3466,14 @@ export function WorkbenchView({
         {recipeManagerOpen ? (
           <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecipeManagerOpen(false) }}>
             <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
-              <div className="recipe-manager-heading"><div><strong id="recipe-manager-title">저장 규칙</strong></div><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
+              <div className="recipe-manager-heading"><strong id="recipe-manager-title">저장 규칙</strong><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="저장 규칙 닫기"><X size={16} /></button></div>
               <div className="recipe-manager-list">
-                {activeFolderRules.length ? <button className="recipe-manager-apply-all" type="button" onClick={() => void applySavedRules(activeFolderRules, `${workbenchFolderLabel(activeFile!)} 폴더 규칙`)} disabled={!activeFile || batchPreview.status === 'running'}><Play size={14} />현재 폴더 규칙 모두 적용 <span>{activeFolderRules.length}</span></button> : null}
+                {activeFolderRules.length ? <div className="recipe-manager-current"><span>현재 평가에 {activeFolderRules.length}개 적용</span><button type="button" onClick={() => void applyRuleSet(activeFolderRules, `${workbenchFolderLabel(activeFile!)} 규칙`)} disabled={!activeFile || batchPreview.status === 'running'}><RotateCcw size={13} />다시 분류</button></div> : null}
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => (
-                  <section className="recipe-manager-item" key={recipe.recipeId}>
-                    <div className="recipe-manager-item-top"><div><strong>{recipe.name}</strong><span>r{recipe.revision} · {recipe.rules.length}개 판정</span></div><div className="recipe-manager-item-actions"><button type="button" className="recipe-apply" onClick={() => void applySavedRules(recipe.rules as RecipeRule[], recipe.name)} disabled={!activeFile || batchPreview.status === 'running'}><Play size={12} />적용</button><button type="button" className="recipe-archive" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div></div>
-                    {recipe.rules.map((rule) => <div className="recipe-manager-rule" key={rule.id}>
-                      <div><b>{rule.label}</b><span>{rule.clauses.map((clause) => clause.matcher.pattern).join(' · ') || '조건 없음'}</span></div>
-                      <button type="button" onClick={() => loadRecipeIntoDraft(recipe, rule as RecipeRule)}><Pencil size={12} />수정</button>
-                    </div>)}
-                  </section>
+                  <div className="recipe-manager-item" key={recipe.recipeId}>
+                    <button className="recipe-manager-copy" type="button" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></button>
+                    <div className="recipe-manager-item-actions">{recipe.rules.every((rule) => activeFolderRuleIds.has(rule.id)) ? <span className="recipe-applied"><Check size={12} />적용됨</span> : <button type="button" className="recipe-add" onClick={() => void addSavedRecipe(recipe)} disabled={!activeFile || batchPreview.status === 'running'}><Plus size={12} />추가</button>}<button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
+                  </div>
                 )) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
               </div>
             </div>

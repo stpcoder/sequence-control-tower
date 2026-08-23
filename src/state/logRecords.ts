@@ -8,7 +8,7 @@ import type { ArtifactFailureAddressEvent, ArtifactFailureAddressFields, Project
 
 export type CandidateState = 'candidate' | 'approved' | 'rejected' | 'missing' | 'malformed'
 export type ReviewState = 'confirmed' | 'needs_review'
-export type ResultSource = 'engineer' | 'candidate' | 'unreviewed'
+export type ResultSource = 'engineer' | 'rule' | 'candidate' | 'unreviewed'
 export type PatternAxis = 'sample' | 'temperature' | 'mode' | 'grid'
 export type EvaluationStage = 'power' | 'pbl' | 'xbl' | 'abl' | 'uefi' | 'lk' | 'lk2' | 'boot' | 'training' | 'diag' | 'hdiag' | 'test' | 'os'
 export type EvaluationStageStatus = 'pass' | 'fail' | 'reached'
@@ -653,7 +653,9 @@ export function projectLogRecords(
     const failureAddress = failureAddressEventsBySource[file.id]
     const resultSource: ResultSource = file.decision
       ? 'engineer'
-      : file.ruleResult || inferred.result !== 'UNKNOWN'
+      : file.ruleResult && file.ruleResult !== 'UNKNOWN'
+        ? 'rule'
+        : inferred.result !== 'UNKNOWN'
         ? 'candidate'
         : 'unreviewed'
     const hasSelectedEvidence = Object.prototype.hasOwnProperty.call(selectedEvidence, file.id)
@@ -684,7 +686,7 @@ export function projectLogRecords(
       stageResults,
       ...(pivotFailureResult(result) && failureAddress?.events.length ? { failureAddressEvents: failureAddress.events } : {}),
       ...(pivotFailureResult(result) && failureAddress?.truncated ? { failureAddressTruncated: true } : {}),
-      review: file.decision && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
+      review: (file.decision || (file.ruleResult && file.ruleResult !== 'UNKNOWN')) && !file.ruleNeedsReview ? 'confirmed' : 'needs_review',
       evidenceCount: hasSelectedEvidence ? selectedEvidenceCount : inferred.evidenceCount,
       selectedEvidenceCount,
     }

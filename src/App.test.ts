@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { ArtifactRecord, ProjectSnapshot } from '../electron/shared/contracts'
+import type { ArtifactRecord, EvaluationProjectSnapshot, ProjectSnapshot } from '../electron/shared/contracts'
 import {
+  appliedBatchRulesByFolder,
   availableEvaluationLogs,
   createLatestProjectSaveQueue,
   projectArtifactFiles,
@@ -10,6 +11,7 @@ import {
 } from './App'
 import type { WorkbenchFile } from './views/WorkbenchView'
 import type { LogResultRecord } from './state/logRecords'
+import type { RecipeRule } from './domain/workbench'
 
 function project(id: string, roots: string[]): ProjectSnapshot {
   return {
@@ -47,6 +49,57 @@ function artifact(id: string, rootId: string): ArtifactRecord {
 }
 
 describe('project UI state updates', () => {
+  it('restores the cumulative rule set most recently applied to an evaluation folder', () => {
+    const savedRule: RecipeRule = {
+      id: 'rule-pass',
+      label: 'PASS',
+      status: 'candidate',
+      scope: { kind: 'analysis' },
+      clauses: [{
+        id: 'clause-pass',
+        presence: 'present',
+        occurrence: { kind: 'atLeast', count: 1 },
+        matcher: { kind: 'literal', pattern: '@PASS', caseSensitive: false, target: 'content' },
+        sourceObservationId: 'observation-pass',
+      }],
+      priority: 0,
+      confidence: 0.9,
+      repetition: 1,
+      createdFromSourceIds: ['file-a'],
+    }
+    const snapshot: EvaluationProjectSnapshot = {
+      schemaVersion: 1,
+      projectIdHash: 'project',
+      revision: 1,
+      decisions: [],
+      recipes: [
+        { id: 'saved-revision', recipeId: 'saved-pass', revision: 1, name: 'PASS', rules: [savedRule], createdAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'batch-revision', recipeId: 'active-batch-ruleset', revision: 1, name: 'Applied rules', rules: [savedRule], createdAt: '2026-01-01T00:00:00.000Z' },
+      ],
+      batches: [{
+        id: 'batch-a',
+        status: 'completed',
+        recipeRevisionIds: ['batch-revision'],
+        outcomes: [{
+          source: { sourceId: 'file-a', artifactId: 'artifact-a', sourceKeyHash: 'source-a' },
+          result: 'PASS',
+          outcomeSource: 'rule',
+          matchedRuleId: 'rule-pass',
+          evidenceRefs: [],
+        }],
+        matchedCount: 1,
+        exceptionCount: 0,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        completedAt: '2026-01-01T00:00:00.000Z',
+      }],
+      metadataApprovals: [],
+    }
+
+    expect(appliedBatchRulesByFolder([
+      { id: 'file-a', name: 'file-a.log', artifactId: 'artifact-a', rootId: 'root-a' },
+    ], snapshot)).toEqual({ 'root:root-a': [savedRule] })
+  })
+
   it('serializes immediate memory saves against the latest saved revision', async () => {
     let current = { revision: 1, value: '' }
     const seen: Array<{ revision: number; value: string }> = []

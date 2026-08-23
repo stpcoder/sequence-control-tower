@@ -33,6 +33,7 @@ import {
   folderSelectionTargetId,
   groupWorkspaceSearchHits,
   recipeEvidenceSpecs,
+  recipeRuleSummary,
   recentSearchQueries,
   resolveRecipeEvidenceCounts,
   dedupeWorkbenchFiles,
@@ -214,6 +215,8 @@ describe('Log Workbench UI data hardening', () => {
     const revised = rule('revised', 'SYSTEM_REBOOT', 'candidate')
     expect(mergeAppliedFolderRules([old, pass], new Set([old.id]), revised).map((item) => item.id)).toEqual(['pass', 'revised'])
     expect(mergeAppliedFolderRules([old, pass], new Set(), pass)).toEqual([old, pass])
+    expect(mergeAppliedFolderRules([old], new Set(), [pass, revised]).map((item) => item.id)).toEqual(['old', 'pass', 'revised'])
+    expect(recipeRuleSummary(pass)).toContain('→ Pass')
   })
 
   it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
@@ -423,7 +426,11 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).toContain('font-size: 13px')
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
     expect(workbenchSource).toContain("const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])")
-    expect(workbenchSource).toContain('현재 폴더 규칙 모두 적용')
+    expect(workbenchSource).toContain('현재 평가에 {activeFolderRules.length}개 적용')
+    expect(workbenchSource).toContain('다시 분류')
+    expect(workbenchSource).toContain('<Plus size={12} />추가')
+    expect(workbenchSource).toContain('<Trash2 size={12} />삭제')
+    expect(workbenchSource).not.toContain('>보관<')
     expect(workbenchSource).toContain('저장하고 현재 폴더 적용')
     expect(workbenchSource).not.toContain('현재 폴더에 미리 적용')
     expect(workbenchSource).not.toContain('<Sparkles size={14} />Agent')

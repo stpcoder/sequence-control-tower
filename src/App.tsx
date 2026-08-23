@@ -23,6 +23,7 @@ import {
   mergeWorkbenchFiles,
   WorkbenchView,
   filterUserRecipeRevisions,
+  workbenchRootGroupKey,
   type WorkbenchDecision,
   type WorkbenchFile,
   type WorkbenchRecipeDraft,
@@ -181,11 +182,16 @@ export function setupAppCommandListener(
 
 export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: EvaluationProjectSnapshot | null, projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = []): WorkbenchFile[] {
   if (!snapshot) return [...files]
+  const activeRuleIds = new Set(filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(snapshot.recipes))
+    .flatMap((recipe) => recipe.rules.map((rule) => rule.id)))
   return files.map((file) => {
     if (!file.artifactId) return file
     const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
     const decision = [...snapshot.decisions].reverse().find((item) => matchesPersistedSource(file, item.source, projectSources))
-    const outcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => matchesPersistedSource(file, item.source, projectSources))
+    const outcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => (
+      matchesPersistedSource(file, item.source, projectSources)
+      && (item.outcomeSource !== 'rule' || Boolean(item.matchedRuleId && activeRuleIds.has(item.matchedRuleId)))
+    ))
     return {
       ...base,
       ...(decision ? { decision: decision.result } : {}),
@@ -195,6 +201,35 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
       } : {}),
     }
   })
+}
+
+/** Restore the exact rule set most recently applied to each evaluation folder.
+ * Batch revisions retain the rule snapshot, so additions survive navigation
+ * and app restarts without turning every project rule into a global rule. */
+export function appliedBatchRulesByFolder(
+  files: readonly WorkbenchFile[],
+  snapshot: EvaluationProjectSnapshot | null,
+  projectSources: ReadonlyArray<ProjectSnapshot['artifacts'][number]> = [],
+): Record<string, RecipeRule[]> {
+  if (!snapshot) return {}
+  const recipeByRevision = new Map(snapshot.recipes.map((recipe) => [recipe.id, recipe]))
+  const activeRuleIds = new Set(filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(snapshot.recipes))
+    .flatMap((recipe) => recipe.rules.map((rule) => rule.id)))
+  const groups = new Map<string, WorkbenchFile[]>()
+  files.forEach((file) => {
+    const key = workbenchRootGroupKey(file)
+    groups.set(key, [...(groups.get(key) ?? []), file])
+  })
+  return Object.fromEntries([...groups].flatMap(([folderKey, folderFiles]) => {
+    const batch = [...snapshot.batches].reverse().find((candidate) => candidate.outcomes.some((outcome) => (
+      folderFiles.some((file) => matchesPersistedSource(file, outcome.source, projectSources))
+    )))
+    if (!batch) return []
+    const rules = batch.recipeRevisionIds.flatMap((revisionId) => (
+      recipeByRevision.get(revisionId)?.rules as RecipeRule[] | undefined
+    ) ?? []).filter((rule) => activeRuleIds.has(rule.id))
+    return [[folderKey, [...new Map(rules.map((rule) => [rule.id, rule])).values()]]]
+  }))
 }
 
 export function projectMetadataApprovals(
@@ -651,6 +686,11 @@ export default function App() {
     return filterUserRecipeRevisions(getActiveEvaluationRecipeRevisions(evaluationSnapshot.recipes))
   }, [evaluationSnapshot])
 
+  const appliedRulesByFolder = useMemo(
+    () => appliedBatchRulesByFolder(files, evaluationSnapshot, project?.artifacts ?? []),
+    [evaluationSnapshot, files, project?.artifacts],
+  )
+
   const selectedFile = useMemo(() => files.find((file) => file.id === selectedFileId), [files, selectedFileId])
 
   const updateFiles = useCallback((next: WorkbenchFile[]) => {
@@ -932,6 +972,7 @@ export default function App() {
       files={files}
       durableRules={durableRules}
       durableRecipes={durableRecipes}
+      appliedRulesByFolder={appliedRulesByFolder}
       selectedFileId={selectedFileId ?? undefined}
       selectedFolderRootId={selectedEvaluationRootId}
       onFilesChange={updateFiles}

@@ -98,6 +98,18 @@ describe('renderer log result projection', () => {
     expect(byId.get('training')).toMatchObject({ result: 'TRAINING_FAIL', resultSource: 'candidate', review: 'needs_review' })
   })
 
+  it('projects a saved-rule classification as an applied result instead of another candidate', () => {
+    const [row] = projectLogRecords([{
+      id: 'rule-result',
+      name: 'SMP-A17_85C_DIAG.log',
+      text: '@FAIL',
+      ruleResult: 'TEST_FAIL',
+      ruleNeedsReview: false,
+    }])
+
+    expect(row).toMatchObject({ result: 'TEST_FAIL', resultSource: 'rule', review: 'confirmed' })
+  })
+
   it('parses deterministic sample prefixes and common filename modes without weakening ambiguity handling', () => {
     const rows = projectLogRecords([
       { id: 'hyphen', name: 'SMP-A17_85C_NORMAL.log', text: '' },
