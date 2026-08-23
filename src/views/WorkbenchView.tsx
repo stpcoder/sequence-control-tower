@@ -9,7 +9,6 @@ import {
 import {
   AlertTriangle,
   ArrowDown,
-  ArrowRight,
   ArrowUp,
   Braces,
   CaseSensitive,
@@ -407,6 +406,43 @@ export type OccurrenceChoice =
   | { kind: 'zero' }
   | { kind: 'atLeast' }
   | { kind: 'exact'; count: number }
+
+interface SearchConditionRowProps {
+  query: string
+  matchLabel: string
+  selected: boolean
+  onToggle: () => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  moveUpDisabled?: boolean
+  moveDownDisabled?: boolean
+}
+
+/** Shared by first-decision review and deterministic rule setup so the same
+ * search condition never changes shape between the two steps. */
+function SearchConditionRow({
+  query,
+  matchLabel,
+  selected,
+  onToggle,
+  onMoveUp,
+  onMoveDown,
+  moveUpDisabled,
+  moveDownDisabled,
+}: SearchConditionRowProps) {
+  return <div className="recipe-observation-row">
+    <button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={onToggle} title={selected ? '판정 조건 해제' : '판정 조건 추가'}>
+      <i aria-hidden="true">{selected ? <Check size={11} /> : null}</i>
+      <code>{query}</code>
+      <small>{matchLabel}</small>
+      <span aria-hidden="true">{selected ? '−' : '＋'}</span>
+    </button>
+    {selected && onMoveUp && onMoveDown ? <span className="workflow-check-order">
+      <button type="button" onClick={onMoveUp} disabled={moveUpDisabled} aria-label={`${query} 위로 이동`}><ArrowUp size={13} /></button>
+      <button type="button" onClick={onMoveDown} disabled={moveDownDisabled} aria-label={`${query} 아래로 이동`}><ArrowDown size={13} /></button>
+    </span> : <span />}
+  </div>
+}
 
 export function occurrenceConditionForChoice(choice: OccurrenceChoice | undefined, observation: SearchObservation): RuleClause['occurrence'] {
   if (choice?.kind === 'zero') return { kind: 'exact', count: 0 }
@@ -1193,7 +1229,7 @@ export function WorkbenchView({
   const [occurrenceByObservationId, setOccurrenceByObservationId] = useState<Record<string, OccurrenceChoice>>({})
   const [exactCountDraftByObservationId, setExactCountDraftByObservationId] = useState<Record<string, string>>({})
   const [recipeClauseOrderByFile, setRecipeClauseOrderByFile] = useState<Record<string, string[]>>({})
-  const [clauseOrderOpen, setClauseOrderOpen] = useState(false)
+  const [recipeDetailsOpen, setRecipeDetailsOpen] = useState(false)
   const [requireMarkerOrder, setRequireMarkerOrder] = useState(false)
   const [backendHits, setBackendHits] = useState<SearchHit[]>([])
   const [backendCounts, setBackendCounts] = useState<Record<string, number>>({})
@@ -1275,7 +1311,6 @@ export function WorkbenchView({
   const patternReviewStatusRef = useRef<PatternReviewStatus>('idle')
   const recipeEvidenceGeneration = useRef(0)
   const replacementInputRef = useRef<HTMLInputElement>(null)
-  const clauseOrderModalRef = useRef<HTMLDivElement>(null)
   const recipeManagerRef = useRef<HTMLDivElement>(null)
   const lineWindowsRef = useRef<Record<string, LoadedLineWindow>>({})
 
@@ -1320,35 +1355,7 @@ export function WorkbenchView({
   }, [recipeManagerOpen])
 
   useEffect(() => {
-    if (!clauseOrderOpen) return
-    const modal = clauseOrderModalRef.current
-    const focusable = () => modal?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
-    focusable()?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setClauseOrderOpen(false)
-        return
-      }
-      if (event.key !== 'Tab' || !modal) return
-      const items = [...modal.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-      if (!items.length) return
-      const first = items[0]
-      const last = items[items.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [clauseOrderOpen])
-
-  useEffect(() => {
-    setClauseOrderOpen(false)
+    setRecipeDetailsOpen(false)
   }, [activeFileId])
 
   activeFileIdRef.current = activeFileId
@@ -1759,7 +1766,7 @@ export function WorkbenchView({
     setOccurrenceByObservationId((current) => omitObservationKeys(current, keys))
     setExactCountDraftByObservationId((current) => omitObservationKeys(current, keys))
     setUnresolvedRecipeClauseIds(new Set())
-    setClauseOrderOpen(false)
+    setRecipeDetailsOpen(false)
     setRecipeVisible(false)
     setRecipeSaved(false)
   }
@@ -1839,7 +1846,7 @@ export function WorkbenchView({
       if (editingRecipeId === recipeId) {
         setEditingRecipeId(undefined)
         setRecipeVisible(false)
-        setClauseOrderOpen(false)
+        setRecipeDetailsOpen(false)
         setRecipeSaved(false)
       }
       if (activeFile) {
@@ -1906,7 +1913,7 @@ export function WorkbenchView({
     authorizedHitKeyRef.current = ''
     const changingFile = fileId !== activeFileIdRef.current
     if (changingFile) {
-      setClauseOrderOpen(false)
+      setRecipeDetailsOpen(false)
       bestEffortCancelPatternReview()
       batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
       lineScrollAnchor.current = null
@@ -2990,6 +2997,7 @@ export function WorkbenchView({
       const ids = moveRecipeClause(current[activeFile.id] ?? [], selectedIds, observationId, delta)
       return { ...current, [activeFile.id]: ids }
     })
+    setRequireMarkerOrder(true)
     setRecipeSaved(false)
   }
 
@@ -3519,10 +3527,16 @@ export function WorkbenchView({
                       const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
                       const selected = selectedIndex >= 0
                       return <div className={selected ? 'selected' : ''} key={key}>
-                        <div className="recipe-observation-row">
-                          <button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i aria-hidden="true">{selected ? <Check size={11} /> : null}</i><code>{check.query}</code><small>{check.matchCount > 0 ? `${check.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button>
-                          {selected ? <span className="workflow-check-order"><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))} disabled={selectedIndex === 0} aria-label={`${check.query} 위로 이동`}><ArrowUp size={13} /></button><button type="button" onClick={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))} disabled={selectedIndex === workflowChecks.length - 1} aria-label={`${check.query} 아래로 이동`}><ArrowDown size={13} /></button></span> : <span />}
-                        </div>
+                        <SearchConditionRow
+                          query={check.query}
+                          matchLabel={check.matchCount > 0 ? `${check.matchCount}회` : '없음'}
+                          selected={selected}
+                          onToggle={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))}
+                          onMoveUp={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))}
+                          onMoveDown={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))}
+                          moveUpDisabled={selectedIndex === 0}
+                          moveDownDisabled={selectedIndex === workflowChecks.length - 1}
+                        />
                       </div>
                     })}
                   </div>
@@ -3622,10 +3636,22 @@ export function WorkbenchView({
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
                     {recipeObservations.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
+                      const selectedIndex = selectedRecipeObservations.findIndex((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]
                       return <div className={selected ? 'selected' : ''} key={observation.id}>
-                        <div className="recipe-observation-row"><button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => toggleRecipeObservation(observation.id)} title={selected ? '판정 조건 해제' : '판정 조건 추가'}><i>{selected ? <Check size={12} /> : null}</i><code>{observation.query}</code><small>{unresolvedRecipeClauseIds.has(observation.id) ? '파일 검사 필요' : observation.matched ? `${observation.matchCount}회` : '없음'}</small><span aria-hidden="true">{selected ? '−' : '＋'}</span></button><button type="button" className="recipe-observation-delete" onClick={() => deleteRecipeObservation(observation.id)} aria-label={`${observation.query} 검색 기록 삭제`} title="검색 기록 삭제"><Trash2 size={13} /></button></div>
-                        {selected ? <div className="recipe-condition-editor">
+                        <SearchConditionRow
+                          query={observation.query}
+                          matchLabel={unresolvedRecipeClauseIds.has(observation.id) ? '검사 중' : observation.matched ? `${observation.matchCount}회` : '없음'}
+                          selected={selected}
+                          onToggle={() => toggleRecipeObservation(observation.id)}
+                          {...(selected && canRequireMarkerOrder ? {
+                            onMoveUp: () => movePinnedClause(observation.id, -1),
+                            onMoveDown: () => movePinnedClause(observation.id, 1),
+                            moveUpDisabled: selectedIndex === 0,
+                            moveDownDisabled: selectedIndex === selectedRecipeObservations.length - 1,
+                          } : {})}
+                        />
+                        {selected && recipeDetailsOpen ? <div className="recipe-condition-editor">
                           <label><span>검색어</span><input aria-label={`${observation.query} 검색 조건`} value={observation.query} onChange={(event) => updateRecipeObservation(observation.id, { query: event.target.value })} /></label>
                           <label><span>발생</span><span className="recipe-inline-controls"><select aria-label={`${observation.query} 발생 조건`} value={occurrence?.kind === 'zero' ? 'zero' : occurrence?.kind === 'exact' ? 'exact' : 'atLeast'} onChange={(event) => {
                             const value = event.target.value
@@ -3634,31 +3660,16 @@ export function WorkbenchView({
                           <label><span>방식</span><select aria-label={`${observation.query} 검색 방식`} value={observation.matcherKind} onChange={(event) => updateRecipeObservation(observation.id, { matcherKind: event.target.value as SearchObservation['matcherKind'] })}><option value="literal">문자</option><option value="regex">정규식</option></select></label>
                           <label><span>대상</span><select aria-label={`${observation.query} 검색 대상`} value={observation.target} onChange={(event) => updateRecipeObservation(observation.id, { target: event.target.value as SearchObservation['target'] })}><option value="content">본문</option><option value="file_name">파일명</option><option value="path">경로</option></select></label>
                           <button type="button" className={`recipe-case-toggle ${observation.caseSensitive ? 'active' : ''}`} aria-pressed={observation.caseSensitive} onClick={() => updateRecipeObservation(observation.id, { caseSensitive: !observation.caseSensitive })}><i aria-hidden="true" />대소문자 구분</button>
+                          <button type="button" className="recipe-delete-observation" onClick={() => deleteRecipeObservation(observation.id)}><Trash2 size={13} />검색 기록 삭제</button>
                         </div> : null}
                       </div>
                     })}
                   </div>
-                  {canRequireMarkerOrder ? <button className={requireMarkerOrder ? 'recipe-order active' : 'recipe-order'} aria-pressed={requireMarkerOrder} onClick={() => { setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: normalizeRecipeClauseOrder(current[activeFile.id] ?? [], selectedRecipeObservations.map((item) => item.id)) })); setClauseOrderOpen(true) }}><i>{requireMarkerOrder ? <Check size={12} /> : null}</i><span>판정 순서</span></button> : null}
-                  <div className="recipe-logic">
-                    {draft.positiveTerms.length ? <p><Check size={12} /><span>{draft.positiveTerms.join(' · ')}</span></p> : null}
-                    {draft.missingTerms.length ? <p><X size={12} /><span>{draft.missingTerms.join(' · ')} 없음</span></p> : null}
-                    <p className="recipe-result"><ArrowRight size={13} /><span>결과 <b>{draft.decision}</b></span></p>
-                  </div>
+                  <button type="button" className="recipe-details-toggle" aria-expanded={recipeDetailsOpen} onClick={() => setRecipeDetailsOpen((open) => !open)}><SlidersHorizontal size={13} /><span>세부 설정</span><ChevronDown className={recipeDetailsOpen ? 'open' : ''} size={14} /></button>
                   <div className="recipe-actions">
                     <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Play size={14} />}{batchPreview.status === 'running' ? '규칙 저장 중' : recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '저장 완료' : '규칙 저장'}</button>
                   </div>
                 </section>
-              ) : null}
-
-              {clauseOrderOpen && activeFile && canRequireMarkerOrder ? (
-                <div ref={clauseOrderModalRef} className="recipe-order-modal" role="dialog" aria-modal="true" aria-labelledby="recipe-order-title">
-                  <div className="recipe-title"><strong id="recipe-order-title">판정 조건 순서</strong><button type="button" onClick={() => setClauseOrderOpen(false)} aria-label="순서 설정 닫기"><X size={15} /></button></div>
-                  <p>로그에서 먼저 나타나야 하는 조건부터 정렬하세요.</p>
-                  <ol>
-                    {selectedRecipeObservations.map((observation, index) => <li key={observation.id}><b>{index + 1}</b><code>{observation.query}</code><span><button type="button" onClick={() => movePinnedClause(observation.id, -1)} disabled={index === 0} aria-label={`${observation.query} 먼저`}><ArrowUp size={13} />먼저</button><button type="button" onClick={() => movePinnedClause(observation.id, 1)} disabled={index === selectedRecipeObservations.length - 1} aria-label={`${observation.query} 나중`}><ArrowDown size={13} />나중</button></span></li>)}
-                  </ol>
-                  <button type="button" className="save" onClick={() => { setRequireMarkerOrder(true); setClauseOrderOpen(false); setRecipeSaved(false) }}><Check size={14} />이 순서 확정</button>
-                </div>
               ) : null}
 
               {batchPreview.status === 'running' ? (
