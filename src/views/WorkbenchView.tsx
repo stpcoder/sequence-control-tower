@@ -494,6 +494,22 @@ export function moveRecipeClause(
   return next
 }
 
+/** Render selected rows in the exact order the engineer arranged them, then
+ * keep unselected search history underneath in its original order. */
+export function orderSelectionRows<T>(
+  allRows: readonly T[],
+  selectedRows: readonly T[],
+  keyOf: (row: T) => string,
+): T[] {
+  const allByKey = new Map(allRows.map((row) => [keyOf(row), row]))
+  const selectedKeys = new Set(selectedRows.map(keyOf))
+  const orderedSelected = selectedRows.flatMap((row) => {
+    const original = allByKey.get(keyOf(row))
+    return original ? [original] : []
+  })
+  return [...orderedSelected, ...allRows.filter((row) => !selectedKeys.has(keyOf(row)))]
+}
+
 export function mergeAppliedFolderRules(
   currentRules: readonly RecipeRule[],
   replacedRuleIds: ReadonlySet<string>,
@@ -1416,6 +1432,11 @@ export function WorkbenchView({
   const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
   const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
   const workflowChecks = workflowReview ? workflowCheckDrafts[workflowReview.id] ?? workflowReview.checks : []
+  const orderedWorkflowReviewChecks = workflowReview ? orderSelectionRows(
+    workflowReview.checks,
+    workflowChecks,
+    engineerWorkflowCheckKey,
+  ) : []
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeSourceLines = useMemo(() => {
     if (!activeFile) return []
@@ -1660,6 +1681,12 @@ export function WorkbenchView({
       return observation ? [observation] : []
     }).concat(pinned.filter((observation) => !orderedIds.includes(observation.id)))
   }, [activeFile?.id, recipeClauseOrderByFile, recipeObservations, selectedObservationIdsByFile])
+
+  const orderedRecipeObservationRows = useMemo(() => orderSelectionRows(
+    recipeObservations,
+    selectedRecipeObservations,
+    (observation) => observation.id,
+  ), [recipeObservations, selectedRecipeObservations])
 
   const recipeEvidenceSignature = useMemo(() => selectedRecipeObservations.map((observation) => [
     observation.id, observation.query, observation.matcherKind, observation.target, observation.caseSensitive,
@@ -3522,7 +3549,7 @@ export function WorkbenchView({
                     <div><strong>판정 규칙</strong><span>검색 조건 선택</span></div>
                   </div>
                   <div className="recipe-observations workflow-checks" aria-label="판정에 사용할 검색 조건">
-                    {workflowReview.checks.map((check) => {
+                    {orderedWorkflowReviewChecks.map((check) => {
                       const key = engineerWorkflowCheckKey(check)
                       const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
                       const selected = selectedIndex >= 0
@@ -3634,7 +3661,7 @@ export function WorkbenchView({
                 <section className="recipe-suggestion">
                   <div className="recipe-title"><div><strong>판정 규칙</strong><span>검색 조건 선택</span></div><button type="button" className="recipe-clear-observations" onClick={clearRecipeObservations}><Trash2 size={13} />전체 삭제</button><button onClick={() => setRecipeVisible(false)} aria-label="규칙 만들기 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
-                    {recipeObservations.map((observation) => {
+                    {orderedRecipeObservationRows.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
                       const selectedIndex = selectedRecipeObservations.findIndex((item) => item.id === observation.id)
                       const occurrence = occurrenceByObservationId[observation.id]

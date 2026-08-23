@@ -51,6 +51,7 @@ import {
   resolveCurrentReplacementText,
   resolveSearchScopeFiles,
   occurrenceConditionForChoice,
+  orderSelectionRows,
   engineerWorkflowCheckKey,
   moveEngineerWorkflowCheck,
   moveRecipeClause,
@@ -219,6 +220,10 @@ describe('Log Workbench UI data hardening', () => {
     expect(normalizeRecipeClauseOrder(['stale', 'b', 'b'], ['a', 'b', 'c'])).toEqual(['b', 'a', 'c'])
     expect(moveRecipeClause(['stale', 'b', 'b'], ['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
     expect(moveRecipeClause(['b', 'a', 'c'], ['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'b', 'c'])
+    const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'unused' }]
+    const arranged = moveRecipeClause(['a', 'b', 'c'], ['a', 'b', 'c'], 'c', -1)
+    expect(orderSelectionRows(rows, arranged.map((id) => ({ id })), (row) => row.id).map((row) => row.id))
+      .toEqual(['a', 'c', 'b', 'unused'])
   })
 
   it('reapplies previous folder rules when a new exception rule is saved', () => {
