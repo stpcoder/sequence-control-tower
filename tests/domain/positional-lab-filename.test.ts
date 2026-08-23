@@ -79,6 +79,22 @@ describe('underscore-delimited lab filename', () => {
     expect(row.dimensions?.material).toBe('DHCST-90')
   })
 
+  it.each(['CHAE-1', 'DHBCT-4', 'LOT7-A03'])(
+    'accepts %s without assuming a fixed material naming scheme',
+    (material) => {
+      const variedName = name.replace('_DHCST-89_C_', `_${material}_C_`)
+      expect(parsePositionalLabFilename(variedName)).toMatchObject({ material })
+      expect(extractLpddrFilenameDimensions(variedName)).toMatchObject({
+        material,
+        sample: material,
+      })
+      expect(projectLogRecords([{ id: material, name: variedName, text: '' }])[0]).toMatchObject({
+        sample: { value: material, state: 'candidate' },
+        dimensions: { material, sample: material },
+      })
+    },
+  )
+
   it('normalizes explicit MATERIAL and SAMPLE tokens to the same value', () => {
     expect(extractLpddrFilenameDimensions('run_MATERIAL_DHCST-91.log')).toMatchObject({
       material: 'DHCST-91',

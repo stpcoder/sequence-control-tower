@@ -2,7 +2,7 @@
 
 - 앱 내장 데모 로그와 장문 QA 로그 58개의 파일명을 실제 평가용 underscore 규격으로 통일했습니다.
 - 파일명에서 실장기 채널, SoC, 평가번호, 온도, 전압, ECC, 사용자 조건, 주파수, 자재, 평가 Step과 결과를 분리합니다.
-- `DHCST-xx`를 자재와 Sample의 동일 식별자로 사용하고 `Pass`, `Fail`, `MbeFail`, `TrainingFail`, `HdiagReboot`, `SystemHalt` 결과를 판정합니다.
+- `COM` 다음 토큰을 자재/Sample 식별자로 읽으므로 `DHCST-89`, `CHAE-1`, `DHBCT-4`처럼 서로 다른 사내 명명 방식을 그대로 사용할 수 있습니다.
 - 160자를 넘는 긴 평가 파일명도 끝의 자재·Step·결과가 잘리지 않도록 보존합니다.
 - `Ch8` 실장기 채널과 `DRAMCH0` 불량 주소 Channel을 별도 항목으로 처리합니다.
 
