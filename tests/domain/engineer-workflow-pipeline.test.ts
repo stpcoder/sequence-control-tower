@@ -33,7 +33,7 @@ const corpusRoot = resolve("tests/fixtures/engineer-workflow");
 const temporaryRoots: string[] = [];
 
 const axes = {
-  samples: ["SAMP-A", "SAMP-B", "SAMP-C", "SAMP-D"],
+  samples: ["DHCST-89", "DHCST-90", "DHCST-91", "DHCST-92"],
   temperatures: ["-40C", "25C", "85C"],
   modes: ["DIAG", "STRESS"],
   runs: [1, 2],
@@ -248,13 +248,13 @@ function countBy<T extends string>(values: readonly T[]): Record<string, number>
 }
 
 function parseFilename(fileName: string): Pick<FixtureRow, "sample" | "temperature" | "mode" | "run"> {
-  const match = /^(SAMP-[A-D])__TEMP=(-40C|25C|85C)__MODE=(DIAG|STRESS)__RUN=(1|2)\.log$/.exec(fileName);
+  const match = /^26-08-\d{2}-\d{2}-\d{2}-\d{2}_UTF02A-2_Ch\d+_SM8975_\d+_(-?\d+)_\d+(?:\.\d+)?_EVA_EN_SKEW-(?:SS|SF|FS|FF)_TM-(DIAG|STRESS)_RUN(1|2)_9600MHZ_COM\d+_(DHCST-(?:89|90|91|92))_C_[A-Za-z]+\.log$/.exec(fileName);
   if (!match) throw new Error(`Unexpected engineer-workflow filename: ${fileName}`);
   return {
-    sample: match[1],
-    temperature: match[2],
-    mode: match[3],
-    run: Number(match[4]),
+    sample: match[4],
+    temperature: `${match[1]}C`,
+    mode: match[2],
+    run: Number(match[3]),
   };
 }
 

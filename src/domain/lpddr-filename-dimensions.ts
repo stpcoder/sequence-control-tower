@@ -38,6 +38,8 @@ const positionalOutcome = (value: string | undefined): ResultLabel | undefined =
   if (token === 'MBEFAIL' || token === 'HDIAGFAIL' || token === 'HIDAGFAIL' || token === 'DIAGFAIL') return 'DIAG_FAIL'
   if (token === 'TRAININGFAIL' || token === 'TRFAIL') return 'TRAINING_FAIL'
   if (token === 'SYSTEMHALT' || token === 'HALT') return 'SYSTEM_HALT'
+  if (token === 'INCOMPLETE' || token === 'TRUNCATED') return 'INCOMPLETE'
+  if (token === 'UNKNOWN' || token === 'UNCLASSIFIED') return 'UNKNOWN'
   if (token === 'TESTFAIL' || token === 'FAIL') return 'TEST_FAIL'
   return undefined
 }
@@ -126,6 +128,7 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
   const parsedVdd = decimal(vdd)
   const parsedFrequency = decimal(frequency)
   const parsedTestMode = capture(name, /(?:^|[_\-.])(?:TM|MODE)(?:=|_|-)?([A-Z0-9-]+)/i)?.toUpperCase()
+  const explicitDramChannel = capture(name, /(?:^|[_\-.])DRAM(?:CH|CHANNEL)(?:=|_|-)?(\d+)/i)
   return {
     ...explicitConditions,
     skew: (prefixedSkew ?? standardSkew)?.toUpperCase(),
@@ -136,7 +139,7 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
     bl: capture(name, /(?:^|[_\-.])BL(?:=|_|-)?(\d+)/i),
     dq: capture(name, /(?:^|[_\-.])DQ(?:=|_|-)?(\d+)/i),
     // Positional Ch8 is the tester/equipment channel, not a DRAM fail address.
-    channel: positional ? undefined : capture(name, /(?:^|[_\-.])(?:CH|CHANNEL)(?:=|_|-)?(\d+)/i),
+    channel: explicitDramChannel ?? (positional ? undefined : capture(name, /(?:^|[_\-.])(?:CH|CHANNEL)(?:=|_|-)?(\d+)/i)),
     subChannel: capture(name, /(?:^|[_\-.])(?:SUBCH|SUBCHANNEL|SCH)(?:=|_|-)?(\d+)/i),
     chipSelect: capture(name, /(?:^|[_\-.])(?:CS|CHIPSELECT)(?:=|_|-)?(\d+)/i),
     rank: capture(name, /(?:^|[_\-.])(?:RANK|RK)(?:=|_|-)?(\d+)/i),

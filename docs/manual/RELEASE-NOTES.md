@@ -1,4 +1,12 @@
-# Sequence Control Tower 0.12.4
+# Sequence Control Tower 0.12.5
+
+- 앱 내장 데모 로그와 장문 QA 로그 58개의 파일명을 실제 평가용 underscore 규격으로 통일했습니다.
+- 파일명에서 실장기 채널, SoC, 평가번호, 온도, 전압, ECC, 사용자 조건, 주파수, 자재, 평가 Step과 결과를 분리합니다.
+- `DHCST-xx`를 자재와 Sample의 동일 식별자로 사용하고 `Pass`, `Fail`, `MbeFail`, `TrainingFail`, `HdiagReboot`, `SystemHalt` 결과를 판정합니다.
+- 160자를 넘는 긴 평가 파일명도 끝의 자재·Step·결과가 잘리지 않도록 보존합니다.
+- `Ch8` 실장기 채널과 `DRAMCH0` 불량 주소 Channel을 별도 항목으로 처리합니다.
+
+## 0.12.4
 
 - 규칙을 저장하면 현재 평가의 기존 규칙에 누적하고 결과를 즉시 적용합니다.
 - 새 규칙은 `규칙 저장`만 누르면 현재 평가에 자동 적용되며 기존 규칙은 유지됩니다.

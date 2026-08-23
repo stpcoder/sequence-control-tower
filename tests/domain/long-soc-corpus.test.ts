@@ -23,7 +23,7 @@ describe('long tangled SoC corpus', () => {
       expect(text).toContain('SYNTHETIC_PUBLIC_FLOW_CORPUS')
       expect(detectSocFilenameContext(scenario.file).vendor).toBe(scenario.vendor)
       expect(extractLpddrFilenameDimensions(scenario.file)).toMatchObject({
-        skew: expect.any(String), channel: expect.any(String), subChannel: expect.any(String), rank: expect.any(String),
+        skew: expect.any(String), sample: expect.stringMatching(/^DHCST-/), equipmentChannel: expect.any(String), channel: expect.any(String), subChannel: expect.any(String), rank: expect.any(String),
         bankGroup: expect.any(String), bank: expect.any(String), row: expect.any(String), column: expect.any(String), dq: expect.any(String), bl: expect.any(String),
       })
     }
@@ -41,7 +41,7 @@ describe('long tangled SoC corpus', () => {
     const expected = new Map(manifest.scenarios.map((scenario) => [scenario.file, scenario.expected]))
     for (const source of inspected.sources) {
       const counts = Object.fromEntries(source.evidence.map((item) => [item.specId, item.occurrenceCount ?? 0])) as Record<string, number>
-      expect(classifyLpddrStatus(counts).status).toBe(expected.get(source.sourceId))
+      expect(classifyLpddrStatus(counts).status, source.sourceId).toBe(expected.get(source.sourceId))
     }
     const deep = await artifacts.search({ artifactIds: imported.artifacts.map((item) => item.id), query: 'EDAC MC', maxMatches: 20, contextLines: 0 })
     expect(deep.matches).toHaveLength(4)

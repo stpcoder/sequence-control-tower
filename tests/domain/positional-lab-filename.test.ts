@@ -93,4 +93,9 @@ describe('underscore-delimited lab filename', () => {
   it('does not positional-parse a partially similar arbitrary filename', () => {
     expect(parsePositionalLabFilename('note_Ch8_SM8975_1_25.log')).toBeUndefined()
   })
+
+  it('keeps tester Ch separate from an explicit DRAMCH condition', () => {
+    const dimensions = extractLpddrFilenameDimensions('26-08-07-14-13-17_UTF02A-2_Ch8_SM8975_1_25_1.00_EVA_EN_DEFAULT_DRAMCH0_SCH1_5333MHZ_COM74_DHCST-89_C_Pass.log')
+    expect(dimensions).toMatchObject({ equipmentChannel: '8', channel: '0', subChannel: '1' })
+  })
 })

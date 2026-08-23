@@ -17,7 +17,7 @@ manifest는 [`tests/fixtures/engineer-workflow/manifest.json`](../../tests/fixtu
 
 | 축 | 값 |
 | --- | --- |
-| sample | `SAMP-A`, `SAMP-B`, `SAMP-C`, `SAMP-D` |
+| sample(자재) | `DHCST-89`, `DHCST-90`, `DHCST-91`, `DHCST-92` |
 | temperature | `-40C`, `25C`, `85C` |
 | mode | `DIAG`, `STRESS` |
 | run | `1`, `2` |
@@ -25,8 +25,10 @@ manifest는 [`tests/fixtures/engineer-workflow/manifest.json`](../../tests/fixtu
 filename 형식은 다음과 같다.
 
 ```text
-SAMP-{A|B|C|D}__TEMP={-40C|25C|85C}__MODE={DIAG|STRESS}__RUN={1|2}.log
+26-08-20-09-00-01_UTF02A-2_Ch8_SM8975_1_-40_0.75_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_SystemHalt.log
 ```
+
+파일명은 `날짜_UTF02A-2_실장기채널_SoC_평가번호_온도_전압_EVA_ECC_사용자조건_주파수_COM_자재_평가Step_결과.log` 순서다. `sample`과 `자재`는 같은 값으로 취급한다.
 
 각 `sample|temperature|mode` 조합은 `comparisonKey`가 되며 Run1과 Run2가 한 쌍을 이룬다. 전체 수량은 `4 × 3 × 2 × 2 = 48`개다.
 
@@ -36,30 +38,30 @@ SAMP-{A|B|C|D}__TEMP={-40C|25C|85C}__MODE={DIAG|STRESS}__RUN={1|2}.log
 
 | sample | temperature | mode | Run1 결과 | Run2 결과 | pairTransition |
 | --- | --- | --- | --- | --- | --- |
-| `SAMP-A` | `-40C` | `DIAG` | `SYSTEM_HALT` | `PASS` | `RECOVERY` |
-| `SAMP-A` | `-40C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
-| `SAMP-A` | `25C` | `DIAG` | `DIAG_FAIL` | `PASS` | `RECOVERY` |
-| `SAMP-A` | `25C` | `STRESS` | `PASS` | `TEST_FAIL` | `REGRESSION` |
-| `SAMP-A` | `85C` | `DIAG` | `TRAINING_FAIL` | `TRAINING_FAIL` | `STABLE_FAILURE` |
-| `SAMP-A` | `85C` | `STRESS` | `SYSTEM_REBOOT` | `PASS` | `RECOVERY` |
-| `SAMP-B` | `-40C` | `DIAG` | `TEST_FAIL` | `PASS` | `RECOVERY` |
-| `SAMP-B` | `-40C` | `STRESS` | `PASS` | `SYSTEM_REBOOT` | `REGRESSION` |
-| `SAMP-B` | `25C` | `DIAG` | `INCOMPLETE` | `PASS` | `RECOVERY` |
-| `SAMP-B` | `25C` | `STRESS` | `SYSTEM_HALT` | `SYSTEM_HALT` | `STABLE_FAILURE` |
-| `SAMP-B` | `85C` | `DIAG` | `UNKNOWN` | `PASS` | `RECOVERY` |
-| `SAMP-B` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
-| `SAMP-C` | `-40C` | `DIAG` | `PASS` | `PASS` | `STABLE_PASS` |
-| `SAMP-C` | `-40C` | `STRESS` | `DIAG_FAIL` | `DIAG_FAIL` | `STABLE_FAILURE` |
-| `SAMP-C` | `25C` | `DIAG` | `TRAINING_FAIL` | `PASS` | `RECOVERY` |
-| `SAMP-C` | `25C` | `STRESS` | `PASS` | `INCOMPLETE` | `REGRESSION` |
-| `SAMP-C` | `85C` | `DIAG` | `TEST_FAIL` | `SYSTEM_HALT` | `STABLE_FAILURE` |
-| `SAMP-C` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
-| `SAMP-D` | `-40C` | `DIAG` | `SYSTEM_REBOOT` | `PASS` | `RECOVERY` |
-| `SAMP-D` | `-40C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
-| `SAMP-D` | `25C` | `DIAG` | `SYSTEM_HALT` | `SYSTEM_REBOOT` | `STABLE_FAILURE` |
-| `SAMP-D` | `25C` | `STRESS` | `UNKNOWN` | `UNKNOWN` | `STABLE_FAILURE` |
-| `SAMP-D` | `85C` | `DIAG` | `INCOMPLETE` | `INCOMPLETE` | `STABLE_FAILURE` |
-| `SAMP-D` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-89` | `-40C` | `DIAG` | `SYSTEM_HALT` | `PASS` | `RECOVERY` |
+| `DHCST-89` | `-40C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-89` | `25C` | `DIAG` | `DIAG_FAIL` | `PASS` | `RECOVERY` |
+| `DHCST-89` | `25C` | `STRESS` | `PASS` | `TEST_FAIL` | `REGRESSION` |
+| `DHCST-89` | `85C` | `DIAG` | `TRAINING_FAIL` | `TRAINING_FAIL` | `STABLE_FAILURE` |
+| `DHCST-89` | `85C` | `STRESS` | `SYSTEM_REBOOT` | `PASS` | `RECOVERY` |
+| `DHCST-90` | `-40C` | `DIAG` | `TEST_FAIL` | `PASS` | `RECOVERY` |
+| `DHCST-90` | `-40C` | `STRESS` | `PASS` | `SYSTEM_REBOOT` | `REGRESSION` |
+| `DHCST-90` | `25C` | `DIAG` | `INCOMPLETE` | `PASS` | `RECOVERY` |
+| `DHCST-90` | `25C` | `STRESS` | `SYSTEM_HALT` | `SYSTEM_HALT` | `STABLE_FAILURE` |
+| `DHCST-90` | `85C` | `DIAG` | `UNKNOWN` | `PASS` | `RECOVERY` |
+| `DHCST-90` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-91` | `-40C` | `DIAG` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-91` | `-40C` | `STRESS` | `DIAG_FAIL` | `DIAG_FAIL` | `STABLE_FAILURE` |
+| `DHCST-91` | `25C` | `DIAG` | `TRAINING_FAIL` | `PASS` | `RECOVERY` |
+| `DHCST-91` | `25C` | `STRESS` | `PASS` | `INCOMPLETE` | `REGRESSION` |
+| `DHCST-91` | `85C` | `DIAG` | `TEST_FAIL` | `SYSTEM_HALT` | `STABLE_FAILURE` |
+| `DHCST-91` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-92` | `-40C` | `DIAG` | `SYSTEM_REBOOT` | `PASS` | `RECOVERY` |
+| `DHCST-92` | `-40C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
+| `DHCST-92` | `25C` | `DIAG` | `SYSTEM_HALT` | `SYSTEM_REBOOT` | `STABLE_FAILURE` |
+| `DHCST-92` | `25C` | `STRESS` | `UNKNOWN` | `UNKNOWN` | `STABLE_FAILURE` |
+| `DHCST-92` | `85C` | `DIAG` | `INCOMPLETE` | `INCOMPLETE` | `STABLE_FAILURE` |
+| `DHCST-92` | `85C` | `STRESS` | `PASS` | `PASS` | `STABLE_PASS` |
 
 manifest의 결과 수량은 `PASS 23`, `DIAG_FAIL 3`, `TEST_FAIL 3`, `TRAINING_FAIL 3`, `SYSTEM_HALT 5`, `SYSTEM_REBOOT 4`, `INCOMPLETE 4`, `UNKNOWN 3`이다. 전이 수량은 `RECOVERY 16`, `STABLE_PASS 12`, `REGRESSION 6`, `STABLE_FAILURE 14`이다.
 

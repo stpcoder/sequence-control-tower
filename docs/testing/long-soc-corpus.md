@@ -10,6 +10,12 @@
 - Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column, DQ, BL
 - UART·kernel·thermal·storage·UI trace가 섞인 긴 배경 로그
 
+모든 파일명은 실제 평가용 순서인 `날짜_UTF02A-2_실장기채널_SoC_평가번호_온도_전압_EVA_ECC_사용자조건_주파수_COM_자재_평가Step_결과.log`를 사용합니다. 예시는 다음과 같습니다.
+
+```text
+26-08-24-09-10-01_UTF02A-2_Ch8_SM8975_2_85_1.275_EVA_EN_SKEW-SF_LOT-LA_DIE03_DEFAULT_9600MHZ_TM-HDIAG_PAT-WR_DQ9_BL16_DRAMCH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_COM74_DHCST-102_C_Fail.log
+```
+
 ## 공개 구조 참고
 
 - Android Bootloader 개요: https://source.android.com/docs/core/architecture/bootloader

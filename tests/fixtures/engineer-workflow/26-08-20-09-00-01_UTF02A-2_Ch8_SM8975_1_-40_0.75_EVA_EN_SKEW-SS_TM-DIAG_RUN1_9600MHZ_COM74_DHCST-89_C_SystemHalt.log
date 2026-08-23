@@ -1,0 +1,25 @@
+# SYNTHETIC_METADATA
+SAMPLE=DHCST-89;
+TEMP=-40C;
+MODE=DIAG;
+RUN=1;
+COMPARISON_KEY=DHCST-89|-40C|DIAG;
+EXPECTED_RESULT=SYSTEM_HALT;
+PAIR_TRANSITION=RECOVERY;
+TARGET_TEMPERATURE=-40C;
+MEASURED_TEMPERATURE=-40.0C;
+VDD=0.75V;
+REQUESTED_TEST_MODE=DIAG;
+OBSERVED_TEST_MODE=DIAG;
+INFO pmic_sequence=nominal;
+DEBUG refclk_lock=1;
+POWER_ON state=asserted;
+UEFI entry firmware=SYN-UEFI-01;
+ExitBootServices status=success;
+OS boot start loader=SYN-OS-01;
+stressapp start profile=synthetic-memory;
+stressapp heartbeat=stable;
+stressapp completed result=PASS;
+HIDAG START mode=DIAG;
+FAILURE_POINT=HIDAG_EXECUTION;
+INFO console_state=halted;

@@ -158,6 +158,21 @@ describe('ArtifactService log workbench', () => {
     expect(result.artifacts).toHaveLength(1)
   })
 
+  it('preserves long lab filenames through the trailing material, step, and outcome', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source')
+    await mkdir(source)
+    const fileName = '26-08-24-09-00-01_UTF02A-2_Ch8_SM8975_1_25_1.295_EVA_EN_SKEW-SS_LOT-LA_DIE03_DEFAULT_9600MHZ_TM-HDIAG_PAT-PRBS31_DQ9_BL16_DRAMCH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_COM74_DHCST-101_C_Pass.log'
+    await writeFile(join(source, fileName), '@PASS\n', 'utf8')
+
+    const service = new ArtifactService(join(root, 'data'))
+    await service.initialize()
+    const result = await service.importFolder(source, { extensions: ['log'] })
+
+    expect(result.failures).toEqual([])
+    expect(result.artifacts[0]?.sources?.[0]?.relativePath).toBe(fileName)
+  })
+
   it('does not report the limit when only ineligible files or empty directories remain', async () => {
     const root = await temporaryRoot()
     const source = join(root, 'source')

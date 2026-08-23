@@ -243,7 +243,10 @@ export function artifactRootIdForPath(rootPath: string): string {
 }
 
 function safeSourcePart(value: string, fallback: string): string {
-  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 160)
+  // Lab filenames legitimately carry the full evaluation condition tuple.
+  // Keep enough of the filesystem component to preserve the trailing material,
+  // step, and outcome fields (for example `_DHCST-89_C_Pass.log`).
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 240)
   return cleaned || fallback
 }
 

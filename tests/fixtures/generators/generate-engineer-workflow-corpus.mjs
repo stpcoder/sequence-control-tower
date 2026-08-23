@@ -6,12 +6,13 @@ import { fileURLToPath } from 'node:url'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultOutput = resolve(scriptDirectory, '..', 'engineer-workflow')
-const generatorId = 'engineer-workflow-corpus-v1'
+const generatorId = 'engineer-workflow-corpus-v2'
 
-const samples = ['SAMP-A', 'SAMP-B', 'SAMP-C', 'SAMP-D']
+const samples = ['DHCST-89', 'DHCST-90', 'DHCST-91', 'DHCST-92']
 const temperatures = ['-40C', '25C', '85C']
 const modes = ['DIAG', 'STRESS']
 const runs = [1, 2]
+const skews = ['SS', 'SF', 'FS', 'FF']
 const voltages = {
   '-40C': '0.75V',
   '25C': '0.80V',
@@ -21,33 +22,33 @@ const voltages = {
 // Each row is one Run1 -> Run2 comparison. The matrix deliberately includes
 // all supported outcomes and all pair behaviours used by engineer workflows.
 const outcomeMatrix = {
-  'SAMP-A|-40C|DIAG': ['SYSTEM_HALT', 'PASS'],
-  'SAMP-A|-40C|STRESS': ['PASS', 'PASS'],
-  'SAMP-A|25C|DIAG': ['DIAG_FAIL', 'PASS'],
-  'SAMP-A|25C|STRESS': ['PASS', 'TEST_FAIL'],
-  'SAMP-A|85C|DIAG': ['TRAINING_FAIL', 'TRAINING_FAIL'],
-  'SAMP-A|85C|STRESS': ['SYSTEM_REBOOT', 'PASS'],
+  'DHCST-89|-40C|DIAG': ['SYSTEM_HALT', 'PASS'],
+  'DHCST-89|-40C|STRESS': ['PASS', 'PASS'],
+  'DHCST-89|25C|DIAG': ['DIAG_FAIL', 'PASS'],
+  'DHCST-89|25C|STRESS': ['PASS', 'TEST_FAIL'],
+  'DHCST-89|85C|DIAG': ['TRAINING_FAIL', 'TRAINING_FAIL'],
+  'DHCST-89|85C|STRESS': ['SYSTEM_REBOOT', 'PASS'],
 
-  'SAMP-B|-40C|DIAG': ['TEST_FAIL', 'PASS'],
-  'SAMP-B|-40C|STRESS': ['PASS', 'SYSTEM_REBOOT'],
-  'SAMP-B|25C|DIAG': ['INCOMPLETE', 'PASS'],
-  'SAMP-B|25C|STRESS': ['SYSTEM_HALT', 'SYSTEM_HALT'],
-  'SAMP-B|85C|DIAG': ['UNKNOWN', 'PASS'],
-  'SAMP-B|85C|STRESS': ['PASS', 'PASS'],
+  'DHCST-90|-40C|DIAG': ['TEST_FAIL', 'PASS'],
+  'DHCST-90|-40C|STRESS': ['PASS', 'SYSTEM_REBOOT'],
+  'DHCST-90|25C|DIAG': ['INCOMPLETE', 'PASS'],
+  'DHCST-90|25C|STRESS': ['SYSTEM_HALT', 'SYSTEM_HALT'],
+  'DHCST-90|85C|DIAG': ['UNKNOWN', 'PASS'],
+  'DHCST-90|85C|STRESS': ['PASS', 'PASS'],
 
-  'SAMP-C|-40C|DIAG': ['PASS', 'PASS'],
-  'SAMP-C|-40C|STRESS': ['DIAG_FAIL', 'DIAG_FAIL'],
-  'SAMP-C|25C|DIAG': ['TRAINING_FAIL', 'PASS'],
-  'SAMP-C|25C|STRESS': ['PASS', 'INCOMPLETE'],
-  'SAMP-C|85C|DIAG': ['TEST_FAIL', 'SYSTEM_HALT'],
-  'SAMP-C|85C|STRESS': ['PASS', 'PASS'],
+  'DHCST-91|-40C|DIAG': ['PASS', 'PASS'],
+  'DHCST-91|-40C|STRESS': ['DIAG_FAIL', 'DIAG_FAIL'],
+  'DHCST-91|25C|DIAG': ['TRAINING_FAIL', 'PASS'],
+  'DHCST-91|25C|STRESS': ['PASS', 'INCOMPLETE'],
+  'DHCST-91|85C|DIAG': ['TEST_FAIL', 'SYSTEM_HALT'],
+  'DHCST-91|85C|STRESS': ['PASS', 'PASS'],
 
-  'SAMP-D|-40C|DIAG': ['SYSTEM_REBOOT', 'PASS'],
-  'SAMP-D|-40C|STRESS': ['PASS', 'PASS'],
-  'SAMP-D|25C|DIAG': ['SYSTEM_HALT', 'SYSTEM_REBOOT'],
-  'SAMP-D|25C|STRESS': ['UNKNOWN', 'UNKNOWN'],
-  'SAMP-D|85C|DIAG': ['INCOMPLETE', 'INCOMPLETE'],
-  'SAMP-D|85C|STRESS': ['PASS', 'PASS'],
+  'DHCST-92|-40C|DIAG': ['SYSTEM_REBOOT', 'PASS'],
+  'DHCST-92|-40C|STRESS': ['PASS', 'PASS'],
+  'DHCST-92|25C|DIAG': ['SYSTEM_HALT', 'SYSTEM_REBOOT'],
+  'DHCST-92|25C|STRESS': ['UNKNOWN', 'UNKNOWN'],
+  'DHCST-92|85C|DIAG': ['INCOMPLETE', 'INCOMPLETE'],
+  'DHCST-92|85C|STRESS': ['PASS', 'PASS'],
 }
 
 const allowedOutcomes = new Set([
@@ -107,6 +108,31 @@ function reachedTestStage(outcome, sampleIndex, run) {
   if (outcome === 'UNKNOWN') return false
   if (outcome === 'SYSTEM_HALT' && (sampleIndex + run) % 2 === 0) return false
   return true
+}
+
+const outcomeSuffix = {
+  PASS: 'Pass',
+  DIAG_FAIL: 'MbeFail',
+  TEST_FAIL: 'Fail',
+  TRAINING_FAIL: 'TrainingFail',
+  SYSTEM_HALT: 'SystemHalt',
+  SYSTEM_REBOOT: 'HdiagReboot',
+  INCOMPLETE: 'Incomplete',
+  UNKNOWN: 'Unknown',
+}
+
+function labFilename({ sample, sampleIndex, temperature, temperatureIndex, mode, modeIndex, run, outcome }) {
+  const evaluationNo = sampleIndex * 12 + temperatureIndex * 4 + modeIndex * 2 + run
+  const second = String(evaluationNo).padStart(2, '0')
+  const voltage = voltages[temperature].replace(/V$/i, '')
+  const temperatureValue = temperature.replace(/C$/i, '')
+  return [
+    `26-08-${String(20 + sampleIndex).padStart(2, '0')}-09-00-${second}`,
+    'UTF02A-2', `Ch${8 + sampleIndex}`, 'SM8975', evaluationNo,
+    temperatureValue, voltage, 'EVA', 'EN', `SKEW-${skews[sampleIndex]}`,
+    `TM-${mode}`, `RUN${run}`, '9600MHZ', `COM${74 + sampleIndex}`,
+    sample, 'C', outcomeSuffix[outcome],
+  ].join('_') + '.log'
 }
 
 function logFor({ sample, sampleIndex, temperature, mode, run, outcome, pairTransition }) {
@@ -176,7 +202,7 @@ function logFor({ sample, sampleIndex, temperature, mode, run, outcome, pairTran
   return `${lines.join('\n')}\n`
 }
 
-function fixtureFor(sample, sampleIndex, temperature, mode, run) {
+function fixtureFor(sample, sampleIndex, temperature, temperatureIndex, mode, modeIndex, run) {
   const key = comparisonKey(sample, temperature, mode)
   const outcomes = outcomeMatrix[key]
   if (!outcomes) throw new Error(`Missing outcome matrix row: ${key}`)
@@ -184,7 +210,7 @@ function fixtureFor(sample, sampleIndex, temperature, mode, run) {
   const pairTransition = transitionFor(outcomes)
   if (!allowedOutcomes.has(outcome)) throw new Error(`Unsupported outcome: ${outcome}`)
   return {
-    relativePath: `${sample}__TEMP=${temperature}__MODE=${mode}__RUN=${run}.log`,
+    relativePath: labFilename({ sample, sampleIndex, temperature, temperatureIndex, mode, modeIndex, run, outcome }),
     sample,
     temperature,
     mode,
@@ -200,10 +226,10 @@ function fixtureFor(sample, sampleIndex, temperature, mode, run) {
 function createFixtures() {
   const fixtures = []
   samples.forEach((sample, sampleIndex) => {
-    temperatures.forEach((temperature) => {
-      modes.forEach((mode) => {
+    temperatures.forEach((temperature, temperatureIndex) => {
+      modes.forEach((mode, modeIndex) => {
         runs.forEach((run) => {
-          fixtures.push(fixtureFor(sample, sampleIndex, temperature, mode, run))
+          fixtures.push(fixtureFor(sample, sampleIndex, temperature, temperatureIndex, mode, modeIndex, run))
         })
       })
     })

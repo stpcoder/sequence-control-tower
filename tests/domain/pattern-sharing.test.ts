@@ -48,7 +48,7 @@ describe('long SoC result sharing', () => {
     expect(columns).toEqual(expect.arrayContaining([
       'filename', 'folder', 'frequency_mhz', 'vdd', 'pattern', 'channel', 'sub_channel', 'dq', 'result', 'stage_results',
     ]))
-    expect(columns).not.toContain('grid_value')
+    expect(columns).toContain('grid_value')
     expect(serializeLogRecordsCsv(records, columns).split('\r\n')).toHaveLength(7)
     expect(serializePivotGridCsv(grid, ['주파수 (MHz)', 'VDD (V)', 'Pattern'])).toContain('"주파수 (MHz)","VDD (V)","Pattern"')
   })
