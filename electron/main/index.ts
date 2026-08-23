@@ -159,6 +159,9 @@ async function bootstrap(): Promise<void> {
   })
   const nativeAgent = new NativeAgentService({ store: nativeAgentStore, tools: nativeTools, projects, artifacts, llm, opencode })
   const samples = new SampleProjectService(dataRoot, { artifacts, projects })
+  await samples.migrateLegacySamples().catch((error) => {
+    console.error('Legacy sample migration failed', error)
+  })
   nativeAgentForShutdown = nativeAgent
   mcpForShutdown = mcp
   registerIpc({ artifacts, evaluations, analysis, llmConfig, wiki, projects, agent, evaluationAgent, nativeAgent, samples })

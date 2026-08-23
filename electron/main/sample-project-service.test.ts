@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
@@ -19,20 +19,26 @@ describe('SampleProjectService', () => {
     await Promise.all([artifacts.initialize(), projects.initialize()])
     const result = await new SampleProjectService(root, { artifacts, projects }).create()
     expect(result.project.lpddrDevelopmentContext).toMatchObject({ product: 'LPDDR6', customer: 'Xiaomi', densityGb: 16 })
-    expect(result.project.artifacts).toHaveLength(9)
+    expect(result.project.artifacts).toHaveLength(13)
     expect(result.project.folders.map((item) => item.displayLabel).sort()).toEqual([
-      '01-vperi-screening', '02-vperi-retest', '03-vdd-improvement', '04-retention', '05-boot-training',
+      '01-vperi-screening', '02-vperi-retest', '03-vdd-improvement', '04-retention', '05-boot-training', '06-four-corner',
     ])
-    expect(result.project.evaluationNodes).toHaveLength(4)
+    expect(result.project.evaluationNodes).toHaveLength(5)
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-screen-rt2')).toMatchObject({ retestOf: 'sample-n-screen', attemptNo: 2, relation: 'retest' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-vdd-up')).toMatchObject({ parentId: 'sample-n-screen-rt2', purpose: 'improvement', relation: 'improvement' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-retention')).toMatchObject({ hypothesisId: 'sample-h-retention', branchId: 'issue:sample-h-retention:main', relation: 'baseline', status: 'inconclusive' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-retention')?.parentId).toBeUndefined()
     expect(new Set(result.project.evaluationNodes?.map((item) => item.branchId))).toEqual(new Set(['issue:sample-h-vperi-dq9:main', 'issue:sample-h-retention:main']))
-    expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(4)
+    expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-four-corner')).toMatchObject({
+      parentId: 'sample-n-screen', relation: 'condition-comparison', dimensions: { sample: 'CHAE-25', conditionCorner: 'HH/CH/HL/CL' }, status: 'fail',
+    })
+    expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(5)
     expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-8975'] })
     const allArtifacts = new Map((await artifacts.list()).map((artifact) => [artifact.id, artifact]))
     expect(result.project.artifacts.every((item) => Boolean(parsePositionalLabFilename(item.relativePath)))).toBe(true)
+    expect([...new Set(result.project.artifacts.map((item) => parsePositionalLabFilename(item.relativePath)?.material))]).toEqual(expect.arrayContaining([
+      'DHCST-89', 'CHAE-1', 'DHBCT-4', 'BCT-7', 'RTN-21', 'RTN-22', 'CHAE-25',
+    ]))
     const initial = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_BASE_'))!
     const rt = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_RT2_'))!
     expect(initial).toBeDefined()
@@ -50,6 +56,14 @@ describe('SampleProjectService', () => {
     })
     expect(extractLpddrFilenameDimensions(initial.relativePath).channel).toBeUndefined()
     expect(extractLpddrFilenameOutcome(initial.relativePath)).toBe('TEST_FAIL')
+    const corners = result.project.artifacts.filter((item) => /_CORNER-(?:HH|CH|HL|CL)_/.test(item.relativePath))
+    expect(corners).toHaveLength(4)
+    expect(corners.map((item) => extractLpddrFilenameDimensions(item.relativePath))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ conditionCorner: 'HH', temperatureC: 85, vdd: 1.315, sample: 'CHAE-25' }),
+      expect.objectContaining({ conditionCorner: 'CH', temperatureC: -20, vdd: 1.315, sample: 'CHAE-25' }),
+      expect.objectContaining({ conditionCorner: 'HL', temperatureC: 85, vdd: 1.275, sample: 'CHAE-25' }),
+      expect.objectContaining({ conditionCorner: 'CL', temperatureC: -20, vdd: 1.275, sample: 'CHAE-25' }),
+    ]))
     expect(sourceEngineeringContext(initial.relativePath, allArtifacts.get(initial.artifactId)).sequenceSignature).toBe(
       sourceEngineeringContext(rt.relativePath, allArtifacts.get(rt.artifactId)).sequenceSignature,
     )
@@ -65,5 +79,25 @@ describe('SampleProjectService', () => {
     expect(result.project.evidenceRecords?.find((item) => item.id === 'sample-e-screen-fail')?.sourceIds).toHaveLength(2)
     const all = await projects.list(true)
     expect(all.some((item) => item.archived && item.lpddrDevelopmentContext?.product === 'LPDDR5')).toBe(true)
+  })
+
+  it('replaces active legacy generated samples and removes only their generated folders', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-sample-migration-'))
+    const artifacts = new ArtifactService(root); const projects = new ProjectStore(root)
+    await Promise.all([artifacts.initialize(), projects.initialize()])
+    const legacy = await projects.create({ name: 'old sample', description: 'SCT_SAMPLE_LPDDR6_XIAOMI_V2 · generated' })
+    for (const folder of ['lpddr6-xiaomi', 'lpddr6-xiaomi-v2']) {
+      const path = join(root, 'samples', folder)
+      await mkdir(path, { recursive: true }); await writeFile(join(path, 'old.log'), 'old')
+    }
+
+    const migrated = await new SampleProjectService(root, { artifacts, projects }).migrateLegacySamples()
+
+    expect(migrated).toBe(true)
+    expect((await projects.get(legacy.id))?.archived).toBe(true)
+    expect((await projects.list()).some((item) => item.description?.includes('SCT_SAMPLE_EVALUATION_V4'))).toBe(true)
+    await expect(access(join(root, 'samples', 'lpddr6-xiaomi'))).rejects.toThrow()
+    await expect(access(join(root, 'samples', 'lpddr6-xiaomi-v2'))).rejects.toThrow()
+    await expect(access(join(root, 'samples', 'evaluation-demo-v4'))).resolves.toBeUndefined()
   })
 })

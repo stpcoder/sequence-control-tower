@@ -1,4 +1,11 @@
-# Sequence Control Tower 0.12.5
+# Sequence Control Tower 0.12.6
+
+- 구버전 데모의 `LPDDR6_XIAOMI_...` 파일명을 제거하고 실제 평가용 positional 파일명으로 교체했습니다.
+- 기존 V1~V3 데모 프로젝트는 앱 시작 시 보관 처리하고, 오래된 생성 폴더만 안전하게 정리합니다.
+- 자재명을 `DHCST-89`, `CHAE-1`, `DHBCT-4`, `BCT-7`, `RTN-21`처럼 서로 다른 형식으로 구성했습니다.
+- 같은 `CHAE-25` 자재로 HH·CH·HL·CL 4-Corner 평가를 추가했습니다. HH/CH는 HVDD, HL/CL은 LVDD이며 Hot/Cold 조건을 정확히 조합합니다.
+
+## 0.12.5
 
 - 앱 내장 데모 로그와 장문 QA 로그 58개의 파일명을 실제 평가용 underscore 규격으로 통일했습니다.
 - 파일명에서 실장기 채널, SoC, 평가번호, 온도, 전압, ECC, 사용자 조건, 주파수, 자재, 평가 Step과 결과를 분리합니다.
