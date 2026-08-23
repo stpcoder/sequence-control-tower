@@ -35,6 +35,7 @@ import {
   folderSelectionTargetId,
   groupWorkspaceSearchHits,
   recipeEvidenceSpecs,
+  ruleFolderUsage,
   recipeRuleSummary,
   recentSearchQueries,
   resolveRecipeEvidenceCounts,
@@ -61,6 +62,7 @@ import {
   successfulSearchCounts,
   shouldCancelAnalysisJob,
   patternReviewFailureMessage,
+  planRuleApplication,
   type WorkbenchFile,
 } from '../../src/views/WorkbenchView'
 
@@ -234,6 +236,48 @@ describe('Log Workbench UI data hardening', () => {
     expect(mergeAppliedFolderRules([old, pass], new Set(), pass)).toEqual([old, pass])
     expect(mergeAppliedFolderRules([old], new Set(), [pass, revised]).map((item) => item.id)).toEqual(['old', 'pass', 'revised'])
     expect(recipeRuleSummary(pass)).toContain('→ Pass')
+  })
+
+  it('reports whether a project rule is unused, folder-only, or project-wide', () => {
+    const pass = rule('pass', 'PASS', 'candidate')
+    const halt = rule('halt', 'SYSTEM_HALT', 'candidate')
+    const folderKeys = ['root:evaluation-a', 'root:evaluation-b']
+
+    expect(ruleFolderUsage([pass], {}, folderKeys, folderKeys[0])).toEqual({
+      appliedFolderCount: 0,
+      appliedToCurrentFolder: false,
+      appliedToEntireProject: false,
+    })
+    expect(ruleFolderUsage([pass], { [folderKeys[0]]: [pass, halt] }, folderKeys, folderKeys[0])).toEqual({
+      appliedFolderCount: 1,
+      appliedToCurrentFolder: true,
+      appliedToEntireProject: false,
+    })
+    expect(ruleFolderUsage([pass], { [folderKeys[0]]: [pass], [folderKeys[1]]: [halt, pass] }, folderKeys, folderKeys[0])).toEqual({
+      appliedFolderCount: 2,
+      appliedToCurrentFolder: true,
+      appliedToEntireProject: true,
+    })
+  })
+
+  it('adds project rules without leaking one folder\'s private rules into another', () => {
+    const folderOnlyA = rule('folder-a', 'SYSTEM_HALT', 'candidate')
+    const folderOnlyB = rule('folder-b', 'TEST_FAIL', 'candidate')
+    const shared = rule('shared', 'PASS', 'candidate')
+    const groups = [
+      { key: 'root:a', label: 'A', files: [{ id: 'a', name: 'a.log', rootId: 'a' }] },
+      { key: 'root:b', label: 'B', files: [{ id: 'b', name: 'b.log', rootId: 'b' }] },
+    ]
+    const plans = planRuleApplication(groups, {
+      'root:a': [folderOnlyA],
+      'root:b': [folderOnlyB],
+    }, [shared], 'project', 'root:a')
+
+    expect(plans[0].rules.map((item) => item.id)).toEqual(['folder-a', 'shared'])
+    expect(plans[1].rules.map((item) => item.id)).toEqual(['folder-b', 'shared'])
+    expect(plans[0].rules).not.toContain(folderOnlyB)
+    expect(plans[1].rules).not.toContain(folderOnlyA)
+    expect(planRuleApplication(groups, {}, [shared], 'folder', 'root:a').map((item) => item.group.key)).toEqual(['root:a'])
   })
 
   it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
@@ -442,10 +486,15 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).toContain('.search-result-line {')
     expect(workbenchCss).toContain('font-size: 13px')
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
-    expect(workbenchSource).toContain("const batchFiles = resolveSearchScopeFiles('folder', files, activeFile.id, [])")
+    expect(workbenchSource).toContain("scope === 'project'")
+    expect(workbenchSource).toContain('mergeAppliedFolderRules(effectiveRulesByFolder[group.key] ?? [], new Set(), uniqueRules)')
     expect(workbenchSource).toContain("recipeSaved ? '저장 완료' : '규칙 저장'")
-    expect(workbenchSource).toContain('<Play size={12} />현재 폴더 적용')
-    expect(workbenchSource).toContain('<Check size={12} />현재 폴더 적용됨')
+    expect(workbenchSource).toContain('<strong>현재 폴더</strong>')
+    expect(workbenchSource).toContain('<strong>전체 프로젝트</strong>')
+    expect(workbenchSource).toContain("void applySavedRecipe(recipe, 'folder')")
+    expect(workbenchSource).toContain("void applySavedRecipe(recipe, 'project')")
+    expect(workbenchSource).toContain("? '전체 프로젝트'")
+    expect(workbenchSource).toContain("? '현재 폴더'")
     expect(workbenchSource).toContain('<Trash2 size={12} />삭제')
     expect(workbenchSource).toContain('className="recipe-details-toggle"')
     expect(workbenchSource).toContain('className="recipe-delete-observation"')

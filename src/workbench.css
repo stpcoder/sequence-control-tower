@@ -524,8 +524,8 @@
 .recipe-details-toggle:hover { color: var(--wb-text); }
 .recipe-details-toggle > svg:last-child { transition: transform 160ms ease; }
 .recipe-details-toggle > svg:last-child.open { transform: rotate(180deg); }
-.recipe-manager-scrim { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(8, 10, 14, .7); }
-.recipe-manager { display: grid; width: min(100%, 430px); max-height: min(620px, calc(100% - 18px)); overflow: hidden; border: 1px solid var(--wb-line); border-radius: 10px; background: var(--wb-side); box-shadow: 0 18px 42px rgba(0,0,0,.42); }
+.recipe-manager-scrim { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(8, 10, 14, .72); }
+.recipe-manager { display: grid; width: min(100%, 470px); max-height: min(620px, calc(100% - 18px)); overflow: hidden; border: 1px solid var(--wb-line); border-radius: 10px; background: var(--wb-side); box-shadow: 0 18px 42px rgba(0,0,0,.42); }
 .recipe-manager-heading { display: flex; min-height: 50px; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--wb-line-soft); }
 .recipe-manager-heading strong { font-size: var(--wb-type-body); font-weight: 600; }
 .recipe-manager-heading button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 6px; color: var(--wb-dim); }
@@ -544,6 +544,20 @@
 .recipe-manager-item-actions .recipe-add { color: #c8dcf7; background: var(--wb-blue-soft); }
 .recipe-manager-item-actions .recipe-delete { color: var(--wb-orange); }
 .recipe-applied { color: var(--wb-green); }
+.recipe-usage { color: var(--wb-dim); font-size: var(--wb-type-secondary); white-space: nowrap; }
+.recipe-usage.active { color: var(--wb-green); }
+.recipe-apply-scope { display: grid; min-height: 0; padding: 8px 14px 14px; }
+.recipe-scope-back { display: flex; width: max-content; min-height: 30px; align-items: center; gap: 4px; margin-left: -7px; padding: 0 7px; border-radius: 6px; color: var(--wb-muted); font-size: var(--wb-type-secondary); }
+.recipe-scope-back svg { transform: rotate(180deg); }
+.recipe-scope-back:hover { color: var(--wb-text); background: var(--wb-hover); }
+.recipe-scope-name { overflow: hidden; margin: 5px 0 9px; color: var(--wb-text); font-size: var(--wb-type-body); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-scope-option { display: grid; min-height: 58px; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 9px; border-top: 1px solid var(--wb-line-soft); color: var(--wb-muted); text-align: left; }
+.recipe-scope-option:last-child { border-bottom: 1px solid var(--wb-line-soft); }
+.recipe-scope-option:hover:not(:disabled) { color: var(--wb-text); background: var(--wb-hover); }
+.recipe-scope-option > span { display: grid; min-width: 0; gap: 3px; }
+.recipe-scope-option strong { color: var(--wb-text); font-size: var(--wb-type-body); font-weight: 600; }
+.recipe-scope-option small { overflow: hidden; color: var(--wb-dim); font-size: var(--wb-type-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.recipe-scope-option em { display: flex; align-items: center; gap: 4px; color: var(--wb-green); font-size: var(--wb-type-secondary); font-style: normal; white-space: nowrap; }
 .recipe-manager-empty { padding: 34px 4px; color: var(--wb-dim); font-size: var(--wb-type-secondary); text-align: center; }
 .recipe-actions { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 0 0 8px; }
 .recipe-actions button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; border: 1px solid var(--wb-line); border-radius: 7px; color: var(--wb-muted); font-size: var(--wb-type-body); }
