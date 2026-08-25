@@ -47,6 +47,7 @@ import {
   mergeLineWindow,
   mergeAppliedFolderRules,
   mergeWorkbenchFiles,
+  markerOrderAfterSelectionChange,
   nextSearchHitIndex,
   omitFileCacheEntry,
   invalidateImportBatchGeneration,
@@ -60,6 +61,7 @@ import {
   moveRecipeClause,
   normalizeRecipeClauseOrder,
   toggleEngineerWorkflowCheck,
+  toggleRecipeClauseSelection,
   reorderRuleClausesByObservationIds,
   successfulSearchCounts,
   shouldCancelAnalysisJob,
@@ -228,6 +230,17 @@ describe('Log Workbench UI data hardening', () => {
     const arranged = moveRecipeClause(['a', 'b', 'c'], ['a', 'b', 'c'], 'c', -1)
     expect(orderSelectionRows(rows, arranged.map((id) => ({ id })), (row) => row.id).map((row) => row.id))
       .toEqual(['a', 'c', 'b', 'unused'])
+  })
+
+  it('keeps selection and clause order synchronized across detail-panel toggles', () => {
+    const removed = toggleRecipeClauseSelection(['a', 'b', 'c'], ['b', 'a', 'c'], 'a')
+    expect(removed).toEqual({ selectedIds: ['b', 'c'], order: ['b', 'c'] })
+    expect(markerOrderAfterSelectionChange(true, removed.selectedIds.length)).toBe(true)
+
+    const restored = toggleRecipeClauseSelection(removed.selectedIds, removed.order, 'a')
+    expect(restored).toEqual({ selectedIds: ['b', 'c', 'a'], order: ['b', 'c', 'a'] })
+    expect(moveRecipeClause(restored.order, restored.selectedIds, 'a', -1)).toEqual(['b', 'a', 'c'])
+    expect(markerOrderAfterSelectionChange(true, 1)).toBe(false)
   })
 
   it('reapplies previous folder rules when a new exception rule is saved', () => {

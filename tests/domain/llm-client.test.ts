@@ -142,6 +142,44 @@ describe('OpenAI-compatible chat client', () => {
     )
   })
 
+  it('accepts array-form text content from an OpenAI-compatible gateway', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] } }]
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const request = client(effective({ baseUrl: 'http://vllm.invalid/v1' }))
+
+    await expect(request.complete('minimal evidence', undefined, vi.fn())).resolves.toEqual({
+      content: 'first\nsecond',
+      model: 'qwen-internal',
+    })
+  })
+
+  it.each(['reasoning', 'reasoning_content'])('retries a vLLM %s-only response with thinking disabled', async (reasoningField) => {
+    let requestCount = 0
+    const server = await mockServer((_request, response) => {
+      requestCount += 1
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(requestCount === 1
+        ? { choices: [{ message: { content: null, [reasoningField]: 'internal reasoning' }, finish_reason: 'length' }] }
+        : { choices: [{ message: { content: '{"summary":"recovered"}' }, finish_reason: 'stop' }] }))
+    })
+    const stages: string[] = []
+    const request = client(effective({ baseUrl: server.baseUrl, maxRetries: 1 }))
+
+    await expect(request.complete('minimal evidence', undefined, (stage) => stages.push(stage))).resolves.toEqual({
+      content: '{"summary":"recovered"}',
+      model: 'qwen-internal',
+    })
+    expect(server.records).toHaveLength(2)
+    expect(JSON.parse(server.records[0].body)).not.toHaveProperty('chat_template_kwargs')
+    expect(JSON.parse(server.records[1].body)).toEqual(expect.objectContaining({
+      include_reasoning: false,
+      chat_template_kwargs: { enable_thinking: false, thinking: false },
+    }))
+    expect(stages.some((stage) => stage.includes('최종 답변 없이 추론 내용만 반환'))).toBe(true)
+  })
+
   it('uses a bounded low-reasoning budget for Gemini 3 on the global Vertex endpoint', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       choices: [{ message: { content: 'gemini 3 ok' } }]

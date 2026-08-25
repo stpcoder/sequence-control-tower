@@ -498,6 +498,27 @@ export function moveRecipeClause(
   return next
 }
 
+export function toggleRecipeClauseSelection(
+  selectedIds: readonly string[],
+  order: readonly string[],
+  observationId: string,
+): { selectedIds: string[]; order: string[] } {
+  const removing = selectedIds.includes(observationId)
+  const nextSelectedIds = removing
+    ? selectedIds.filter((id) => id !== observationId)
+    : [...selectedIds, observationId]
+  const orderWithoutTarget = order.filter((id) => id !== observationId)
+  const nextOrder = normalizeRecipeClauseOrder(
+    removing ? orderWithoutTarget : [...orderWithoutTarget, observationId],
+    nextSelectedIds,
+  )
+  return { selectedIds: nextSelectedIds, order: nextOrder }
+}
+
+export function markerOrderAfterSelectionChange(enabled: boolean, selectedCount: number): boolean {
+  return enabled && selectedCount > 1
+}
+
 /** Render selected rows in the exact order the engineer arranged them, then
  * keep unselected search history underneath in its original order. */
 export function orderSelectionRows<T>(
@@ -3095,21 +3116,15 @@ export function WorkbenchView({
 
   const toggleRecipeObservation = (observationId: string) => {
     if (!activeFile) return
-    setSelectedObservationIdsByFile((current) => {
-      const selected = current[activeFile.id] ?? []
-      const next = selected.includes(observationId)
-        ? selected.filter((id) => id !== observationId)
-        : [...selected, observationId]
-      return { ...current, [activeFile.id]: next }
-    })
-    setRecipeClauseOrderByFile((current) => {
-      const selected = current[activeFile.id] ?? []
-      return {
-        ...current,
-        [activeFile.id]: selected.includes(observationId) ? selected.filter((id) => id !== observationId) : [...selected, observationId],
-      }
-    })
-    setRequireMarkerOrder(false)
+    const fileId = activeFile.id
+    const next = toggleRecipeClauseSelection(
+      selectedObservationIdsByFile[fileId] ?? [],
+      recipeClauseOrderByFile[fileId] ?? [],
+      observationId,
+    )
+    setSelectedObservationIdsByFile((current) => ({ ...current, [fileId]: next.selectedIds }))
+    setRecipeClauseOrderByFile((current) => ({ ...current, [fileId]: next.order }))
+    setRequireMarkerOrder((current) => markerOrderAfterSelectionChange(current, next.selectedIds.length))
     setRecipeSaved(false)
   }
 
@@ -3137,8 +3152,9 @@ export function WorkbenchView({
 
   const movePinnedClause = (observationId: string, delta: -1 | 1) => {
     if (!activeFile) return
+    const availableIds = new Set(recipeObservations.map((observation) => observation.id))
+    const selectedIds = (selectedObservationIdsByFile[activeFile.id] ?? []).filter((id) => availableIds.has(id))
     setRecipeClauseOrderByFile((current) => {
-      const selectedIds = selectedRecipeObservations.map((item) => item.id)
       const ids = moveRecipeClause(current[activeFile.id] ?? [], selectedIds, observationId, delta)
       return { ...current, [activeFile.id]: ids }
     })

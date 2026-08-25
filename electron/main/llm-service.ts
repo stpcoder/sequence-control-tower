@@ -558,8 +558,14 @@ class SlidingWindowLimiter {
   }
 }
 
+interface ChatCompletionMessage {
+  content?: unknown
+  reasoning?: unknown
+  reasoning_content?: unknown
+}
+
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: unknown } }>
+  choices?: Array<{ message?: ChatCompletionMessage; finish_reason?: unknown }>
 }
 
 const MAX_CHAT_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -567,6 +573,21 @@ const MAX_CHAT_ERROR_BYTES = 16 * 1024
 
 function isGemini3Model(model: string): boolean {
   return /(?:^|\/)gemini-3(?:\.\d+)?-/i.test(model.trim())
+}
+
+export function chatMessageText(content: unknown): string {
+  if (typeof content === 'string') return content.trim()
+  if (!Array.isArray(content)) return ''
+  return content.flatMap((part) => {
+    if (typeof part === 'string') return [part]
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return []
+    const text = (part as Record<string, unknown>).text
+    return typeof text === 'string' ? [text] : []
+  }).join('\n').trim()
+}
+
+function hasReasoning(message: ChatCompletionMessage | undefined): boolean {
+  return Boolean(chatMessageText(message?.reasoning) || chatMessageText(message?.reasoning_content))
 }
 
 export class OpenAiCompatibleClient {
@@ -594,7 +615,8 @@ export class OpenAiCompatibleClient {
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
-    const automaticVertexAuth = !config.apiKey && isVertexOpenAiBaseUrl(config.baseUrl)
+    const vertexEndpoint = isVertexOpenAiBaseUrl(config.baseUrl)
+    const automaticVertexAuth = !config.apiKey && vertexEndpoint
     const accessToken = config.apiKey ?? await this.vertexAuth.token(config.baseUrl)
     if (automaticVertexAuth && !accessToken) throw new Error('LLM_VERTEX_AUTH_UNAVAILABLE')
     let lastError: Error | undefined
@@ -607,6 +629,9 @@ export class OpenAiCompatibleClient {
       })
       if (attempt > 0) onStage(`${llmFailureDisplay(lastError) ?? '사내 LLM 요청 실패'} · 재시도 ${attempt}/${config.maxRetries}`)
       else onStage('사내 LLM 응답 대기')
+      const retryWithoutThinking = !vertexEndpoint
+        && attempt > 0
+        && llmErrorCode(lastError) === 'LLM_REASONING_ONLY_RESPONSE'
 
       const timeoutController = new AbortController()
       let timedOut = false
@@ -633,6 +658,10 @@ export class OpenAiCompatibleClient {
               { role: 'user', content: prompt }
             ],
             ...(gemini3 ? { reasoning_effort: 'low' } : { temperature: 0.1 }),
+            ...(retryWithoutThinking ? {
+              include_reasoning: false,
+              chat_template_kwargs: { enable_thinking: false, thinking: false },
+            } : {}),
             max_tokens: completionTokenBudget
           }),
           redirect: 'error',
@@ -663,8 +692,21 @@ export class OpenAiCompatibleClient {
         } catch {
           throw new Error('LLM_INVALID_JSON_RESPONSE')
         }
-        const content = parsed.choices?.[0]?.message?.content
-        if (typeof content !== 'string' || !content.trim()) throw new Error('LLM_EMPTY_RESPONSE')
+        const message = parsed.choices?.[0]?.message
+        const content = chatMessageText(message?.content)
+        if (!content) {
+          if (hasReasoning(message)) {
+            console.warn('[llm-service] reasoning-only response', {
+              model: config.model,
+              attempt: attempt + 1,
+              finishReason: typeof parsed.choices?.[0]?.finish_reason === 'string'
+                ? parsed.choices[0].finish_reason
+                : 'unknown',
+            })
+            throw new Error('LLM_REASONING_ONLY_RESPONSE')
+          }
+          throw new Error('LLM_EMPTY_RESPONSE')
+        }
         return { content, model: config.model }
       } catch (error) {
         if (signal?.aborted) throw abortError()
@@ -679,6 +721,7 @@ export class OpenAiCompatibleClient {
         const retryable =
           currentCode === 'LLM_REQUEST_TIMEOUT' ||
           currentCode === 'LLM_REQUEST_FAILED' ||
+          currentCode === 'LLM_REASONING_ONLY_RESPONSE' ||
           /^LLM_HTTP_(?:408|429|5\d{2})$/.test(currentCode)
         if (!retryable || attempt >= config.maxRetries) throw current
         await delay(Math.min(1_000 * 2 ** attempt + Math.random() * 500, 15_000), signal)

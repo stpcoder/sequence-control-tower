@@ -42,7 +42,7 @@ export function llmHttpErrorCode(status: number, bodyText: string, statusText = 
 export function llmErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   return /LLM_HTTP_\d{3}/.exec(raw)?.[0]
-    ?? /LLM_(?:REQUEST_TIMEOUT|REQUEST_FAILED|UNAVAILABLE|TPM_REQUEST_TOO_LARGE|INVALID_JSON_RESPONSE|EMPTY_RESPONSE|RESPONSE_TOO_LARGE|VERTEX_AUTH_UNAVAILABLE)/.exec(raw)?.[0]
+    ?? /LLM_(?:REQUEST_TIMEOUT|REQUEST_FAILED|UNAVAILABLE|TPM_REQUEST_TOO_LARGE|INVALID_JSON_RESPONSE|EMPTY_RESPONSE|REASONING_ONLY_RESPONSE|RESPONSE_TOO_LARGE|VERTEX_AUTH_UNAVAILABLE)/.exec(raw)?.[0]
     ?? ''
 }
 
@@ -57,6 +57,7 @@ export function llmFailureDisplay(error: unknown): string | null {
   if (code === 'LLM_TPM_REQUEST_TOO_LARGE') return '요청 크기가 설정한 TPM 한도를 초과했습니다.'
   if (code === 'LLM_INVALID_JSON_RESPONSE') return 'LLM 응답이 OpenAI Chat Completions JSON 형식이 아닙니다.'
   if (code === 'LLM_EMPTY_RESPONSE') return 'LLM 응답의 choices[0].message.content가 비어 있습니다.'
+  if (code === 'LLM_REASONING_ONLY_RESPONSE') return 'LLM이 최종 답변 없이 추론 내용만 반환했습니다.'
   if (code === 'LLM_RESPONSE_TOO_LARGE') return 'LLM 응답이 앱의 안전 용량 제한을 초과했습니다.'
   if (code === 'LLM_VERTEX_AUTH_UNAVAILABLE') return 'Vertex 인증 토큰을 가져오지 못했습니다.'
   return null

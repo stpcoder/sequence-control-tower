@@ -19,5 +19,6 @@ describe('LLM error diagnostics', () => {
   it('explains transport and response-shape failures', () => {
     expect(llmFailureDisplay(new Error('provider failed: LLM_REQUEST_FAILED'))).toBe('사내 LLM 연결 또는 응답 스트림 실패')
     expect(llmFailureDisplay(new Error('LLM_EMPTY_RESPONSE'))).toContain('choices[0].message.content')
+    expect(llmFailureDisplay(new Error('LLM_REASONING_ONLY_RESPONSE'))).toContain('추론 내용만 반환')
   })
 })
