@@ -4,12 +4,13 @@ import { join } from 'node:path'
 import type { ProjectLoadResult, ProjectSnapshot } from '../shared/contracts'
 import type { ArtifactService } from './artifact-service'
 import type { ProjectStore } from './project-store'
+import { buildSyntheticQualcommLog, type SyntheticOutcome } from './synthetic-qualcomm-log'
 
-const SAMPLE_MARKER = 'SCT_SAMPLE_EVALUATION_V4'
-const REFERENCE_MARKER = 'SCT_SAMPLE_LPDDR5_REFERENCE_V4'
-const SAMPLE_FOLDER = 'evaluation-demo-v4'
-const LEGACY_SAMPLE_MARKER = /SCT_SAMPLE_LPDDR6_XIAOMI_V[1-3]\b/
-const LEGACY_SAMPLE_FOLDERS = ['lpddr6-xiaomi', 'lpddr6-xiaomi-v2', 'lpddr6-xiaomi-v3'] as const
+const SAMPLE_MARKER = 'SCT_SAMPLE_EVALUATION_V5'
+const REFERENCE_MARKER = 'SCT_SAMPLE_LPDDR5_REFERENCE_V5'
+const SAMPLE_FOLDER = 'evaluation-demo-v5'
+const LEGACY_SAMPLE_MARKER = /(?:SCT_SAMPLE_LPDDR6_XIAOMI_V[1-3]|SCT_SAMPLE_EVALUATION_V4)\b/
+const LEGACY_SAMPLE_FOLDERS = ['lpddr6-xiaomi', 'lpddr6-xiaomi-v2', 'lpddr6-xiaomi-v3', 'evaluation-demo-v4'] as const
 
 function demoFilename(input: {
   timestamp: string; equipmentChannel: number; evaluationNo: number; temperatureC: number; vdd: string
@@ -48,46 +49,13 @@ const SAMPLE_EVALUATIONS = [
 ] as const
 const stamp = '2026-08-01T09:00:00.000Z'
 
-function bootLines(run: string, condition: string): string[] {
-  const vdd = /VDD=([0-9.]+)V/i.exec(condition)?.[1] ?? '1.295'
-  const frequency = /FREQ=(\d+)MHz/i.exec(condition)?.[1] ?? '9600'
-  const lines = [
-    `[00:00:00.001] POWER_ON ${run}`,
-    '[00:00:00.114] PBL: boot start',
-    '[00:00:00.267] XBL: DDR init',
-    `[00:00:00.411] DDR_CONDITION ${condition}`,
-    '[00:00:00.790] UEFI: memory training start',
-    `[00:00:00.820] UEFI> set_rail VDD ${vdd}`,
-    `[00:00:00.821] INFO rail controller applied VDD=${vdd}V rc=0`,
-    `[00:00:00.850] UEFI> set_freq ${frequency}`,
-    `[00:00:00.851] DEBUG clock request ${frequency}MHz accepted`,
-    '[00:00:01.206] UEFI: memory training complete',
-    '[00:00:01.409] UEFI: ExitBootServices',
-    '[00:00:02.901] OS: Linux boot complete',
-    'root@sm8975:/ # hdiag --mode memory --start',
-    '[00:00:03.215] HIDAG DIAG START',
-    'root@sm8975:/ # stressapptest -M 4096 -s 600',
-    '# sleep 20',
-    '[00:00:03.418] stressapptest BEGIN'
-  ]
-  for (let index = 0; index < 7_200; index += 1) {
-    const time = `[00:${String(Math.floor(index / 3_600)).padStart(2, '0')}:${String(Math.floor(index / 60) % 60).padStart(2, '0')}.${String(index % 1_000).padStart(3, '0')}]`
-    const variants = [
-      `${time} DEBUG serial.rx packet=${index} bytes=${32 + (index % 96)} crc=ok`,
-      `${time} TRACE scheduler tick=${index} cpu=${index % 8} task=mem_stress`,
-      `${time} INFO traffic loop=${index} channel=${index % 4} bank=${index % 8} bankGroup=${index % 4}`,
-      `${time} [KERNEL] irq=${index % 64} wake=${index % 5} thermal_zone=${42 + (index % 7)}`,
-      `${time} [UI-AUTOMATION] clicked=serial-monitor-${index % 3} focus=${index % 2} frame=${index}`,
-      `${time} DEBUG training.telemetry dq=${index % 32} eye=${18 + (index % 11)}ps sample=${index % 128}`,
-      `${time} TRACE buffer alloc=${4096 + (index % 512)} free=${8192 - (index % 512)} event=complete`,
-    ]
-    lines.push(variants[index % variants.length])
-  }
-  return lines
-}
-
 function log(run: string, condition: string, end: string[]): string {
-  return `${[...bootLines(run, condition), ...end].join('\n')}\n`
+  const joined = end.join('\n')
+  const outcome: SyntheticOutcome = /TRAINING_FAIL/i.test(joined) ? 'TRAINING_FAIL'
+    : /(?:WATCHDOG|REBOOT_REASON)/i.test(joined) ? 'SYSTEM_REBOOT'
+      : /(?:SYSTEM_HALT|CPU_HALT)/i.test(joined) ? 'SYSTEM_HALT'
+        : /@FAIL/i.test(joined) ? 'TEST_FAIL' : 'PASS'
+  return buildSyntheticQualcommLog({ run, condition, outcome, terminalLines: end, lineCount: 7_600 })
 }
 
 const SAMPLE_LOGS: Record<string, string> = {

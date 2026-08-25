@@ -113,7 +113,9 @@ export const LPDDR_STATUS_SPECS: ArtifactEvidenceSpec[] = [
   { id: 'stress-pass', query: 'stressapp(?:test)?[^\n]{0,80}\bPASS\b', mode: 'regex', caseSensitive: false },
   { id: 'diag-start', query: '(?:HIDAG|HI_DIAG|DIAG(?:NOSTIC)?)[^\n]{0,80}(?:START|BEGIN|RUN)', mode: 'regex', caseSensitive: false },
   { id: 'training-fail', query: '(?:TRAINING|TRAIN)[ _:-]*FAIL', mode: 'regex', caseSensitive: false },
-  { id: 'reboot', query: '(?:SYSTEM[ _-]*REBOOT|WATCHDOG|REBOOT_REASON|WARM RESET)', mode: 'regex', caseSensitive: false },
+  // An operator-issued UEFI reset is a sequence command, not a failure. Only
+  // explicit watchdog/reboot-result evidence is classified as SYSTEM_REBOOT.
+  { id: 'reboot', query: '(?:SYSTEM[ _-]*REBOOT|WATCHDOG|REBOOT_REASON)', mode: 'regex', caseSensitive: false },
   { id: 'halt', query: '(?:SYSTEM[ _-]*HALT|CPU[ _-]*HALT|FATAL EXCEPTION|KERNEL PANIC)', mode: 'regex', caseSensitive: false },
   { id: 'fast-fail', query: '(?:FAST[ _-]*FAIL|FAIL[ _-]*FAST|EARLY[ _-]*EXIT)', mode: 'regex', caseSensitive: false },
   { id: 'normal-end', query: '(?:TEST|SEQUENCE|RUN)[ _:-]*(?:COMPLETE|END|DONE)', mode: 'regex', caseSensitive: false }
@@ -833,7 +835,10 @@ export class LpddrAgentToolService {
       try {
         failAddressSearch = await this.deps.artifacts.search({
           artifactIds: [...failedSourceIdsByArtifact.keys()],
-          query: '(?:CH(?:ANNEL)?|SUB(?:CH|CHANNEL)|SUB[ _]?CHANNEL|CS|CHIP[ _]?SELECT|BK|BANK|RK|RANK|BG|BANK[ _]?GROUP|ROW|COL(?:UMN)?|WR|WRITE|RD|READ|DQ|BL)\\s*[=:]',
+          // Long training traces also contain CH/DQ fields. Requiring an
+          // error marker on the same line prevents those healthy rows from
+          // exhausting maxMatches before the terminal fail address.
+          query: '(?=.*(?:@FAIL|FAIL(?:URE)?|ERR(?:OR)?|MISCOMPARE|MISMATCH|\\bEDAC\\b.*\\b(?:UE|CE)\\b))(?=.*(?:CH(?:ANNEL)?|SUB(?:CH|CHANNEL)|SUB[ _]?CHANNEL|CS|CHIP[ _]?SELECT|BK|BANK|RK|RANK|BG|BANK[ _]?GROUP|ROW|COL(?:UMN)?|WR|WRITE|RD|READ|DQ|BL)\\s*[=:]).+',
           mode: 'regex', caseSensitive: false, maxMatches: 2_000, contextLines: 0,
         })
       } catch { /* Condition rates remain available when optional fail-address scanning fails. */ }

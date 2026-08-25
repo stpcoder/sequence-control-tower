@@ -3,10 +3,11 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildQualcommLog } from './synthetic-soc-flow.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultOutput = resolve(scriptDirectory, '..', 'engineer-workflow')
-const generatorId = 'engineer-workflow-corpus-v2'
+const generatorId = 'engineer-workflow-corpus-v3'
 
 const samples = ['DHCST-89', 'DHCST-90', 'DHCST-91', 'DHCST-92']
 const temperatures = ['-40C', '25C', '85C']
@@ -14,9 +15,9 @@ const modes = ['DIAG', 'STRESS']
 const runs = [1, 2]
 const skews = ['SS', 'SF', 'FS', 'FF']
 const voltages = {
-  '-40C': '0.75V',
-  '25C': '0.80V',
-  '85C': '0.90V',
+  '-40C': '1.275V',
+  '25C': '1.295V',
+  '85C': '1.315V',
 }
 
 // Each row is one Run1 -> Run2 comparison. The matrix deliberately includes
@@ -141,7 +142,7 @@ function logFor({ sample, sampleIndex, temperature, mode, run, outcome, pairTran
   const key = comparisonKey(sample, temperature, mode)
   const failure = failurePoint(outcome, sampleIndex, run)
   const testStageReached = reachedTestStage(outcome, sampleIndex, run)
-  const lines = [
+  const metadata = [
     '# SYNTHETIC_METADATA',
     `SAMPLE=${sample};`,
     `TEMP=${temperature};`,
@@ -157,49 +158,22 @@ function logFor({ sample, sampleIndex, temperature, mode, run, outcome, pairTran
     `OBSERVED_TEST_MODE=${mode};`,
     'INFO pmic_sequence=nominal;',
     'DEBUG refclk_lock=1;',
-    'POWER_ON state=asserted;',
-    'UEFI entry firmware=SYN-UEFI-01;',
   ]
-
-  if (outcome === 'SYSTEM_HALT' && !testStageReached) {
-    lines.push(`FAILURE_POINT=${failure};`, 'INFO console_state=halted;')
-    return `${lines.join('\n')}\n`
-  }
-
-  if (outcome !== 'UNKNOWN') {
-    lines.push('ExitBootServices status=success;')
-    lines.push('OS boot start loader=SYN-OS-01;')
-  }
-
-  if (testStageReached) {
-    lines.push('stressapp start profile=synthetic-memory;', 'stressapp heartbeat=stable;')
-    if (outcome === 'TEST_FAIL') {
-      lines.push(`FAILURE_POINT=${failure};`, 'TEST_FAIL bank=SYN-BANK-01;')
-      return `${lines.join('\n')}\n`
-    } else {
-      lines.push('stressapp completed result=PASS;')
-    }
-    lines.push(`HIDAG START mode=${mode};`)
-    if (outcome === 'PASS') {
-      lines.push('HIDAG END result=PASS;', '@PASS;')
-    } else if (outcome === 'DIAG_FAIL') {
-      lines.push(`FAILURE_POINT=${failure};`, 'DIAG_FAIL code=SYN-DIAG-07;')
-    } else if (outcome === 'TRAINING_FAIL') {
-      lines.push(`FAILURE_POINT=${failure};`, 'TRAINING_FAIL lane=SYN-LANE-01;')
-    } else if (outcome === 'SYSTEM_REBOOT') {
-      lines.push(`FAILURE_POINT=${failure};`, 'WATCHDOG_RESET reason=synthetic-timeout;', 'SYSTEM_REBOOT;')
-    } else if (outcome === 'SYSTEM_HALT') {
-      lines.push(`FAILURE_POINT=${failure};`, 'INFO console_state=halted;')
-    } else if (outcome === 'INCOMPLETE') {
-      lines.push(`FAILURE_POINT=${failure};`, 'INFO capture_state=stopped-before-terminal;')
-    } else if (outcome === 'UNKNOWN') {
-      lines.push('INFO capture_state=ambiguous;')
-    }
-  } else if (outcome === 'UNKNOWN') {
-    lines.push(`FAILURE_POINT=${failure};`, 'INFO capture_state=ambiguous;')
-  }
-
-  return `${lines.join('\n')}\n`
+  if (failure) metadata.push(`FAILURE_POINT=${failure};`)
+  metadata.push(`TEST_STAGE_REACHED=${testStageReached};`)
+  const condition = [
+    `TEMP=${temperature}`, `VDD=${vdd}`, 'FREQ=9600MHz', `TM=${mode}`, `PATTERN=${mode === 'DIAG' ? 'WR' : 'MARCH_C'}`,
+    `CH=${sampleIndex % 4}`, `SUBCH=${run % 2}`, `RANK=${sampleIndex % 2}`, `BG=${(sampleIndex + run) % 4}`,
+    `BANK=${(sampleIndex * 2 + run) % 8}`, `ROW=0x${(0x20 + sampleIndex * 4 + run).toString(16)}`,
+    `COL=0x${(0x10 + run * 4).toString(16)}`, `DQ=${sampleIndex * 4 + run}`, `BL=${run * 8}`,
+  ].join(' ')
+  return buildQualcommLog({
+    run: `${sample}_${temperature}_${mode}_RUN${run}`,
+    condition,
+    outcome,
+    lineCount: 3_600,
+    header: metadata,
+  })
 }
 
 function fixtureFor(sample, sampleIndex, temperature, temperatureIndex, mode, modeIndex, run) {
@@ -219,6 +193,7 @@ function fixtureFor(sample, sampleIndex, temperature, temperatureIndex, mode, mo
     expectedResult: outcome,
     pairTransition,
     comparisonKey: key,
+    lineCount: 3_600,
     content: logFor({ sample, sampleIndex, temperature, mode, run, outcome, pairTransition }),
   }
 }

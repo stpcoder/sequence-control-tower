@@ -22,4 +22,24 @@ describe('console-aware artifact fingerprint', () => {
     expect(fingerprint.commandCount).toBe(0)
     expect(fingerprint.console).toMatchObject({ ambiguousCount: 1, statusCounts: { 'at-pass': 1 } })
   })
+
+  it('fingerprints the real lab firmware-to-console command flow', () => {
+    const fingerprint = parseSequence([
+      'UEFI] erase ddr',
+      'DRAM training information deleted: SUCCESS',
+      'UEFI] dtvs',
+      'UEFI] dtvs 1',
+      'UEFI] reset',
+      'B - 008000 - Warm reset asserted',
+      'UEFI] exit',
+      'console:/ # setddrclk 9600',
+      'console:/ # hdiag --pattern WR',
+    ].join('\n'), 'SM8975_lab-console.log')
+
+    expect(fingerprint.commandCount).toBe(7)
+    expect(fingerprint.commandSignatures).toEqual(expect.arrayContaining([
+      'training-control:erase-ddr', 'test-mode-control:dtvs', 'firmware-control:reset',
+      'firmware-control:exit', 'clock-control:setddrclk', 'diagnostic:hdiag',
+    ]))
+  })
 })

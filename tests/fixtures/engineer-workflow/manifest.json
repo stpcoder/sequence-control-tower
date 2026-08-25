@@ -1,5 +1,5 @@
 {
-  "generatorId": "engineer-workflow-corpus-v2",
+  "generatorId": "engineer-workflow-corpus-v3",
   "schemaVersion": 1,
   "title": "Privacy-safe deterministic engineer workflow corpus",
   "privacy": "All identifiers, addresses, temperatures, voltages, and records are synthetic and deterministic.",
@@ -43,7 +43,7 @@
   },
   "fixtures": [
     {
-      "relativePath": "26-08-20-09-00-01_UTF02A-2_Ch8_SM8975_1_-40_0.75_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_SystemHalt.log",
+      "relativePath": "26-08-20-09-00-01_UTF02A-2_Ch8_SM8975_1_-40_1.275_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_SystemHalt.log",
       "sample": "DHCST-89",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -51,10 +51,11 @@
       "outcome": "SYSTEM_HALT",
       "expectedResult": "SYSTEM_HALT",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|-40C|DIAG"
+      "comparisonKey": "DHCST-89|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-02_UTF02A-2_Ch8_SM8975_2_-40_0.75_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-02_UTF02A-2_Ch8_SM8975_2_-40_1.275_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -62,10 +63,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|-40C|DIAG"
+      "comparisonKey": "DHCST-89|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-03_UTF02A-2_Ch8_SM8975_3_-40_0.75_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-03_UTF02A-2_Ch8_SM8975_3_-40_1.275_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -73,10 +75,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-89|-40C|STRESS"
+      "comparisonKey": "DHCST-89|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-04_UTF02A-2_Ch8_SM8975_4_-40_0.75_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-04_UTF02A-2_Ch8_SM8975_4_-40_1.275_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -84,10 +87,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-89|-40C|STRESS"
+      "comparisonKey": "DHCST-89|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-05_UTF02A-2_Ch8_SM8975_5_25_0.80_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_MbeFail.log",
+      "relativePath": "26-08-20-09-00-05_UTF02A-2_Ch8_SM8975_5_25_1.295_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_MbeFail.log",
       "sample": "DHCST-89",
       "temperature": "25C",
       "mode": "DIAG",
@@ -95,10 +99,11 @@
       "outcome": "DIAG_FAIL",
       "expectedResult": "DIAG_FAIL",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|25C|DIAG"
+      "comparisonKey": "DHCST-89|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-06_UTF02A-2_Ch8_SM8975_6_25_0.80_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-06_UTF02A-2_Ch8_SM8975_6_25_1.295_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "25C",
       "mode": "DIAG",
@@ -106,10 +111,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|25C|DIAG"
+      "comparisonKey": "DHCST-89|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-07_UTF02A-2_Ch8_SM8975_7_25_0.80_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-07_UTF02A-2_Ch8_SM8975_7_25_1.295_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "25C",
       "mode": "STRESS",
@@ -117,10 +123,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-89|25C|STRESS"
+      "comparisonKey": "DHCST-89|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-08_UTF02A-2_Ch8_SM8975_8_25_0.80_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Fail.log",
+      "relativePath": "26-08-20-09-00-08_UTF02A-2_Ch8_SM8975_8_25_1.295_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Fail.log",
       "sample": "DHCST-89",
       "temperature": "25C",
       "mode": "STRESS",
@@ -128,10 +135,11 @@
       "outcome": "TEST_FAIL",
       "expectedResult": "TEST_FAIL",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-89|25C|STRESS"
+      "comparisonKey": "DHCST-89|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-09_UTF02A-2_Ch8_SM8975_9_85_0.90_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_TrainingFail.log",
+      "relativePath": "26-08-20-09-00-09_UTF02A-2_Ch8_SM8975_9_85_1.315_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_TrainingFail.log",
       "sample": "DHCST-89",
       "temperature": "85C",
       "mode": "DIAG",
@@ -139,10 +147,11 @@
       "outcome": "TRAINING_FAIL",
       "expectedResult": "TRAINING_FAIL",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-89|85C|DIAG"
+      "comparisonKey": "DHCST-89|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-10_UTF02A-2_Ch8_SM8975_10_85_0.90_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_TrainingFail.log",
+      "relativePath": "26-08-20-09-00-10_UTF02A-2_Ch8_SM8975_10_85_1.315_EVA_EN_SKEW-SS_TM-DIAG_RUN2_9600MHZ_COM74_DHCST-89_C_TrainingFail.log",
       "sample": "DHCST-89",
       "temperature": "85C",
       "mode": "DIAG",
@@ -150,10 +159,11 @@
       "outcome": "TRAINING_FAIL",
       "expectedResult": "TRAINING_FAIL",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-89|85C|DIAG"
+      "comparisonKey": "DHCST-89|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-11_UTF02A-2_Ch8_SM8975_11_85_0.90_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_HdiagReboot.log",
+      "relativePath": "26-08-20-09-00-11_UTF02A-2_Ch8_SM8975_11_85_1.315_EVA_EN_SKEW-SS_TM-STRESS_RUN1_9600MHZ_COM74_DHCST-89_C_HdiagReboot.log",
       "sample": "DHCST-89",
       "temperature": "85C",
       "mode": "STRESS",
@@ -161,10 +171,11 @@
       "outcome": "SYSTEM_REBOOT",
       "expectedResult": "SYSTEM_REBOOT",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|85C|STRESS"
+      "comparisonKey": "DHCST-89|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-20-09-00-12_UTF02A-2_Ch8_SM8975_12_85_0.90_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
+      "relativePath": "26-08-20-09-00-12_UTF02A-2_Ch8_SM8975_12_85_1.315_EVA_EN_SKEW-SS_TM-STRESS_RUN2_9600MHZ_COM74_DHCST-89_C_Pass.log",
       "sample": "DHCST-89",
       "temperature": "85C",
       "mode": "STRESS",
@@ -172,10 +183,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-89|85C|STRESS"
+      "comparisonKey": "DHCST-89|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-13_UTF02A-2_Ch9_SM8975_13_-40_0.75_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Fail.log",
+      "relativePath": "26-08-21-09-00-13_UTF02A-2_Ch9_SM8975_13_-40_1.275_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Fail.log",
       "sample": "DHCST-90",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -183,10 +195,11 @@
       "outcome": "TEST_FAIL",
       "expectedResult": "TEST_FAIL",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|-40C|DIAG"
+      "comparisonKey": "DHCST-90|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-14_UTF02A-2_Ch9_SM8975_14_-40_0.75_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-14_UTF02A-2_Ch9_SM8975_14_-40_1.275_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -194,10 +207,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|-40C|DIAG"
+      "comparisonKey": "DHCST-90|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-15_UTF02A-2_Ch9_SM8975_15_-40_0.75_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-15_UTF02A-2_Ch9_SM8975_15_-40_1.275_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -205,10 +219,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-90|-40C|STRESS"
+      "comparisonKey": "DHCST-90|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-16_UTF02A-2_Ch9_SM8975_16_-40_0.75_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_HdiagReboot.log",
+      "relativePath": "26-08-21-09-00-16_UTF02A-2_Ch9_SM8975_16_-40_1.275_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_HdiagReboot.log",
       "sample": "DHCST-90",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -216,10 +231,11 @@
       "outcome": "SYSTEM_REBOOT",
       "expectedResult": "SYSTEM_REBOOT",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-90|-40C|STRESS"
+      "comparisonKey": "DHCST-90|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-17_UTF02A-2_Ch9_SM8975_17_25_0.80_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Incomplete.log",
+      "relativePath": "26-08-21-09-00-17_UTF02A-2_Ch9_SM8975_17_25_1.295_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Incomplete.log",
       "sample": "DHCST-90",
       "temperature": "25C",
       "mode": "DIAG",
@@ -227,10 +243,11 @@
       "outcome": "INCOMPLETE",
       "expectedResult": "INCOMPLETE",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|25C|DIAG"
+      "comparisonKey": "DHCST-90|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-18_UTF02A-2_Ch9_SM8975_18_25_0.80_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-18_UTF02A-2_Ch9_SM8975_18_25_1.295_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "25C",
       "mode": "DIAG",
@@ -238,10 +255,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|25C|DIAG"
+      "comparisonKey": "DHCST-90|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-19_UTF02A-2_Ch9_SM8975_19_25_0.80_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_SystemHalt.log",
+      "relativePath": "26-08-21-09-00-19_UTF02A-2_Ch9_SM8975_19_25_1.295_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_SystemHalt.log",
       "sample": "DHCST-90",
       "temperature": "25C",
       "mode": "STRESS",
@@ -249,10 +267,11 @@
       "outcome": "SYSTEM_HALT",
       "expectedResult": "SYSTEM_HALT",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-90|25C|STRESS"
+      "comparisonKey": "DHCST-90|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-20_UTF02A-2_Ch9_SM8975_20_25_0.80_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_SystemHalt.log",
+      "relativePath": "26-08-21-09-00-20_UTF02A-2_Ch9_SM8975_20_25_1.295_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_SystemHalt.log",
       "sample": "DHCST-90",
       "temperature": "25C",
       "mode": "STRESS",
@@ -260,10 +279,11 @@
       "outcome": "SYSTEM_HALT",
       "expectedResult": "SYSTEM_HALT",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-90|25C|STRESS"
+      "comparisonKey": "DHCST-90|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-21_UTF02A-2_Ch9_SM8975_21_85_0.90_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Unknown.log",
+      "relativePath": "26-08-21-09-00-21_UTF02A-2_Ch9_SM8975_21_85_1.315_EVA_EN_SKEW-SF_TM-DIAG_RUN1_9600MHZ_COM75_DHCST-90_C_Unknown.log",
       "sample": "DHCST-90",
       "temperature": "85C",
       "mode": "DIAG",
@@ -271,10 +291,11 @@
       "outcome": "UNKNOWN",
       "expectedResult": "UNKNOWN",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|85C|DIAG"
+      "comparisonKey": "DHCST-90|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-22_UTF02A-2_Ch9_SM8975_22_85_0.90_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-22_UTF02A-2_Ch9_SM8975_22_85_1.315_EVA_EN_SKEW-SF_TM-DIAG_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "85C",
       "mode": "DIAG",
@@ -282,10 +303,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-90|85C|DIAG"
+      "comparisonKey": "DHCST-90|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-23_UTF02A-2_Ch9_SM8975_23_85_0.90_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-23_UTF02A-2_Ch9_SM8975_23_85_1.315_EVA_EN_SKEW-SF_TM-STRESS_RUN1_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "85C",
       "mode": "STRESS",
@@ -293,10 +315,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-90|85C|STRESS"
+      "comparisonKey": "DHCST-90|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-21-09-00-24_UTF02A-2_Ch9_SM8975_24_85_0.90_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
+      "relativePath": "26-08-21-09-00-24_UTF02A-2_Ch9_SM8975_24_85_1.315_EVA_EN_SKEW-SF_TM-STRESS_RUN2_9600MHZ_COM75_DHCST-90_C_Pass.log",
       "sample": "DHCST-90",
       "temperature": "85C",
       "mode": "STRESS",
@@ -304,10 +327,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-90|85C|STRESS"
+      "comparisonKey": "DHCST-90|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-25_UTF02A-2_Ch10_SM8975_25_-40_0.75_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-25_UTF02A-2_Ch10_SM8975_25_-40_1.275_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -315,10 +339,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-91|-40C|DIAG"
+      "comparisonKey": "DHCST-91|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-26_UTF02A-2_Ch10_SM8975_26_-40_0.75_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-26_UTF02A-2_Ch10_SM8975_26_-40_1.275_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -326,10 +351,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-91|-40C|DIAG"
+      "comparisonKey": "DHCST-91|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-27_UTF02A-2_Ch10_SM8975_27_-40_0.75_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_MbeFail.log",
+      "relativePath": "26-08-22-09-00-27_UTF02A-2_Ch10_SM8975_27_-40_1.275_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_MbeFail.log",
       "sample": "DHCST-91",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -337,10 +363,11 @@
       "outcome": "DIAG_FAIL",
       "expectedResult": "DIAG_FAIL",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-91|-40C|STRESS"
+      "comparisonKey": "DHCST-91|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-28_UTF02A-2_Ch10_SM8975_28_-40_0.75_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_MbeFail.log",
+      "relativePath": "26-08-22-09-00-28_UTF02A-2_Ch10_SM8975_28_-40_1.275_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_MbeFail.log",
       "sample": "DHCST-91",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -348,10 +375,11 @@
       "outcome": "DIAG_FAIL",
       "expectedResult": "DIAG_FAIL",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-91|-40C|STRESS"
+      "comparisonKey": "DHCST-91|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-29_UTF02A-2_Ch10_SM8975_29_25_0.80_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_TrainingFail.log",
+      "relativePath": "26-08-22-09-00-29_UTF02A-2_Ch10_SM8975_29_25_1.295_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_TrainingFail.log",
       "sample": "DHCST-91",
       "temperature": "25C",
       "mode": "DIAG",
@@ -359,10 +387,11 @@
       "outcome": "TRAINING_FAIL",
       "expectedResult": "TRAINING_FAIL",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-91|25C|DIAG"
+      "comparisonKey": "DHCST-91|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-30_UTF02A-2_Ch10_SM8975_30_25_0.80_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-30_UTF02A-2_Ch10_SM8975_30_25_1.295_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "25C",
       "mode": "DIAG",
@@ -370,10 +399,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-91|25C|DIAG"
+      "comparisonKey": "DHCST-91|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-31_UTF02A-2_Ch10_SM8975_31_25_0.80_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-31_UTF02A-2_Ch10_SM8975_31_25_1.295_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "25C",
       "mode": "STRESS",
@@ -381,10 +411,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-91|25C|STRESS"
+      "comparisonKey": "DHCST-91|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-32_UTF02A-2_Ch10_SM8975_32_25_0.80_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_Incomplete.log",
+      "relativePath": "26-08-22-09-00-32_UTF02A-2_Ch10_SM8975_32_25_1.295_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_Incomplete.log",
       "sample": "DHCST-91",
       "temperature": "25C",
       "mode": "STRESS",
@@ -392,10 +423,11 @@
       "outcome": "INCOMPLETE",
       "expectedResult": "INCOMPLETE",
       "pairTransition": "REGRESSION",
-      "comparisonKey": "DHCST-91|25C|STRESS"
+      "comparisonKey": "DHCST-91|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-33_UTF02A-2_Ch10_SM8975_33_85_0.90_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_Fail.log",
+      "relativePath": "26-08-22-09-00-33_UTF02A-2_Ch10_SM8975_33_85_1.315_EVA_EN_SKEW-FS_TM-DIAG_RUN1_9600MHZ_COM76_DHCST-91_C_Fail.log",
       "sample": "DHCST-91",
       "temperature": "85C",
       "mode": "DIAG",
@@ -403,10 +435,11 @@
       "outcome": "TEST_FAIL",
       "expectedResult": "TEST_FAIL",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-91|85C|DIAG"
+      "comparisonKey": "DHCST-91|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-34_UTF02A-2_Ch10_SM8975_34_85_0.90_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_SystemHalt.log",
+      "relativePath": "26-08-22-09-00-34_UTF02A-2_Ch10_SM8975_34_85_1.315_EVA_EN_SKEW-FS_TM-DIAG_RUN2_9600MHZ_COM76_DHCST-91_C_SystemHalt.log",
       "sample": "DHCST-91",
       "temperature": "85C",
       "mode": "DIAG",
@@ -414,10 +447,11 @@
       "outcome": "SYSTEM_HALT",
       "expectedResult": "SYSTEM_HALT",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-91|85C|DIAG"
+      "comparisonKey": "DHCST-91|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-35_UTF02A-2_Ch10_SM8975_35_85_0.90_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-35_UTF02A-2_Ch10_SM8975_35_85_1.315_EVA_EN_SKEW-FS_TM-STRESS_RUN1_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "85C",
       "mode": "STRESS",
@@ -425,10 +459,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-91|85C|STRESS"
+      "comparisonKey": "DHCST-91|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-22-09-00-36_UTF02A-2_Ch10_SM8975_36_85_0.90_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
+      "relativePath": "26-08-22-09-00-36_UTF02A-2_Ch10_SM8975_36_85_1.315_EVA_EN_SKEW-FS_TM-STRESS_RUN2_9600MHZ_COM76_DHCST-91_C_Pass.log",
       "sample": "DHCST-91",
       "temperature": "85C",
       "mode": "STRESS",
@@ -436,10 +471,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-91|85C|STRESS"
+      "comparisonKey": "DHCST-91|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-37_UTF02A-2_Ch11_SM8975_37_-40_0.75_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_HdiagReboot.log",
+      "relativePath": "26-08-23-09-00-37_UTF02A-2_Ch11_SM8975_37_-40_1.275_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_HdiagReboot.log",
       "sample": "DHCST-92",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -447,10 +483,11 @@
       "outcome": "SYSTEM_REBOOT",
       "expectedResult": "SYSTEM_REBOOT",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-92|-40C|DIAG"
+      "comparisonKey": "DHCST-92|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-38_UTF02A-2_Ch11_SM8975_38_-40_0.75_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
+      "relativePath": "26-08-23-09-00-38_UTF02A-2_Ch11_SM8975_38_-40_1.275_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
       "sample": "DHCST-92",
       "temperature": "-40C",
       "mode": "DIAG",
@@ -458,10 +495,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "RECOVERY",
-      "comparisonKey": "DHCST-92|-40C|DIAG"
+      "comparisonKey": "DHCST-92|-40C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-39_UTF02A-2_Ch11_SM8975_39_-40_0.75_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Pass.log",
+      "relativePath": "26-08-23-09-00-39_UTF02A-2_Ch11_SM8975_39_-40_1.275_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Pass.log",
       "sample": "DHCST-92",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -469,10 +507,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-92|-40C|STRESS"
+      "comparisonKey": "DHCST-92|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-40_UTF02A-2_Ch11_SM8975_40_-40_0.75_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
+      "relativePath": "26-08-23-09-00-40_UTF02A-2_Ch11_SM8975_40_-40_1.275_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
       "sample": "DHCST-92",
       "temperature": "-40C",
       "mode": "STRESS",
@@ -480,10 +519,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-92|-40C|STRESS"
+      "comparisonKey": "DHCST-92|-40C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-41_UTF02A-2_Ch11_SM8975_41_25_0.80_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_SystemHalt.log",
+      "relativePath": "26-08-23-09-00-41_UTF02A-2_Ch11_SM8975_41_25_1.295_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_SystemHalt.log",
       "sample": "DHCST-92",
       "temperature": "25C",
       "mode": "DIAG",
@@ -491,10 +531,11 @@
       "outcome": "SYSTEM_HALT",
       "expectedResult": "SYSTEM_HALT",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|25C|DIAG"
+      "comparisonKey": "DHCST-92|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-42_UTF02A-2_Ch11_SM8975_42_25_0.80_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_HdiagReboot.log",
+      "relativePath": "26-08-23-09-00-42_UTF02A-2_Ch11_SM8975_42_25_1.295_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_HdiagReboot.log",
       "sample": "DHCST-92",
       "temperature": "25C",
       "mode": "DIAG",
@@ -502,10 +543,11 @@
       "outcome": "SYSTEM_REBOOT",
       "expectedResult": "SYSTEM_REBOOT",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|25C|DIAG"
+      "comparisonKey": "DHCST-92|25C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-43_UTF02A-2_Ch11_SM8975_43_25_0.80_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Unknown.log",
+      "relativePath": "26-08-23-09-00-43_UTF02A-2_Ch11_SM8975_43_25_1.295_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Unknown.log",
       "sample": "DHCST-92",
       "temperature": "25C",
       "mode": "STRESS",
@@ -513,10 +555,11 @@
       "outcome": "UNKNOWN",
       "expectedResult": "UNKNOWN",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|25C|STRESS"
+      "comparisonKey": "DHCST-92|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-44_UTF02A-2_Ch11_SM8975_44_25_0.80_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Unknown.log",
+      "relativePath": "26-08-23-09-00-44_UTF02A-2_Ch11_SM8975_44_25_1.295_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Unknown.log",
       "sample": "DHCST-92",
       "temperature": "25C",
       "mode": "STRESS",
@@ -524,10 +567,11 @@
       "outcome": "UNKNOWN",
       "expectedResult": "UNKNOWN",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|25C|STRESS"
+      "comparisonKey": "DHCST-92|25C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-45_UTF02A-2_Ch11_SM8975_45_85_0.90_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_Incomplete.log",
+      "relativePath": "26-08-23-09-00-45_UTF02A-2_Ch11_SM8975_45_85_1.315_EVA_EN_SKEW-FF_TM-DIAG_RUN1_9600MHZ_COM77_DHCST-92_C_Incomplete.log",
       "sample": "DHCST-92",
       "temperature": "85C",
       "mode": "DIAG",
@@ -535,10 +579,11 @@
       "outcome": "INCOMPLETE",
       "expectedResult": "INCOMPLETE",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|85C|DIAG"
+      "comparisonKey": "DHCST-92|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-46_UTF02A-2_Ch11_SM8975_46_85_0.90_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_Incomplete.log",
+      "relativePath": "26-08-23-09-00-46_UTF02A-2_Ch11_SM8975_46_85_1.315_EVA_EN_SKEW-FF_TM-DIAG_RUN2_9600MHZ_COM77_DHCST-92_C_Incomplete.log",
       "sample": "DHCST-92",
       "temperature": "85C",
       "mode": "DIAG",
@@ -546,10 +591,11 @@
       "outcome": "INCOMPLETE",
       "expectedResult": "INCOMPLETE",
       "pairTransition": "STABLE_FAILURE",
-      "comparisonKey": "DHCST-92|85C|DIAG"
+      "comparisonKey": "DHCST-92|85C|DIAG",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-47_UTF02A-2_Ch11_SM8975_47_85_0.90_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Pass.log",
+      "relativePath": "26-08-23-09-00-47_UTF02A-2_Ch11_SM8975_47_85_1.315_EVA_EN_SKEW-FF_TM-STRESS_RUN1_9600MHZ_COM77_DHCST-92_C_Pass.log",
       "sample": "DHCST-92",
       "temperature": "85C",
       "mode": "STRESS",
@@ -557,10 +603,11 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-92|85C|STRESS"
+      "comparisonKey": "DHCST-92|85C|STRESS",
+      "lineCount": 3600
     },
     {
-      "relativePath": "26-08-23-09-00-48_UTF02A-2_Ch11_SM8975_48_85_0.90_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
+      "relativePath": "26-08-23-09-00-48_UTF02A-2_Ch11_SM8975_48_85_1.315_EVA_EN_SKEW-FF_TM-STRESS_RUN2_9600MHZ_COM77_DHCST-92_C_Pass.log",
       "sample": "DHCST-92",
       "temperature": "85C",
       "mode": "STRESS",
@@ -568,7 +615,8 @@
       "outcome": "PASS",
       "expectedResult": "PASS",
       "pairTransition": "STABLE_PASS",
-      "comparisonKey": "DHCST-92|85C|STRESS"
+      "comparisonKey": "DHCST-92|85C|STRESS",
+      "lineCount": 3600
     }
   ]
 }

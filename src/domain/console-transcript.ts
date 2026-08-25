@@ -81,11 +81,12 @@ function validCommand(value: string): string | null {
 function promptMatch(raw: string): PromptMatch | null {
   const line = withoutCapturePrefix(raw)
   const patterns: Array<{ expression: RegExp; kind: ConsolePromptKind; signature: string; confidence: number; promptGroup: number; commandGroup: number; ambiguous?: boolean }> = [
-    { expression: /^((?:UEFI|EDK2|Shell|FS\d+:\\?)\s*>)[ \t]*(.+)$/i, kind: 'uefi', signature: 'uefi-angle', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
+    { expression: /^((?:UEFI|EDK2|Shell|FS\d+:\\?)\s*(?:>|\]))[ \t]*(.+)$/i, kind: 'uefi', signature: 'uefi-firmware-prompt', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^((?:LK2?|PBL|XBL|ABL|BOOTLOADER)\s*>)[ \t]*(.+)$/i, kind: 'bootloader', signature: 'bootloader-angle', confidence: 0.98, promptGroup: 1, commandGroup: 2 },
     { expression: /^((?:root|shell)@[A-Za-z0-9._-]+(?::[^#$\s]*)?\s*#)[ \t]+(.+)$/i, kind: 'os-root', signature: 'os-root-host', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^([A-Za-z0-9._-]+@[A-Za-z0-9._-]+(?::[^$\s]*)?\s*\$)[ \t]+(.+)$/i, kind: 'os-user', signature: 'os-user-host', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^([A-Za-z0-9._-]+:\/[^#\s]*\s*#)[ \t]+(.+)$/i, kind: 'os-root', signature: 'android-root', confidence: 0.98, promptGroup: 1, commandGroup: 2 },
+    { expression: /^((?:console|uart|serial)\s*:\s*#)[ \t]*(.+)$/i, kind: 'os-root', signature: 'console-root', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^((?:TX|SEND|CMD|INPUT)\s*(?:>|:))[ \t]*(.+)$/i, kind: 'transport', signature: 'transport-command', confidence: 0.95, promptGroup: 1, commandGroup: 2 },
     { expression: /^(=>)[ \t]+(.+)$/, kind: 'bootloader', signature: 'bootloader-arrow', confidence: 0.96, promptGroup: 1, commandGroup: 2 },
     { expression: /^(#)[ \t]+(.+)$/, kind: 'bare-root', signature: 'bare-root-hash', confidence: 0.62, promptGroup: 1, commandGroup: 2, ambiguous: true },
@@ -112,7 +113,7 @@ const STATUS_PATTERNS: Array<{ kind: ConsoleStatusKind; expression: RegExp }> = 
   { kind: 'at-pass', expression: /(?:^|\s)@PASS(?:\s|$)/i },
   { kind: 'at-fail', expression: /(?:^|\s)@FAIL(?:\s|$)/i },
   { kind: 'training-fail', expression: /\b(?:TRAINING|TRAIN)[ _:-]*FAIL(?:ED|URE)?\b/i },
-  { kind: 'reboot', expression: /\b(?:SYSTEM[ _-]*REBOOT|WATCHDOG|REBOOT_REASON|WARM RESET)\b/i },
+  { kind: 'reboot', expression: /\b(?:SYSTEM[ _-]*REBOOT|WATCHDOG|REBOOT_REASON)\b/i },
   { kind: 'halt', expression: /\b(?:SYSTEM[ _-]*HALT|CPU[ _-]*HALT|FATAL EXCEPTION|KERNEL PANIC)\b/i },
   { kind: 'fast-fail', expression: /\b(?:FAST[ _-]*FAIL|FAIL[ _-]*FAST|EARLY[ _-]*EXIT)\b/i },
   { kind: 'stress-pass', expression: /\bstressapp(?:test)?\b.{0,100}\bPASS\b/i },
@@ -121,7 +122,7 @@ const STATUS_PATTERNS: Array<{ kind: ConsoleStatusKind; expression: RegExp }> = 
 ]
 
 export function consolePromptSearchPattern(): string {
-  return '(?:UEFI|EDK2|Shell|FS\\d+:\\\\?|LK2?|PBL|XBL|ABL|BOOTLOADER)\\s*>|(?:root|shell)@[A-Za-z0-9._-]+[^#\\n]{0,80}#|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+[^$\\n]{0,80}\\$|(?:TX|SEND|CMD|INPUT)\\s*(?:>|:)|^\\s*(?:#|\\$|=>)\\s+'
+  return '(?:UEFI|EDK2|Shell|FS\\d+:\\\\?|LK2?|PBL|XBL|ABL|BOOTLOADER)\\s*(?:>|\\])|[A-Za-z0-9._-]+:/[^#\\n]{0,80}#|(?:console|uart|serial)\\s*:\\s*#|(?:root|shell)@[A-Za-z0-9._-]+[^#\\n]{0,80}#|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+[^$\\n]{0,80}\\$|(?:TX|SEND|CMD|INPUT)\\s*(?:>|:)|^\\s*(?:#|\\$|=>)\\s+'
 }
 
 export function classifyConsoleLine(raw: string, decisions: readonly ConsolePromptDecision[] = []): { role: ConsoleLineRole; prompt?: PromptMatch; statuses: ConsoleStatusKind[] } {
@@ -195,7 +196,7 @@ export function analyzeConsoleTranscript(text: string, decisions: readonly Conso
 export function looksLikeConsoleTranscript(fileName: string, text: string): boolean {
   if (/\.(?:log|txt|out|console)$/i.test(fileName)) return true
   const sample = text.slice(0, 128_000)
-  const strongPrompts = sample.match(/(?:UEFI|EDK2|Shell|LK2?|PBL|XBL|ABL)\s*>|(?:root|shell)@[\w.-]+[^#\n]{0,80}#/gi)?.length ?? 0
+  const strongPrompts = sample.match(/(?:UEFI|EDK2|Shell|LK2?|PBL|XBL|ABL)\s*(?:>|\])|[\w.-]+:\/[^#\n]{0,80}#|(?:console|uart|serial)\s*:\s*#|(?:root|shell)@[\w.-]+[^#\n]{0,80}#/gi)?.length ?? 0
   const statusMarkers = sample.match(/@(?:PASS|FAIL)|TRAIN(?:ING)?[_ :-]*FAIL|SYSTEM[_ -]*(?:HALT|REBOOT)/gi)?.length ?? 0
   return strongPrompts >= 2 || statusMarkers >= 2
 }

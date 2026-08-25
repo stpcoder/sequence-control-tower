@@ -232,9 +232,12 @@ function executableOf(command: string): string {
 export function inferCommandFamily(command: string): { family: string; executable: string } {
   const lower = command.toLocaleLowerCase("en-US");
   const executable = executableOf(command);
+  if (/^erase\s+ddr\b/.test(lower)) return { family: "training-control", executable: "erase-ddr" };
+  if (/^dtvs(?:\s|$)/.test(lower)) return { family: "test-mode-control", executable: "dtvs" };
+  if (/^(?:reset|exit)(?:\s|$)/.test(lower)) return { family: "firmware-control", executable };
   if (/\b(?:@?tf|temp(?:erature)?|chamber)\b/.test(lower)) return { family: "temperature-control", executable };
   if (/\b(?:vdd\w*|vcc\w*|vpp|set_rail)\b/.test(lower)) return { family: "voltage-control", executable };
-  if (/\b(?:clk(?:\.sh)?|clock|frequency|freq)\b/.test(lower)) return { family: "clock-control", executable };
+  if (/\b(?:setddrclk|clk(?:\.sh)?|clock|frequency|freq)\b/.test(lower)) return { family: "clock-control", executable };
   if (/\b(?:hdiag\w*|diag\w*|memtest\w*)\b/.test(lower)) return { family: "diagnostic", executable };
   if (/\badb(?:\.exe)?\b/.test(lower)) return { family: "device-bridge", executable };
   if (/^(?:sleep|wait|timeout)\b/.test(lower)) return { family: "timing", executable };

@@ -30,11 +30,13 @@ import {
   defaultRuleObservationIds,
   deferredSearchHitIndex,
   DEFAULT_WORKBENCH_PANE_WIDTHS,
+  emptyBatchPreview,
   clauseSpecKey,
   filterUserRecipeRevisions,
   folderSelectionTargetId,
   groupWorkspaceSearchHits,
   recipeEvidenceSpecs,
+  removeRulesFromAppliedFolders,
   ruleFolderUsage,
   recipeRuleSummary,
   recentSearchQueries,
@@ -536,6 +538,22 @@ describe('Log Workbench UI data hardening', () => {
     expect(canApplyBatchResult(true, second, first)).toBe(false)
     expect(canApplyBatchResult(true, second, second)).toBe(true)
     expect(canApplyBatchResult(false, second, second)).toBe(false)
+  })
+
+  it('returns rule controls to an actionable state when batch work is invalidated', () => {
+    expect(emptyBatchPreview()).toEqual({ status: 'idle', matched: 0, exceptions: 0 })
+  })
+
+  it('removes a deleted rule from every folder where it was applied', () => {
+    const deleted = { id: 'rule-deleted' } as RecipeRule
+    const retained = { id: 'rule-retained' } as RecipeRule
+    expect(removeRulesFromAppliedFolders({
+      'root:a': [deleted, retained],
+      'root:b': [deleted],
+    }, new Set([deleted.id]))).toEqual({
+      'root:a': [retained],
+      'root:b': [],
+    })
   })
 
   it('invalidates batch work as soon as a folder import starts', () => {

@@ -4,6 +4,7 @@ import {
   appliedBatchRulesByFolder,
   availableEvaluationLogs,
   createLatestProjectSaveQueue,
+  hydrateEvaluation,
   projectArtifactFiles,
   projectLoadFileState,
   reconcileProjectListedFiles,
@@ -98,6 +99,45 @@ describe('project UI state updates', () => {
     expect(appliedBatchRulesByFolder([
       { id: 'file-a', name: 'file-a.log', artifactId: 'artifact-a', rootId: 'root-a' },
     ], snapshot)).toEqual({ 'root:root-a': [savedRule] })
+  })
+
+  it('does not resurrect an older judgment after the latest matching rule is deleted', () => {
+    const activeRule: RecipeRule = {
+      id: 'rule-active', label: 'PASS', status: 'candidate', scope: { kind: 'analysis' },
+      clauses: [], priority: 0, confidence: 0.9, repetition: 1, createdFromSourceIds: ['file-a'],
+    }
+    const deletedRule: RecipeRule = {
+      ...activeRule, id: 'rule-deleted', label: 'TEST_FAIL', createdFromSourceIds: ['file-a'],
+    }
+    const source = { sourceId: 'file-a', artifactId: 'artifact-a', sourceKeyHash: 'source-a' }
+    const snapshot: EvaluationProjectSnapshot = {
+      schemaVersion: 1,
+      projectIdHash: 'project',
+      revision: 3,
+      decisions: [],
+      recipes: [
+        { id: 'active-revision', recipeId: 'active-recipe', revision: 1, name: 'active', rules: [activeRule], createdAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'deleted-revision', recipeId: 'deleted-recipe', revision: 1, name: 'deleted', rules: [deletedRule], createdAt: '2026-01-02T00:00:00.000Z' },
+        { id: 'deleted-archive', recipeId: 'deleted-recipe', revision: 2, name: 'deleted', rules: [], createdAt: '2026-01-03T00:00:00.000Z', archived: true },
+      ],
+      batches: [
+        {
+          id: 'older-active', status: 'completed', recipeRevisionIds: ['active-revision'],
+          outcomes: [{ source, result: 'PASS', outcomeSource: 'rule', matchedRuleId: 'rule-active', evidenceRefs: [] }],
+          matchedCount: 1, exceptionCount: 0, startedAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'latest-deleted', status: 'completed', recipeRevisionIds: ['deleted-revision'],
+          outcomes: [{ source, result: 'TEST_FAIL', outcomeSource: 'rule', matchedRuleId: 'rule-deleted', evidenceRefs: [] }],
+          matchedCount: 1, exceptionCount: 0, startedAt: '2026-01-02T00:00:00.000Z', completedAt: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+      metadataApprovals: [],
+    }
+
+    expect(hydrateEvaluation([
+      { id: 'file-a', name: 'file-a.log', artifactId: 'artifact-a', ruleResult: 'PASS' },
+    ], snapshot)[0]).not.toHaveProperty('ruleResult')
   })
 
   it('serializes immediate memory saves against the latest saved revision', async () => {

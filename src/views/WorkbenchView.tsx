@@ -369,7 +369,7 @@ export function lineWindowEdgeRequestKey(fileId: string, edge: LineWindowEdge, b
   return `${fileId}:${edge}:${boundary}`
 }
 
-interface BatchPreview {
+export interface BatchPreview {
   status: 'idle' | 'running' | 'done' | 'error'
   matched: number
   exceptions: number
@@ -620,6 +620,20 @@ export function advanceBatchGeneration(currentGeneration: number): number {
   return currentGeneration + 1
 }
 
+export function emptyBatchPreview(): BatchPreview {
+  return { status: 'idle', matched: 0, exceptions: 0 }
+}
+
+export function removeRulesFromAppliedFolders(
+  current: Readonly<Record<string, readonly RecipeRule[]>>,
+  deletedRuleIds: ReadonlySet<string>,
+): Record<string, RecipeRule[]> {
+  return Object.fromEntries(Object.entries(current).map(([folderKey, rules]) => [
+    folderKey,
+    rules.filter((rule) => !deletedRuleIds.has(rule.id)),
+  ]))
+}
+
 export function invalidateImportBatchGeneration(currentGeneration: number): number {
   return advanceBatchGeneration(currentGeneration)
 }
@@ -738,35 +752,83 @@ export function omitFileCacheEntry<T>(cache: Readonly<Record<string, T>>, fileId
   return next
 }
 
+function embeddedDemoLog(condition: string, terminal: string[], trainingFailure = false): string {
+  const lines = [
+    '# SYNTHETIC_BROWSER_DEMO: not a vendor capture',
+    `META ${condition}`,
+    'B - 000000 - Power key pressed',
+    'B - 000017 - PBL, Start',
+    'B - 000085 - PMIC rails stable',
+    'B - 000136 - UFS link startup complete',
+    'B - 000221 - XBL loader authentication complete',
+    'B - 000340 - DDR training, Start',
+  ]
+  const training = (cycle: number, count: number) => {
+    const phases = ['CA', 'write-leveling', 'read-gate', 'read-eye', 'write-eye', 'VrefDQ', 'deskew']
+    for (let index = 0; index < count; index += 1) {
+      lines.push(`DDR_TRAIN cycle=${cycle} phase=${phases[Math.floor(index / 32) % phases.length]} CH=${index % 4} SUBCH=${Math.floor(index / 4) % 2} DQ=${index % 32} left=${18 + index % 17} right=${20 + index % 19} result=PASS`)
+    }
+  }
+  training(1, 240)
+  lines.push(
+    'TRAINING_PASS', 'UEFI]', 'UEFI]', 'UEFI] erase ddr', 'DRAM training information deleted: SUCCESS',
+    'UEFI] dtvs', 'dtvs 0: DEFAULT', `dtvs 1: EVALUATION ${condition}`, 'dtvs 2: LOW_MARGIN',
+    'dtvs 3: HIGH_MARGIN', 'UEFI] dtvs 1', 'DTVS option 1 selected', 'UEFI] reset',
+    'B - 008000 - Warm reset asserted', 'B - 008340 - DDR training, Start',
+  )
+  training(2, trainingFailure ? 1_800 : 240)
+  if (trainingFailure) return [...lines, ...terminal].join('\n')
+  lines.push(
+    'TRAINING_PASS', 'UEFI]', 'UEFI] exit', 'UEFI: ExitBootServices', 'EFI stub: Booting Linux Kernel...',
+    '[    0.252104] init: init first stage started!', '[    0.260803] init: Loading Android SELinux policy',
+    '[    0.418776] init: init second stage started!',
+  )
+  const services = ['servicemanager', 'hwservicemanager', 'vold', 'apexd', 'logd', 'zygote', 'surfaceflinger']
+  for (let index = 0; index < 1_200; index += 1) {
+    const variant = index % 5
+    if (variant === 0) lines.push(`[${(0.5 + index * 0.004).toFixed(6)}] init: starting service '${services[index % services.length]}' pid=${300 + index}`)
+    else if (variant === 1) lines.push(`[${(0.5 + index * 0.004).toFixed(6)}] ueventd: /devices/platform/soc/${index % 48} permissions applied`)
+    else if (variant === 2) lines.push(`[${(0.5 + index * 0.004).toFixed(6)}] ufshcd: tag=${index % 32} command complete status=0`)
+    else if (variant === 3) lines.push(`[${(0.5 + index * 0.004).toFixed(6)}] binder: transaction=${index} completed`)
+    else lines.push(`[${(0.5 + index * 0.004).toFixed(6)}] thermal: zone=${index % 6} temp=${42000 + index % 13000}`)
+  }
+  lines.push('console:/ #', 'console:/ # setddrclk 9600', 'console:/ # hdiag --pattern WR --loops 200', 'HIDAG START pattern=WR', 'console:/ # sleep 20')
+  while (lines.length < 2_600 - terminal.length) {
+    const index = lines.length
+    lines.push(`HIDAG progress loop=${Math.floor(index / 32)}/200 CH=${index % 4} SUBCH=${Math.floor(index / 4) % 2} BG=${index % 4} BK=${index % 8} compare=PASS`)
+  }
+  return [...lines, ...terminal].join('\n')
+}
+
 export const DEMO_LOGS: WorkbenchFile[] = [
   {
     id: 'demo-pass-01',
     origin: 'Qualcomm_A / 85C',
-    relativePath: 'LOT12/CHAE-1/26-08-07-09-14-02_UTF02A-2_Ch8_SM8975_1_85_0.780_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-PRBS31_COM74_CHAE-1_C_Pass.log',
-    name: '26-08-07-09-14-02_UTF02A-2_Ch8_SM8975_1_85_0.780_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-PRBS31_COM74_CHAE-1_C_Pass.log',
-    text: `[2026-07-31 09:14:02.118] boot: platform init\n[2026-07-31 09:14:04.903] env: temperature=85.1C, vdd=0.780V\n[2026-07-31 09:14:05.220] mode: DIAG inserted\n[2026-07-31 09:14:06.101] stressapp: start, duration=3600\n[2026-07-31 09:14:41.308] stressapp: memory pattern 0xAA PASS\n[2026-07-31 09:15:18.427] stressapp: memory pattern 0x55 PASS\n[2026-07-31 09:15:30.601] hidag: start\n[2026-07-31 09:15:33.885] hidag: training phase complete\n[2026-07-31 09:15:41.092] hidag: link margin 14.2%\n[2026-07-31 09:15:45.716] @PASS DIAG_COMPLETE\n[2026-07-31 09:15:45.719] normal_end: true\n[2026-07-31 09:15:46.002] session closed`,
+    relativePath: 'LOT12/CHAE-1/26-08-07-09-14-02_UTF02A-2_Ch8_SM8975_1_85_1.315_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-PRBS31_COM74_CHAE-1_C_Pass.log',
+    name: '26-08-07-09-14-02_UTF02A-2_Ch8_SM8975_1_85_1.315_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-PRBS31_COM74_CHAE-1_C_Pass.log',
+    text: embeddedDemoLog('TEMP=85C VDD=1.315V FREQ=9600MHz TM=DIAG PATTERN=PRBS31', ['stressapptest PASS', '@PASS', 'TEST COMPLETE']),
     decision: 'PASS',
   },
   {
     id: 'demo-halt-03',
     origin: 'Qualcomm_A / 85C',
-    relativePath: 'LOT12/DHBCT-4/26-08-07-10-42-11_UTF02A-2_Ch8_SM8975_2_85_0.780_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-WR_COM74_DHBCT-4_C_SystemHalt.log',
-    name: '26-08-07-10-42-11_UTF02A-2_Ch8_SM8975_2_85_0.780_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-WR_COM74_DHBCT-4_C_SystemHalt.log',
-    text: `[2026-07-31 10:42:11.008] boot: platform init\n[2026-07-31 10:42:13.711] env: temperature=84.8C, vdd=0.780V\n[2026-07-31 10:42:14.104] mode: DIAG inserted\n[2026-07-31 10:42:15.884] stressapp: start, duration=3600\n[2026-07-31 10:42:50.049] stressapp: memory pattern 0xAA PASS\n[2026-07-31 10:43:17.201] stressapp: memory pattern 0x55 PASS\n[2026-07-31 10:43:29.774] hidag: start\n[2026-07-31 10:43:32.192] hidag: training phase complete\n[2026-07-31 10:43:35.668] HIDAG ERROR CH=0 SUBCH=0 CS=0 RK=0 BG=1 BK=3 ROW=0x002A COL=0x014 WR=0x55 RD=0x15 DQ=9 BL=16\n[2026-07-31 10:43:35.669] HIDAG ERROR CH=0 SUBCH=0 CS=0 RK=0 BG=1 BK=3 ROW=0x002B COL=0x018 WR=0xAA RD=0xA8 DQ=9 BL=16\n[2026-07-31 10:43:35.811] watchdog: heartbeat delayed\n[2026-07-31 10:43:36.901] watchdog: heartbeat delayed\n[2026-07-31 10:43:38.119] CPU_HALT pmic rail monitor timeout`,
+    relativePath: 'LOT12/DHBCT-4/26-08-07-10-42-11_UTF02A-2_Ch8_SM8975_2_85_1.315_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-WR_COM74_DHBCT-4_C_SystemHalt.log',
+    name: '26-08-07-10-42-11_UTF02A-2_Ch8_SM8975_2_85_1.315_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-WR_COM74_DHBCT-4_C_SystemHalt.log',
+    text: embeddedDemoLog('TEMP=85C VDD=1.315V FREQ=9600MHz TM=DIAG PATTERN=WR', ['HIDAG ERROR CH=0 SUBCH=0 CS=0 RK=0 BG=1 BK=3 ROW=0x002A COL=0x014 WR=0x55 RD=0x15 DQ=9 BL=16', 'HIDAG heartbeat stopped without @PASS or @FAIL', 'SYSTEM_HALT']),
   },
   {
     id: 'demo-training-07',
     origin: 'Qualcomm_A / 105C',
-    relativePath: 'LOT12/BCT-7/26-08-07-13-08-01_UTF02A-2_Ch6_SM8975_3_105_0.760_EVA_EN_DEFAULT_8533MHZ_TM-BOOT_PAT-TRAIN_COM62_BCT-7_C_TrainingFail.log',
-    name: '26-08-07-13-08-01_UTF02A-2_Ch6_SM8975_3_105_0.760_EVA_EN_DEFAULT_8533MHZ_TM-BOOT_PAT-TRAIN_COM62_BCT-7_C_TrainingFail.log',
-    text: `[2026-07-31 13:08:01.220] boot: platform init\n[2026-07-31 13:08:03.101] env: temperature=105.3C, vdd=0.760V\n[2026-07-31 13:08:03.908] mode: DIAG inserted\n[2026-07-31 13:08:05.345] stressapp: start, duration=3600\n[2026-07-31 13:08:29.720] stressapp: memory pattern 0xAA PASS\n[2026-07-31 13:08:48.387] hidag: start\n[2026-07-31 13:08:50.001] training: lane0 complete\n[2026-07-31 13:08:51.118] training: lane1 timeout\n[2026-07-31 13:08:51.201] TRAINING_FAIL CH=1 SUBCH=0 CS=0 RK=0 BG=0 BK=1 DQ=20 BL=32 lane=1 retry=3\n[2026-07-31 13:08:51.208] @FAIL code=TR_014\n[2026-07-31 13:08:51.511] normal_end: true`,
+    relativePath: 'LOT12/BCT-7/26-08-07-13-08-01_UTF02A-2_Ch6_SM8975_3_105_1.275_EVA_EN_DEFAULT_8533MHZ_TM-BOOT_PAT-TRAIN_COM62_BCT-7_C_TrainingFail.log',
+    name: '26-08-07-13-08-01_UTF02A-2_Ch6_SM8975_3_105_1.275_EVA_EN_DEFAULT_8533MHZ_TM-BOOT_PAT-TRAIN_COM62_BCT-7_C_TrainingFail.log',
+    text: embeddedDemoLog('TEMP=105C VDD=1.275V FREQ=8533MHz TM=BOOT PATTERN=TRAIN', ['DDR_TRAIN phase=read-eye CH=1 SUBCH=0 DQ=20 left=0 right=1 result=FAIL', 'TRAINING_FAIL CH=1 SUBCH=0 CS=0 RK=0 BG=0 BK=1 DQ=20 BL=32 reason=window-collapsed', 'SYSTEM_HALT'], true),
   },
   {
     id: 'demo-reboot-09',
     origin: 'Qualcomm_A / 105C',
-    relativePath: 'LOT12/RTN-21/26-08-07-14-11-07_UTF02A-2_Ch10_SM8975_4_105_0.760_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-MARCH_COM81_RTN-21_C_HdiagReboot.log',
-    name: '26-08-07-14-11-07_UTF02A-2_Ch10_SM8975_4_105_0.760_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-MARCH_COM81_RTN-21_C_HdiagReboot.log',
-    text: `[2026-07-31 14:11:07.100] boot: platform init\n[2026-07-31 14:11:09.824] env: temperature=104.9C, vdd=0.760V\n[2026-07-31 14:11:10.090] mode: DIAG inserted\n[2026-07-31 14:11:11.431] stressapp: start, duration=3600\n[2026-07-31 14:11:44.812] kernel: fatal exception at 0x4E20\n[2026-07-31 14:11:44.816] reboot_reason: WATCHDOG_RESET\n[2026-07-31 14:11:48.027] boot: platform init\n[2026-07-31 14:11:50.638] session recovery detected`,
+    relativePath: 'LOT12/RTN-21/26-08-07-14-11-07_UTF02A-2_Ch10_SM8975_4_105_1.275_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-MARCH_COM81_RTN-21_C_HdiagReboot.log',
+    name: '26-08-07-14-11-07_UTF02A-2_Ch10_SM8975_4_105_1.275_EVA_EN_DEFAULT_9600MHZ_TM-DIAG_PAT-MARCH_COM81_RTN-21_C_HdiagReboot.log',
+    text: embeddedDemoLog('TEMP=105C VDD=1.275V FREQ=9600MHz TM=DIAG PATTERN=MARCH', ['HIDAG ERROR CH=2 SUBCH=1 RK=0 BG=2 BK=4 ROW=0x08F0 COL=0x03C DQ=4 BL=16', 'WATCHDOG bite detected', 'REBOOT_REASON=hdiag-timeout', 'SYSTEM_REBOOT']),
   },
 ]
 
@@ -1325,7 +1387,7 @@ export function WorkbenchView({
   const [archivedRecipeIds, setArchivedRecipeIds] = useState<Set<string>>(() => new Set())
   const [unresolvedRecipeClauseIds, setUnresolvedRecipeClauseIds] = useState<Set<string>>(() => new Set())
   const [recipeEvidenceBusy, setRecipeEvidenceBusy] = useState(false)
-  const [batchPreview, setBatchPreview] = useState<BatchPreview>({ status: 'idle', matched: 0, exceptions: 0 })
+  const [batchPreview, setBatchPreview] = useState<BatchPreview>(emptyBatchPreview)
   const [showBatchExceptions, setShowBatchExceptions] = useState(false)
   const [searchOptionsOpen, setSearchOptionsOpen] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -1372,6 +1434,12 @@ export function WorkbenchView({
   const importInFlightRef = useRef(false)
   const patternReviewGeneration = useRef(0)
   const patternReviewJobIdRef = useRef('')
+
+  const invalidateBatchRun = useCallback(() => {
+    batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
+    setBatchPreview(emptyBatchPreview())
+    setShowBatchExceptions(false)
+  }, [])
 
   const resetSearchNavigation = useCallback(() => {
     setCurrentHit(0)
@@ -1852,6 +1920,7 @@ export function WorkbenchView({
 
   const loadRecipeIntoDraft = (recipe: EvaluationRecipeRevision, rule: RecipeRule) => {
     if (!activeFile) return
+    invalidateBatchRun()
     const history = searchHistory[activeFile.id] ?? []
     const unresolved = new Set<string>()
     const restored = rule.clauses.map((clause) => {
@@ -1912,6 +1981,8 @@ export function WorkbenchView({
     const recipe = activeRecipeRevisions.find((item) => item.recipeId === recipeId)
     if (!recipe || !window.confirm(`“${recipe.name}” 규칙을 삭제할까요?`)) return
     const deletedRuleIds = new Set(recipe.rules.map((rule) => rule.id))
+    invalidateBatchRun()
+    setRecipeApplyId((current) => current === recipeId ? null : current)
     setArchivedRecipeIds((current) => new Set(current).add(recipeId))
     try {
       if (onArchiveRecipe) {
@@ -1928,15 +1999,10 @@ export function WorkbenchView({
         setRecipeDetailsOpen(false)
         setRecipeSaved(false)
       }
-      if (activeFile) {
-        const folderKey = workbenchRootGroupKey(activeFile)
-        setSessionAppliedRulesByFolder((current) => ({
-          ...current,
-          [folderKey]: (current[folderKey] ?? []).filter((rule) => !deletedRuleIds.has(rule.id)),
-        }))
-      }
+      setSessionAppliedRulesByFolder((current) => removeRulesFromAppliedFolders(current, deletedRuleIds))
       onNotify?.(`${recipe.name} 규칙을 삭제했습니다.`, 'success')
     } catch (error) {
+      console.error('[WorkbenchView] Failed to delete analysis rule', { recipeId, error })
       setArchivedRecipeIds((current) => { const next = new Set(current); next.delete(recipeId); return next })
       onNotify?.(error instanceof Error ? `규칙을 삭제하지 못했습니다: ${error.message}` : '규칙을 삭제하지 못했습니다.', 'error')
     }
@@ -1994,7 +2060,7 @@ export function WorkbenchView({
     if (changingFile) {
       setRecipeDetailsOpen(false)
       bestEffortCancelPatternReview()
-      batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
+      invalidateBatchRun()
       lineScrollAnchor.current = null
       activeFileIdRef.current = fileId
       lineWindowEpochs.current.set(fileId, (lineWindowEpochs.current.get(fileId) ?? 0) + 1)
@@ -2018,7 +2084,7 @@ export function WorkbenchView({
       setRevealedLine(null)
     }
     onSelectedFileChange?.(fileId)
-  }, [bestEffortCancelPatternReview, onSelectedFileChange, resetSearchNavigation])
+  }, [bestEffortCancelPatternReview, invalidateBatchRun, onSelectedFileChange, resetSearchNavigation])
 
   const navigateToSearchHit = useCallback((index: number) => {
     const hit = hits[index]
@@ -2484,7 +2550,7 @@ export function WorkbenchView({
     if (!files.length) return
     if (activeFileId && !files.some((file) => file.id === activeFileId)) {
       bestEffortCancelPatternReview()
-      batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
+      invalidateBatchRun()
       activeFileIdRef.current = files[0].id
       patternReviewGeneration.current += 1
       patternReviewJobIdRef.current = ''
@@ -2493,7 +2559,7 @@ export function WorkbenchView({
       setActiveFileId(files[0].id)
       setOpenFileIds((current) => current.includes(files[0].id) ? current : [...current, files[0].id])
     }
-  }, [activeFileId, bestEffortCancelPatternReview, files])
+  }, [activeFileId, bestEffortCancelPatternReview, files, invalidateBatchRun])
 
   useEffect(() => {
     if (controlledFiles !== undefined) return undefined
@@ -2761,7 +2827,7 @@ export function WorkbenchView({
     }
     if (!canStartImport(importInFlightRef.current)) return
     importInFlightRef.current = true
-    batchGeneration.current = invalidateImportBatchGeneration(batchGeneration.current)
+    invalidateBatchRun()
     setImporting(true)
     try {
       if (onImportProjectFolder) {
@@ -3163,6 +3229,7 @@ export function WorkbenchView({
       return { ok: true, resolution: resolved }
     } catch (error) {
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return null
+      console.error('[WorkbenchView] Failed to apply analysis rules', { ruleName, scope, error })
       const message = error instanceof Error ? error.message : '규칙을 적용하지 못했습니다.'
       const targetFileCount = targetGroups.reduce((count, group) => count + group.files.length, 0)
       setBatchPreview({ status: 'error', matched: 0, exceptions: targetFileCount, error: message, ruleName, scope, folderCount: targetGroups.length })
@@ -3297,7 +3364,7 @@ export function WorkbenchView({
 
   const closeTab = (event: React.MouseEvent, fileId: string) => {
     event.stopPropagation()
-    batchGeneration.current = advanceBatchGeneration(batchGeneration.current)
+    invalidateBatchRun()
     const invalidated = advanceFileRequestGeneration(lineWindowGenerations.current, fileId)
     lineWindowGenerations.current = invalidated.generations
     lineWindowEpochs.current.set(fileId, (lineWindowEpochs.current.get(fileId) ?? 0) + 1)

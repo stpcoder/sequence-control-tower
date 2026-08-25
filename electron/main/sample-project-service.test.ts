@@ -1,5 +1,5 @@
-import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { ArtifactService } from './artifact-service'
@@ -69,13 +69,24 @@ describe('SampleProjectService', () => {
     )
     const initialArtifact = allArtifacts.get(initial.artifactId)!
     expect(initialArtifact.fingerprint).toMatchObject({
-      lineCount: expect.any(Number), commandCount: 4,
-      console: { inputCount: 4, ambiguousCount: 1, promptKinds: expect.arrayContaining(['uefi', 'os-root', 'bare-root']) },
+      lineCount: expect.any(Number), commandCount: 9,
+      console: { inputCount: 9, ambiguousCount: 0, promptKinds: expect.arrayContaining(['uefi', 'os-root']) },
     })
     expect(initialArtifact.fingerprint!.lineCount).toBeGreaterThan(7_000)
     expect(initialArtifact.fingerprint!.commandSignatures).toEqual(expect.arrayContaining([
-      'voltage-control:set_rail', 'shell:set_freq', 'diagnostic:hdiag', 'shell:stressapptest',
+      'training-control:erase-ddr', 'test-mode-control:dtvs', 'firmware-control:reset', 'firmware-control:exit',
+      'clock-control:setddrclk', 'diagnostic:hdiag', 'shell:stressapptest', 'timing:sleep',
     ]))
+    const initialText = await readFile(join(root, 'samples', 'evaluation-demo-v5', '01-vperi-screening', basename(initial.relativePath)), 'utf8')
+    const stage = (marker: string) => initialText.indexOf(marker)
+    expect(stage('B - 000000 - Power key pressed')).toBeGreaterThan(0)
+    expect(stage('UEFI] erase ddr')).toBeGreaterThan(stage('DDR training, Start'))
+    expect(stage('UEFI] dtvs 1')).toBeGreaterThan(stage('UEFI] dtvs'))
+    expect(stage('UEFI] reset')).toBeGreaterThan(stage('UEFI] dtvs 1'))
+    expect(stage('UEFI] exit')).toBeGreaterThan(stage('UEFI] reset'))
+    expect(stage('init: init first stage started!')).toBeGreaterThan(stage('UEFI] exit'))
+    expect(stage('init: init second stage started!')).toBeGreaterThan(stage('init: init first stage started!'))
+    expect(stage('console:/ # hdiag')).toBeGreaterThan(stage('console:/ #'))
     expect(result.project.evidenceRecords?.find((item) => item.id === 'sample-e-screen-fail')?.sourceIds).toHaveLength(2)
     const all = await projects.list(true)
     expect(all.some((item) => item.archived && item.lpddrDevelopmentContext?.product === 'LPDDR5')).toBe(true)
@@ -95,9 +106,9 @@ describe('SampleProjectService', () => {
 
     expect(migrated).toBe(true)
     expect((await projects.get(legacy.id))?.archived).toBe(true)
-    expect((await projects.list()).some((item) => item.description?.includes('SCT_SAMPLE_EVALUATION_V4'))).toBe(true)
+    expect((await projects.list()).some((item) => item.description?.includes('SCT_SAMPLE_EVALUATION_V5'))).toBe(true)
     await expect(access(join(root, 'samples', 'lpddr6-xiaomi'))).rejects.toThrow()
     await expect(access(join(root, 'samples', 'lpddr6-xiaomi-v2'))).rejects.toThrow()
-    await expect(access(join(root, 'samples', 'evaluation-demo-v4'))).resolves.toBeUndefined()
+    await expect(access(join(root, 'samples', 'evaluation-demo-v5'))).resolves.toBeUndefined()
   })
 })

@@ -1,7 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "synthetic": true,
-  "description": "Public boot-flow and Linux RAS terminology shaped synthetic corpus. It contains no vendor capture.",
+  "generator": "stateful-power-training-uefi-android-v2",
+  "description": "Synthetic Power-on → Training → firmware prompt → Android → console → Hdiag corpus. It contains no vendor capture.",
   "scenarios": [
     {
       "file": "26-08-24-09-00-01_UTF02A-2_Ch8_SM8975_1_25_1.295_EVA_EN_SKEW-SS_LOT-LA_DIE03_DEFAULT_9600MHZ_TM-HDIAG_PAT-PRBS31_DQ9_BL16_DRAMCH0_SCH1_RK0_BG2_BANK5_ROW0x2A_COL0x14_COM74_DHCST-101_C_Pass.log",

@@ -31,4 +31,31 @@ describe('console transcript classification', () => {
     expect(analysis.inputCount).toBe(0)
     expect(analysis.statusCounts['at-fail']).toBe(1)
   })
+
+  it('recognizes the lab UEFI] and Android console:/ # prompts without treating blank prompts as commands', () => {
+    const analysis = analyzeConsoleTranscript([
+      'UEFI]',
+      'UEFI] erase ddr',
+      'DRAM training information deleted: SUCCESS',
+      'UEFI] dtvs',
+      'dtvs 0: DEFAULT',
+      'UEFI] dtvs 1',
+      'UEFI] reset',
+      'UEFI]',
+      'UEFI] exit',
+      'console:/ #',
+      'console:/ # setddrclk 9600',
+      'console:/ # hdiag --pattern WR',
+    ].join('\n'))
+
+    expect(analysis.inputs.map((item) => item.command)).toEqual([
+      'erase ddr', 'dtvs', 'dtvs 1', 'reset', 'exit', 'setddrclk 9600', 'hdiag --pattern WR',
+    ])
+    expect(analysis.inputs.map((item) => item.commandSignature)).toEqual([
+      'training-control:erase-ddr', 'test-mode-control:dtvs', 'test-mode-control:dtvs',
+      'firmware-control:reset', 'firmware-control:exit', 'clock-control:setddrclk', 'diagnostic:hdiag',
+    ])
+    expect(analysis.promptKinds).toEqual(expect.arrayContaining(['uefi', 'os-root']))
+    expect(analysis.ambiguousCount).toBe(0)
+  })
 })

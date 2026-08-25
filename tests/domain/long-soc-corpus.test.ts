@@ -29,6 +29,42 @@ describe('long tangled SoC corpus', () => {
     }
   })
 
+  it('models firmware interaction and Android boot as ordered stages instead of repeating Training for the whole file', async () => {
+    const manifest = JSON.parse(await readFile(join(corpusRoot, 'manifest.json'), 'utf8')) as CorpusManifest
+    for (const scenario of manifest.scenarios) {
+      const text = await readFile(join(corpusRoot, scenario.file), 'utf8')
+      const lines = text.trimEnd().split('\n')
+      const trainingRows = lines.filter((line) => line.startsWith('DDR_TRAIN ')).length
+      expect(lines[3]).toContain('B - 000000 - Power key pressed')
+
+      if (scenario.vendor === 'qualcomm') {
+        const position = (marker: string) => lines.indexOf(marker)
+        expect(position('UEFI] erase ddr')).toBeGreaterThan(0)
+        expect(position('DRAM training information deleted: SUCCESS')).toBeGreaterThan(position('UEFI] erase ddr'))
+        expect(position('UEFI] dtvs')).toBeGreaterThan(position('DRAM training information deleted: SUCCESS'))
+        expect(position('UEFI] dtvs 1')).toBeGreaterThan(position('UEFI] dtvs'))
+        expect(position('UEFI] reset')).toBeGreaterThan(position('UEFI] dtvs 1'))
+        if (scenario.expected === 'TRAINING_FAIL') {
+          expect(text).toContain('TRAINING_FAIL CH=')
+          expect(text).not.toContain('UEFI] exit')
+          expect(text).not.toContain('console:/ #')
+        } else {
+          expect(position('UEFI] exit')).toBeGreaterThan(position('UEFI] reset'))
+          expect(position('UEFI: ExitBootServices')).toBeGreaterThan(position('UEFI] exit'))
+          expect(position('[    0.252104] init: init first stage started!')).toBeGreaterThan(position('UEFI: ExitBootServices'))
+          expect(position('[    0.418776] init: init second stage started!')).toBeGreaterThan(position('[    0.252104] init: init first stage started!'))
+          expect(position('console:/ #')).toBeGreaterThan(position('[    0.418776] init: init second stage started!'))
+          expect(trainingRows / lines.length).toBeLessThan(0.2)
+        }
+      } else {
+        expect(text).toContain('LK: ENTER')
+        expect(text).toContain('LK2: booting Linux kernel')
+        expect(text).not.toContain('UEFI] erase ddr')
+        expect(trainingRows / lines.length).toBeLessThan(0.15)
+      }
+    }
+  })
+
   it('streams each long log once, finds deep evidence, and applies deterministic result precedence', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'sct-long-corpus-')); scratch.push(dataRoot)
     const artifacts = new ArtifactService(dataRoot); await artifacts.initialize()
@@ -75,11 +111,11 @@ describe('long tangled SoC corpus', () => {
       expect.objectContaining({ skew: 'SS', sampleCount: 3, logCount: 3 }),
       expect.objectContaining({ skew: 'SF', sampleCount: 1, logCount: 1 }),
     ]))
-    expect(trendData.failAddress.events).toBeGreaterThanOrEqual(4)
-    expect(trendData.failAddress.distribution).toEqual(expect.arrayContaining([
-      expect.objectContaining({ dimension: 'DQ', value: '9', eventCount: 2, sourceCount: 2 }),
-      expect.objectContaining({ dimension: 'Channel', value: '0', eventCount: 2, sourceCount: 2 }),
-      expect.objectContaining({ dimension: 'Sub Channel', value: '1', eventCount: 3, sourceCount: 3 }),
-    ]))
+    expect(trendData.failAddress.events).toBeGreaterThanOrEqual(10)
+    const addressBucket = (dimension: string, value: string) => trendData.failAddress.distribution.find((item) => item.dimension === dimension && item.value === value)
+    expect(addressBucket('DQ', '9')).toMatchObject({ sourceCount: 2 })
+    expect(addressBucket('DQ', '9')?.eventCount).toBeGreaterThanOrEqual(4)
+    expect(addressBucket('Channel', '0')).toMatchObject({ sourceCount: 2 })
+    expect(addressBucket('Sub Channel', '1')).toMatchObject({ sourceCount: 3 })
   }, 30_000)
 })

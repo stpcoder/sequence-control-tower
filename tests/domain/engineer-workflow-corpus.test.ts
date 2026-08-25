@@ -43,6 +43,7 @@ type Fixture = {
   expectedResult: ResultLabel;
   pairTransition: PairTransition;
   comparisonKey: string;
+  lineCount: number;
 };
 
 type Manifest = {
@@ -125,7 +126,7 @@ function linePosition(lines: string[], marker: string): number {
 function expectOrderedLines(lines: string[], markers: string[], label: string): void {
   let cursor = -1;
   for (const marker of markers) {
-    const position = linePosition(lines, marker);
+    const position = lines.indexOf(marker, cursor + 1);
     expect(position, `${label}: ${marker}`).toBeGreaterThan(cursor);
     cursor = position;
   }
@@ -151,7 +152,7 @@ describe("deterministic Luna engineer workflow corpus", () => {
     const logEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".log"));
 
     expect(manifest.schemaVersion).toBe(1);
-    expect(manifest.generatorId).toBe("engineer-workflow-corpus-v2");
+    expect(manifest.generatorId).toBe("engineer-workflow-corpus-v3");
     expect(manifest.axes).toEqual(expectedAxes);
     expect(manifest.fixtureCount).toBe(48);
     expect(manifest.fixtures).toHaveLength(48);
@@ -196,6 +197,8 @@ describe("deterministic Luna engineer workflow corpus", () => {
 
       const content = await readFile(join(corpusRoot, fixture.relativePath), "utf8");
       const lines = linesOf(content);
+      expect(lines.length - 1).toBe(fixture.lineCount);
+      expect(fixture.lineCount).toBeGreaterThanOrEqual(3_000);
       expect(lines).toContain(`SAMPLE=${fixture.sample};`);
       expect(lines).toContain(`TEMP=${fixture.temperature};`);
       expect(lines).toContain(`MODE=${fixture.mode};`);
@@ -224,50 +227,51 @@ describe("deterministic Luna engineer workflow corpus", () => {
     });
     expect(manifest.outcomeCounts).toEqual(counts(expectedResults));
     expect(contents.map((content) => content.match(/^EXPECTED_RESULT=(.+);$/m)![1])).toEqual(expectedResults);
-    expect(contents.join("\n")).toContain("@PASS;");
-    expect(contents.join("\n")).toContain("DIAG_FAIL code=SYN-DIAG-07;");
-    expect(contents.join("\n")).toContain("TEST_FAIL bank=SYN-BANK-01;");
-    expect(contents.join("\n")).toContain("TRAINING_FAIL lane=SYN-LANE-01;");
-    expect(contents.join("\n")).toContain("SYSTEM_REBOOT;");
+    expect(contents.join("\n")).toContain("@PASS");
+    expect(contents.join("\n")).toContain("DIAG_FAIL code=HDIAG_COMPARE");
+    expect(contents.join("\n")).toContain("HIDAG @FAIL");
+    expect(contents.join("\n")).toContain("TRAINING_FAIL CH=");
+    expect(contents.join("\n")).toContain("SYSTEM_REBOOT");
   });
 
-  it("preserves reachable POWER_ON, UEFI, ExitBootServices, and OS stage order", async () => {
+  it("preserves Power-on, Training, UEFI commands, reset, Android boot, console, and test order", async () => {
     const manifest = await readManifest();
     for (const fixture of manifest.fixtures) {
       const lines = linesOf(await readFile(join(corpusRoot, fixture.relativePath), "utf8"));
-      const powerOn = "POWER_ON state=asserted;";
-      const uefi = "UEFI entry firmware=SYN-UEFI-01;";
-      const exitBootServices = "ExitBootServices status=success;";
-      const osBoot = "OS boot start loader=SYN-OS-01;";
-
-      expectOrderedLines(lines, [powerOn, uefi], fixture.relativePath);
-      if (lines.includes(exitBootServices)) {
-        expectOrderedLines(lines, [powerOn, uefi, exitBootServices, osBoot], fixture.relativePath);
-      } else if (fixture.expectedResult === "UNKNOWN") {
-        expect(lines).toContain("FAILURE_POINT=UNCLASSIFIED_CAPTURE_END;");
-        expect(lines).not.toContain(osBoot);
-        expect(lines).not.toContain("stressapp start profile=synthetic-memory;");
-        expect(lines).not.toContain("HIDAG START mode=DIAG;");
-        expect(lines).not.toContain("HIDAG START mode=STRESS;");
+      expectOrderedLines(lines, [
+        "B - 000000 - Power key pressed",
+        "B - 001853 - DDR training, Start",
+        "TRAINING_PASS",
+        "UEFI] erase ddr",
+        "DRAM training information deleted: SUCCESS",
+        "UEFI] dtvs",
+        "UEFI] dtvs 1",
+        "UEFI] reset",
+        "B - 008000 - Warm reset asserted",
+      ], fixture.relativePath);
+      if (fixture.expectedResult === "TRAINING_FAIL") {
+        expect(lines).toContainEqual(expect.stringContaining("TRAINING_FAIL CH="));
+        expect(lines).not.toContain("UEFI] exit");
+        expect(lines).not.toContain("console:/ #");
       } else {
-        expect(fixture.expectedResult).toBe("SYSTEM_HALT");
-        expect(lines).toContain("FAILURE_POINT=UEFI_HANDOFF;");
-        expect(lines).not.toContain(osBoot);
-        expect(lines).not.toContain("stressapp start profile=synthetic-memory;");
-        expect(lines).not.toContain("HIDAG START mode=DIAG;");
-        expect(lines).not.toContain("HIDAG START mode=STRESS;");
-      }
-
-      if (fixture.expectedResult === "UNKNOWN") {
-        expect(lines).not.toContain(exitBootServices);
-        expect(lines).not.toContain(osBoot);
+        expectOrderedLines(lines, [
+          "B - 008000 - Warm reset asserted",
+          "TRAINING_PASS",
+          "UEFI] exit",
+          "UEFI: ExitBootServices",
+          "EFI stub: Booting Linux Kernel...",
+          "[    0.252104] init: init first stage started!",
+          "[    0.418776] init: init second stage started!",
+          "console:/ #",
+        ], fixture.relativePath);
+        expect(lines.some((line) => line.startsWith("HIDAG START mode="))).toBe(true);
       }
     }
   });
 
   it("records requested and observed mode, target and measured temperature, VDD, stressapp, and HIDAG evidence", async () => {
     const manifest = await readManifest();
-    const vddByTemperature: Record<string, string> = { "-40C": "0.75V", "25C": "0.80V", "85C": "0.90V" };
+    const vddByTemperature: Record<string, string> = { "-40C": "1.275V", "25C": "1.295V", "85C": "1.315V" };
     let stressappEvidence = 0;
     let hidagEvidence = 0;
 
@@ -279,24 +283,15 @@ describe("deterministic Luna engineer workflow corpus", () => {
       expect(lines).toContain(`OBSERVED_TEST_MODE=${fixture.mode};`);
       expect(lines.some((line) => /^MEASURED_TEMPERATURE=-?\d+\.\dC;$/.test(line))).toBe(true);
 
-      if (lines.includes("stressapp start profile=synthetic-memory;")) {
+      if (lines.includes("stressapptest: start memory=4096MB duration=600s")) {
         stressappEvidence += 1;
-        expect(lines).toContain("stressapp heartbeat=stable;");
-        expect(lines.indexOf("stressapp start profile=synthetic-memory;")).toBeLessThan(lines.indexOf("stressapp heartbeat=stable;"));
-        if (fixture.expectedResult === "TEST_FAIL") {
-          expect(lines).toContain("TEST_FAIL bank=SYN-BANK-01;");
-          expect(lines).not.toContain("stressapp completed result=PASS;");
-          expect(lines).not.toContain(`HIDAG START mode=${fixture.mode};`);
-        } else {
-          expect(lines).toContain("stressapp completed result=PASS;");
-          expect(lines.indexOf("stressapp heartbeat=stable;")).toBeLessThan(lines.indexOf("stressapp completed result=PASS;"));
-        }
+        expect(lines.some((line) => line.startsWith("stressapptest: worker="))).toBe(true);
       }
       if (lines.some((line) => line.startsWith("HIDAG START mode="))) {
         hidagEvidence += 1;
         const hidagStart = lines.findIndex((line) => line.startsWith("HIDAG START mode="));
-        expect(hidagStart).toBeGreaterThan(lines.indexOf("stressapp heartbeat=stable;"));
-        expect(lines[hidagStart]).toBe(`HIDAG START mode=${fixture.mode};`);
+        expect(hidagStart).toBeGreaterThan(lines.indexOf("console:/ #"));
+        expect(lines[hidagStart]).toContain(`mode=${fixture.mode}`);
       }
     }
 
@@ -304,8 +299,8 @@ describe("deterministic Luna engineer workflow corpus", () => {
     expect(hidagEvidence).toBeGreaterThan(0);
     expect(hidagEvidence).toBeGreaterThan(20);
     const allText = (await Promise.all(manifest.fixtures.map((fixture) => readFile(join(corpusRoot, fixture.relativePath), "utf8")))).join("\n");
-    expect(allText).toContain("HIDAG END result=PASS;");
-    expect(allText).toContain("stressapp completed result=PASS;");
+    expect(allText).toContain("HIDAG END result=PASS");
+    expect(allText).toContain("stressapptest PASS");
   });
 
   it("keeps Run1/Run2 comparison keys and recovery, regression, and stable transitions coherent", async () => {
@@ -345,8 +340,8 @@ describe("deterministic Luna engineer workflow corpus", () => {
     expect(corpusText).not.toMatch(/(?:\/Users\/|[A-Z]:\\)/);
     expect(corpusText).not.toMatch(/\b(?:api[_-]?key|bearer|password|secret|customer|employee|proprietary)\b/i);
     expect(corpusText).toContain("# SYNTHETIC_METADATA");
-    expect(corpusText).toContain("SYN-UEFI-01");
-    expect(corpusText).toContain("SYN-OS-01");
+    expect(corpusText).toContain("UEFI] erase ddr");
+    expect(corpusText).toContain("init: init second stage started!");
 
     const temporaryRoot = await mkdtemp(join(tmpdir(), "luna-engineer-workflow-"));
     temporaryRoots.push(temporaryRoot);

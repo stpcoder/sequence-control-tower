@@ -22,10 +22,12 @@ manifest는 [`tests/fixtures/engineer-workflow/manifest.json`](../../tests/fixtu
 | mode | `DIAG`, `STRESS` |
 | run | `1`, `2` |
 
+온도별 합성 전압은 Cold `1.275V`, Room `1.295V`, Hot `1.315V`를 사용합니다. 각 파일은 3,600줄이며 짧은 marker 목록이 아니라 전체 부팅·평가 흐름을 포함합니다.
+
 filename 형식은 다음과 같다.
 
 ```text
-26-08-20-09-00-01_UTF02A-2_Ch8_SM8975_1_-40_0.75_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_SystemHalt.log
+26-08-20-09-00-01_UTF02A-2_Ch8_SM8975_1_-40_1.275_EVA_EN_SKEW-SS_TM-DIAG_RUN1_9600MHZ_COM74_DHCST-89_C_SystemHalt.log
 ```
 
 파일명은 `날짜_UTF02A-2_실장기채널_SoC_평가번호_온도_전압_EVA_ECC_사용자조건_주파수_COM_자재_평가Step_결과.log` 순서다. `sample`과 `자재`는 같은 값으로 취급한다.
@@ -71,15 +73,17 @@ manifest의 결과 수량은 `PASS 23`, `DIAG_FAIL 3`, `TEST_FAIL 3`, `TRAINING_
 
 | 단계 | marker | 의미 |
 | --- | --- | --- |
-| 전원 인가 | `POWER_ON state=asserted;` | 전원 시퀀스가 시작됐다. |
-| 펌웨어 진입 | `UEFI entry firmware=SYN-UEFI-01;` | 펌웨어 진입이 기록됐다. |
-| UEFI handoff | `ExitBootServices status=success;` | UEFI에서 OS로 제어권을 넘겼다. |
-| OS boot start | `OS boot start loader=SYN-OS-01;` | OS 부트 단계가 시작됐다. |
-| test stage | `stressapp start`, `stressapp heartbeat` | 테스트 실행과 heartbeat가 기록됐다. |
-| HIDAG 실행 | `HIDAG START mode={mode};` | 요청 모드의 HIDAG 실행이 시작됐다. |
-| 정상 종료 | `HIDAG END result=PASS;`, `@PASS;` | 테스트와 로그 캡처가 정상 종료됐다. |
+| 전원 인가 | `B - 000000 - Power key pressed` | 전원 시퀀스가 시작됐다. |
+| DRAM Training | `B - ... - DDR training, Start`, `DDR_TRAIN ...` | 주파수·Channel·Sub Channel·Rank·DQ별 Training이 진행된다. |
+| UEFI 설정 | `UEFI] erase ddr`, `UEFI] dtvs`, `UEFI] dtvs 1` | Training 정보를 지우고 평가 옵션을 확인·적용한다. |
+| 재부팅 | `UEFI] reset`, `B - 008000 - Warm reset asserted` | 적용 조건으로 다시 부팅하고 Training을 수행한다. |
+| OS handoff | `UEFI] exit`, `UEFI: ExitBootServices` | UEFI에서 Linux kernel로 제어권을 넘긴다. |
+| Android init | `init first stage started!`, `init second stage started!` | first stage, SELinux, second stage 순서로 Android가 올라온다. |
+| OS 도달 | `console:/ #` | Android root console에 도달했다. |
+| HIDAG 실행 | `console:/ # hdiag ...`, `HIDAG START ...` | 요청 모드의 Hdiag 실행이 시작됐다. |
+| 정상 종료 | `HIDAG END result=PASS`, `@PASS` | 테스트와 로그 캡처가 정상 종료됐다. |
 
-`UNKNOWN`은 UEFI handoff 이후의 종료 증거가 부족하거나 캡처가 모호한 상태다. `SYSTEM_HALT`는 `UEFI_HANDOFF` 또는 `HIDAG_EXECUTION`에서 정지한 상태다. `INCOMPLETE`는 `CAPTURE_STOPPED`가 기록되고 terminal 결과가 없는 상태다. `SYSTEM_REBOOT`는 `WATCHDOG_RESET`과 `SYSTEM_REBOOT`가 기록된 상태다.
+`UNKNOWN`은 console 도달 이후 종료 증거가 부족하거나 캡처가 모호한 상태다. `SYSTEM_HALT`는 Hdiag 실행 중 terminal marker 없이 멈춘 상태다. `INCOMPLETE`는 캡처가 중단된 상태다. `SYSTEM_REBOOT`는 Watchdog과 reboot reason이 기록된 상태다. 사용자가 UEFI에서 실행한 `reset`은 실패 Reboot가 아니다.
 
 ## outcome 정의
 
@@ -89,7 +93,7 @@ manifest의 결과 수량은 `PASS 23`, `DIAG_FAIL 3`, `TEST_FAIL 3`, `TRAINING_
 | `DIAG_FAIL` | `HIDAG_DIAGNOSTIC` 단계에서 `DIAG_FAIL`이 기록됐다. |
 | `TEST_FAIL` | `STRESSAPP_MEMORY` 단계에서 `TEST_FAIL`이 기록됐다. |
 | `TRAINING_FAIL` | `DDR_TRAINING` 단계에서 `TRAINING_FAIL`이 기록됐다. |
-| `SYSTEM_HALT` | `UEFI_HANDOFF` 또는 `HIDAG_EXECUTION`에서 정지 증거가 기록됐다. |
+| `SYSTEM_HALT` | Hdiag 실행 뒤 `@PASS`·`@FAIL` 없이 정지 증거가 기록됐다. |
 | `SYSTEM_REBOOT` | `WATCHDOG_RECOVERY` 단계의 watchdog reset과 reboot가 기록됐다. |
 | `INCOMPLETE` | `CAPTURE_STOPPED`가 기록되고 terminal 결과가 없다. |
 | `UNKNOWN` | `UNCLASSIFIED_CAPTURE_END`와 ambiguous capture 상태가 기록됐다. |

@@ -62,7 +62,7 @@ Agent 답변 아래에 표시되는 파일명을 누르면 근거 로그의 해�
 
 Agent는 로그 전체를 LLM으로 보내지 않습니다. 한 번의 대화는 현재 선택 로그를 우선으로 최대 32개 source만 로컬 검사하고, 검색으로 좁힌 최대 24줄 근거 구간만 LLM에 전달합니다.
 
-콘솔 입력은 `UEFI>`, `root@device #`, `LK>` 같은 prompt 뒤의 명령만 수집합니다. 주석, `META` 헤더, 디버그 출력은 입력 명령에서 제외하고 `@PASS`, `@FAIL`, halt, reboot 같은 상태 신호는 장비 출력으로 유지합니다.
+콘솔 입력은 `UEFI]`, `UEFI>`, `console:/ #`, `root@device #`, `LK>` 같은 prompt 뒤의 명령만 수집합니다. 빈 `UEFI]` prompt, 주석, `META` 헤더, 디버그 출력은 입력 명령에서 제외합니다. 이전 로그에 남은 `console:#`도 호환합니다. `@PASS`, `@FAIL`, halt, watchdog reboot는 장비 출력으로 유지하며, 사용자가 입력한 `UEFI] reset`은 실패 Reboot로 판정하지 않습니다.
 
 응답이 느릴 때는 완료된 확인 항목이 Agent 창의 `확인 과정`에 한 줄씩 표시됩니다. `파일명 조건`, `Grid · Sequence`, `Pass/Fail 판정`, `조건별 경향`, `로그 검색`, `근거 구간`의 요약만 표시하며 원문 로그와 내부 식별자는 진행 화면에 표시하지 않습니다.
 

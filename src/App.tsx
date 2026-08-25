@@ -189,10 +189,16 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
     if (!file.artifactId) return file
     const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
     const decision = [...snapshot.decisions].reverse().find((item) => matchesPersistedSource(file, item.source, projectSources))
-    const outcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => (
+    // The newest outcome is authoritative even when its rule was later edited
+    // or deleted. Do not skip it and resurrect an older rule result: that
+    // would make the judgment screen disagree with the current rule set.
+    const latestOutcome = [...snapshot.batches].reverse().flatMap((batch) => [...batch.outcomes].reverse()).find((item) => (
       matchesPersistedSource(file, item.source, projectSources)
-      && (item.outcomeSource !== 'rule' || Boolean(item.matchedRuleId && activeRuleIds.has(item.matchedRuleId)))
     ))
+    const outcome = latestOutcome && (
+      latestOutcome.outcomeSource !== 'rule'
+      || Boolean(latestOutcome.matchedRuleId && activeRuleIds.has(latestOutcome.matchedRuleId))
+    ) ? latestOutcome : undefined
     return {
       ...base,
       ...(decision ? { decision: decision.result } : {}),

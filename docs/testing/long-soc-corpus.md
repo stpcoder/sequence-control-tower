@@ -8,7 +8,23 @@
 - MediaTek 계열: PASS, Watchdog reboot, System halt
 - SKEW, Lot, Die, Sample, 온도, VDD, 주파수, Mode, Pattern
 - Channel, Sub Channel, Rank, Bank Group, Bank, Row, Column, DQ, BL
-- UART·kernel·thermal·storage·UI trace가 섞인 긴 배경 로그
+- 전원·PMIC·UFS, DRAM Training, Linux kernel, Android init·service, Hdiag 진행 로그
+
+## Qualcomm 상태 흐름
+
+Qualcomm 합성 로그는 다음 순서를 그대로 유지합니다.
+
+1. `B - ...` 전원 인가, PMIC, UFS, PBL/XBL 단계
+2. Channel·Sub Channel·Rank·DQ별 DRAM Training
+3. `UEFI]` 진입
+4. `UEFI] erase ddr` 실행과 Training 정보 삭제 결과
+5. `UEFI] dtvs` 목록 확인, `UEFI] dtvs 1` 적용
+6. `UEFI] reset` 후 전원·Training 단계 재실행
+7. `UEFI] exit` 후 Verified Boot, Linux kernel, Android first-stage init·SELinux·second-stage init
+8. `console:/ #` 도달 후 `setddrclk`, `hdiag`, `stressapptest`, `sleep`
+9. PASS, Hdiag Fail, Training Fail, Watchdog Reboot, System Halt 중 해당 결과
+
+의도적으로 실행한 `UEFI] reset`은 실패 Reboot로 분류하지 않습니다. `WATCHDOG`, `REBOOT_REASON`, `SYSTEM_REBOOT`가 있을 때만 System Reboot로 판정합니다.
 
 모든 파일명은 실제 평가용 순서인 `날짜_UTF02A-2_실장기채널_SoC_평가번호_온도_전압_EVA_ECC_사용자조건_주파수_COM_자재_평가Step_결과.log`를 사용합니다. 예시는 다음과 같습니다.
 
@@ -19,6 +35,9 @@
 ## 공개 구조 참고
 
 - Android Bootloader 개요: https://source.android.com/docs/core/architecture/bootloader
+- Android init의 first stage·SELinux·second stage: https://android.googlesource.com/platform/system/core/+/master/init/README.md
+- AOSP first-stage init 로그 구현: https://android.googlesource.com/platform/system/core/+/master/init/first_stage_init.cpp
+- EDK II UEFI Shell prompt loop: https://github.com/tianocore/edk2/blob/master/ShellPkg/Application/Shell/Shell.c
 - Android Boot reason: https://source.android.com/docs/core/architecture/bootloader/boot-reason
 - Qualcomm Linux 부팅 구성 문서: https://docs.qualcomm.com/bundle/publicresource/topics/80-80022-27/configure_and_secure_boot_with_systemd_boot_and_uki.html
 - MediaTek Android 통신과 UART: https://genio.mediatek.com/doc/android/sw/android/get-started/communication.html
@@ -27,7 +46,7 @@
 - Linux RAS: https://docs.kernel.org/6.11/admin-guide/RAS/main.html
 - Linux ramoops: https://docs.kernel.org/admin-guide/ramoops.html
 
-공개 문서의 단계 구조와 일반적인 RAS 필드만 참고했습니다. 문자열과 타임라인은 테스트용으로 새로 생성했습니다.
+공개 문서의 단계 구조와 일반적인 RAS 필드만 참고했습니다. `erase ddr`, `dtvs`, `UEFI]` 동작은 엔지니어가 설명한 평가 절차를 사용했습니다. 문자열과 타임라인은 테스트용으로 새로 생성했으며 실제 벤더 로그를 복사하지 않았습니다.
 
 ## 재생성 및 검증
 
@@ -40,7 +59,7 @@ npx vitest run tests/domain/long-soc-corpus.test.ts
 
 ## 장문 로그 UX 검증
 
-현재 corpus는 6개 파일, 총 49,900줄입니다. 다음 흐름을 실제 앱과 자동 테스트에서 함께 확인합니다.
+현재 corpus는 6개 파일, 총 49,900줄입니다. Training 문장만 반복하지 않고 펌웨어·Android·테스트 구간이 각각 포함됩니다. 다음 흐름을 실제 앱과 자동 테스트에서 함께 확인합니다.
 
 1. 로그를 열면 첫 구간이 즉시 표시됩니다.
 2. `Ctrl+F`로 파일 전체 일치 개수를 계산하고 마지막 검색 결과까지 이동합니다.
