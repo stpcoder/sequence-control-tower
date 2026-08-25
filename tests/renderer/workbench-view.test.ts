@@ -15,6 +15,7 @@ import {
   advanceFileRequestGeneration,
   advanceSearchRequestGeneration,
   buildPatternReviewComment,
+  canOrderRuleClauses,
   canApplyAnalysisUpdate,
   canApplyBatchResult,
   canApplyImportContinuation,
@@ -39,6 +40,7 @@ import {
   removeRulesFromAppliedFolders,
   ruleFolderUsage,
   recipeRuleSummary,
+  ruleEditorPresentation,
   recentSearchQueries,
   resolveRecipeEvidenceCounts,
   dedupeWorkbenchFiles,
@@ -220,6 +222,50 @@ describe('Log Workbench UI data hardening', () => {
     expect(ordered.clauses.map((clause) => clause.sourceObservationId)).toEqual(['obs-b', 'obs-a'])
     expect(ordered.clauses[0].order).toBeUndefined()
     expect(ordered.clauses[1].order).toEqual({ afterClauseId: 'clause-b' })
+  })
+
+  it('keeps the rule editor mounted when an asynchronous workflow review arrives', () => {
+    expect(ruleEditorPresentation({
+      hasDraft: true,
+      hasObservations: true,
+      editorOpen: true,
+      hasWorkflowReview: true,
+    })).toEqual({
+      showWorkflowReview: true,
+      showEditor: true,
+      showOpenButton: false,
+    })
+    expect(ruleEditorPresentation({
+      hasDraft: true,
+      hasObservations: true,
+      editorOpen: false,
+      hasWorkflowReview: true,
+    })).toEqual({
+      showWorkflowReview: true,
+      showEditor: false,
+      showOpenButton: true,
+    })
+  })
+
+  it('omits stale ordering after a condition changes away from present log content', () => {
+    const base = rule('ordered', 'PASS', 'candidate')
+    const clauses = [
+      { ...base.clauses[0], id: 'clause-a', sourceObservationId: 'obs-a' },
+      { ...base.clauses[0], id: 'clause-b', sourceObservationId: 'obs-b' },
+    ]
+    expect(canOrderRuleClauses({ ...base, clauses })).toBe(true)
+    expect(canOrderRuleClauses({
+      ...base,
+      clauses: clauses.map((clause, index) => index === 1
+        ? { ...clause, matcher: { ...clause.matcher, target: 'file_name' as const } }
+        : clause),
+    })).toBe(false)
+    expect(canOrderRuleClauses({
+      ...base,
+      clauses: clauses.map((clause, index) => index === 1
+        ? { ...clause, presence: 'absent' as const }
+        : clause),
+    })).toBe(false)
   })
 
   it('keeps clause movement stable after rules are added, removed, or reopened', () => {

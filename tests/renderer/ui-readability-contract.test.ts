@@ -89,8 +89,9 @@ describe('UI readability contract', () => {
     expect(workbench.match(/<strong>판정 규칙<\/strong><span>검색 조건 선택<\/span>/g)?.length).toBe(2)
     expect(workbench).toContain('줄 바꿈 <kbd>Alt Z</kbd>')
     expect(workbench).toContain('줄 이동 <kbd>Ctrl G</kbd>')
-    expect(workbench).toContain('!workflowReview && !recipeVisible')
-    expect(workbench).toContain('{!workflowReview && recipeVisible && draft ? (')
+    expect(workbench).toContain('{ruleEditorUi.showOpenButton ? (')
+    expect(workbench).toContain('{ruleEditorUi.showEditor && draft ? (')
+    expect(workbench).not.toContain('!workflowReview && recipeVisible')
   })
 
   it('removes duplicate page copy and uses direct grid directions', async () => {

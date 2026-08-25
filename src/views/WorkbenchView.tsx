@@ -420,6 +420,7 @@ interface SearchConditionRowProps {
   onMoveDown?: () => void
   moveUpDisabled?: boolean
   moveDownDisabled?: boolean
+  orderDisabledReason?: string
 }
 
 /** Shared by first-decision review and deterministic rule setup so the same
@@ -433,6 +434,7 @@ function SearchConditionRow({
   onMoveDown,
   moveUpDisabled,
   moveDownDisabled,
+  orderDisabledReason,
 }: SearchConditionRowProps) {
   return <div className="recipe-observation-row">
     <button type="button" className={`recipe-observation-toggle ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={onToggle} title={selected ? '판정 조건 해제' : '판정 조건 추가'}>
@@ -441,11 +443,34 @@ function SearchConditionRow({
       <small>{matchLabel}</small>
       <span aria-hidden="true">{selected ? '−' : '＋'}</span>
     </button>
-    {selected && onMoveUp && onMoveDown ? <span className="workflow-check-order">
-      <button type="button" onClick={onMoveUp} disabled={moveUpDisabled} aria-label={`${query} 위로 이동`}><ArrowUp size={13} /></button>
-      <button type="button" onClick={onMoveDown} disabled={moveDownDisabled} aria-label={`${query} 아래로 이동`}><ArrowDown size={13} /></button>
+    {selected && onMoveUp && onMoveDown ? <span className="workflow-check-order" title={orderDisabledReason}>
+      <button type="button" onClick={onMoveUp} disabled={moveUpDisabled} aria-label={`${query} 위로 이동`} title={orderDisabledReason}><ArrowUp size={13} /></button>
+      <button type="button" onClick={onMoveDown} disabled={moveDownDisabled} aria-label={`${query} 아래로 이동`} title={orderDisabledReason}><ArrowDown size={13} /></button>
     </span> : <span />}
   </div>
+}
+
+export interface RuleEditorPresentationInput {
+  hasDraft: boolean
+  hasObservations: boolean
+  editorOpen: boolean
+  hasWorkflowReview: boolean
+}
+
+/** Keep the workflow prompt and deterministic rule editor independent.
+ * An asynchronous Agent response must never replace controls the engineer is
+ * already using, and saving a rule must not remove the explicit reopen path. */
+export function ruleEditorPresentation(input: RuleEditorPresentationInput): {
+  showWorkflowReview: boolean
+  showEditor: boolean
+  showOpenButton: boolean
+} {
+  const available = input.hasDraft && input.hasObservations
+  return {
+    showWorkflowReview: input.hasWorkflowReview,
+    showEditor: input.hasDraft && input.editorOpen,
+    showOpenButton: available && !input.editorOpen,
+  }
 }
 
 export function occurrenceConditionForChoice(choice: OccurrenceChoice | undefined, observation: SearchObservation): RuleClause['occurrence'] {
@@ -466,6 +491,15 @@ export function reorderRuleClausesByObservationIds(
   })
   const remaining = rule.clauses.filter((clause) => !observationIds.includes(clause.sourceObservationId))
   return { ...rule, clauses: recalculateClauseOrder([...ordered, ...remaining]) }
+}
+
+/** Ordering is meaningful only for markers that are present in log content.
+ * Detailed-condition edits may temporarily make a saved order invalid; omit
+ * the order instead of creating an invalid rule or tearing down the editor. */
+export function canOrderRuleClauses(rule: RecipeRule): boolean {
+  return rule.clauses.length > 1 && rule.clauses.every((clause) => (
+    clause.presence === 'present' && clause.matcher.target === 'content'
+  ))
 }
 
 /** Keeps only selected clauses, removes duplicates, and appends newly selected
@@ -1876,8 +1910,11 @@ export function WorkbenchView({
     })
   }, [activeFile?.artifactId, activeFile?.id, decision, recipeEvidenceSignature, recipeVisible])
 
-  const canRequireMarkerOrder = selectedRecipeObservations.length > 1
-    && (requireMarkerOrder || selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content'))
+  const canArrangeMarkerOrder = selectedRecipeObservations.length > 1
+    && selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content')
+  const markerOrderDisabledReason = canArrangeMarkerOrder
+    ? undefined
+    : '본문에서 발견된 조건만 순서를 지정할 수 있습니다.'
 
   const updateRecipeObservation = (observationId: string, patch: Partial<Pick<SearchObservation, 'query' | 'matcherKind' | 'target' | 'caseSensitive'>>) => {
     if (!activeFile) return
@@ -2040,6 +2077,13 @@ export function WorkbenchView({
     }
   }, [activeFile, decision, evidenceLines, selectedRecipeObservations])
 
+  const ruleEditorUi = ruleEditorPresentation({
+    hasDraft: Boolean(draft),
+    hasObservations: recipeObservations.length > 0,
+    editorOpen: recipeVisible,
+    hasWorkflowReview: Boolean(workflowReview),
+  })
+
   const buildWorkbenchRule = useCallback((sourceFileId: string, result: Exclude<WorkbenchDecision, 'UNKNOWN'>): RecipeRule | null => {
     const selectedIds = selectedObservationIdsByFile[sourceFileId] ?? []
     const observations = searchHistory[sourceFileId] ?? []
@@ -2061,7 +2105,7 @@ export function WorkbenchView({
       }),
     }
     const orderedIds = recipeClauseOrderByFile[sourceFileId]
-    return requireMarkerOrder && orderedIds?.length
+    return requireMarkerOrder && orderedIds?.length && canOrderRuleClauses(withOccurrences)
       ? reorderRuleClausesByObservationIds(withOccurrences, orderedIds)
       : withOccurrences
   }, [occurrenceByObservationId, recipeClauseOrderByFile, requireMarkerOrder, searchHistory, selectedObservationIdsByFile])
@@ -3241,7 +3285,6 @@ export function WorkbenchView({
         ...Object.fromEntries(pending.map((item) => [item.folderKey, item.resolution.appliedRules])),
       }))
       setBatchPreview({ status: 'done', ...resolved, ruleName, scope, folderCount: targetGroups.length })
-      setRecipeVisible(false)
       return { ok: true, resolution: resolved }
     } catch (error) {
       if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return null
@@ -3711,7 +3754,7 @@ export function WorkbenchView({
                 {activeFile.decision && candidateDecisions[activeFile.id] && candidateDecisions[activeFile.id] !== activeFile.decision ? <button className="confirm-decision-revision" onClick={() => void confirmDecisionRevision()}>기존 {activeFile.decision} → {candidateDecisions[activeFile.id]} 변경 확정</button> : null}
               </section>
 
-              {workflowReview ? (
+              {ruleEditorUi.showWorkflowReview && workflowReview ? (
                 <section className="workflow-confirmation recipe-suggestion" aria-label="판정 규칙 만들기">
                   <div className="recipe-title">
                     <div><strong>판정 규칙</strong><span>검색 조건 선택</span></div>
@@ -3821,11 +3864,11 @@ export function WorkbenchView({
                 <div className="evidence-hint"><span>줄 왼쪽을 눌러 다시 볼 원문을 표시하세요.</span></div>
               )}
 
-              {!workflowReview && !recipeVisible && draft && recipeObservations.length > 0 && !recipeSaved ? (
+              {ruleEditorUi.showOpenButton ? (
                 <button className="recipe-reopen" onClick={() => setRecipeVisible(true)}><Braces size={17} /><strong>판정 규칙 만들기</strong></button>
               ) : null}
 
-              {!workflowReview && recipeVisible && draft ? (
+              {ruleEditorUi.showEditor && draft ? (
                 <section className="recipe-suggestion">
                   <div className="recipe-title"><div><strong>판정 규칙</strong><span>검색 조건 선택</span></div><button type="button" className="recipe-clear-observations" onClick={clearRecipeObservations}><Trash2 size={13} />전체 삭제</button><button onClick={() => setRecipeVisible(false)} aria-label="규칙 만들기 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
@@ -3839,11 +3882,12 @@ export function WorkbenchView({
                           matchLabel={unresolvedRecipeClauseIds.has(observation.id) ? '검사 중' : observation.matched ? `${observation.matchCount}회` : '없음'}
                           selected={selected}
                           onToggle={() => toggleRecipeObservation(observation.id)}
-                          {...(selected && canRequireMarkerOrder ? {
+                          {...(selected && selectedRecipeObservations.length > 1 ? {
                             onMoveUp: () => movePinnedClause(observation.id, -1),
                             onMoveDown: () => movePinnedClause(observation.id, 1),
-                            moveUpDisabled: selectedIndex === 0,
-                            moveDownDisabled: selectedIndex === selectedRecipeObservations.length - 1,
+                            moveUpDisabled: !canArrangeMarkerOrder || selectedIndex === 0,
+                            moveDownDisabled: !canArrangeMarkerOrder || selectedIndex === selectedRecipeObservations.length - 1,
+                            orderDisabledReason: markerOrderDisabledReason,
                           } : {})}
                         />
                         {selected && recipeDetailsOpen ? <div className="recipe-condition-editor">
