@@ -187,7 +187,13 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
     .flatMap((recipe) => recipe.rules.map((rule) => rule.id)))
   return files.map((file) => {
     if (!file.artifactId) return file
-    const { decision: _legacyDecision, ruleResult: _legacyRuleResult, ruleNeedsReview: _legacyRuleNeedsReview, ...base } = file
+    const {
+      decision: _legacyDecision,
+      ruleResult: _legacyRuleResult,
+      ruleNeedsReview: _legacyRuleNeedsReview,
+      ruleExceptionCode: _legacyRuleExceptionCode,
+      ...base
+    } = file
     const decision = [...snapshot.decisions].reverse().find((item) => matchesPersistedSource(file, item.source, projectSources))
     // The newest outcome is authoritative even when its rule was later edited
     // or deleted. Do not skip it and resurrect an older rule result: that
@@ -205,6 +211,7 @@ export function hydrateEvaluation(files: readonly WorkbenchFile[], snapshot: Eva
       ...(outcome ? {
         ruleResult: outcome.result,
         ruleNeedsReview: Boolean(outcome.exceptionCode) || outcome.result === 'UNKNOWN',
+        ...(outcome.exceptionCode ? { ruleExceptionCode: outcome.exceptionCode } : {}),
       } : {}),
     }
   })
@@ -750,7 +757,12 @@ export default function App() {
     if (!window.sequenceIntelligence?.evaluations) {
       const exceptions = new Set(resolution.exceptionIds)
       setFiles((current) => current.map((file) => Object.prototype.hasOwnProperty.call(resolution.outcomes, file.id)
-        ? { ...file, ruleResult: resolution.outcomes[file.id], ruleNeedsReview: exceptions.has(file.id) }
+        ? {
+            ...file,
+            ruleResult: resolution.outcomes[file.id],
+            ruleNeedsReview: exceptions.has(file.id),
+            ruleExceptionCode: batchExceptionCode(resolution, file.id),
+          }
         : file))
       return
     }

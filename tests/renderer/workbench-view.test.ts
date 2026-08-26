@@ -34,6 +34,7 @@ import {
   emptyBatchPreview,
   clauseSpecKey,
   filterUserRecipeRevisions,
+  filterWorkbenchFiles,
   folderSelectionTargetId,
   groupWorkspaceSearchHits,
   recipeEvidenceSpecs,
@@ -299,6 +300,45 @@ describe('Log Workbench UI data hardening', () => {
     expect(recipeRuleSummary(pass)).toContain('→ Pass')
   })
 
+  it('keeps multiple same-result rule variants and classifies either match', () => {
+    const first = rule('diag-fail-a', 'DIAG_FAIL', 'candidate')
+    const secondBase = rule('diag-fail-b', 'DIAG_FAIL', 'candidate')
+    const second = {
+      ...secondBase,
+      clauses: [{
+        ...secondBase.clauses[0],
+        matcher: { kind: 'literal' as const, pattern: '@FAIL', caseSensitive: true, target: 'content' as const },
+      }],
+    }
+    const combined = mergeAppliedFolderRules([first], new Set(), second)
+    const result = resolvePrecomputedBatch(
+      [{ id: 'log-b', name: 'log-b.log', text: '@FAIL' }],
+      combined,
+      new Map([['log-b', {
+        sourceId: 'log-b',
+        rules: combined.map((item) => ({
+          ruleId: item.id,
+          clauses: item.clauses.map((clause) => ({ clauseId: clause.id, occurrenceCount: item.id === second.id ? 1 : 0 })),
+        })),
+      }]]),
+      {},
+    )
+    expect(combined.map((item) => item.id)).toEqual(['diag-fail-a', 'diag-fail-b'])
+    expect(result).toMatchObject({ outcomes: { 'log-b': 'DIAG_FAIL' }, conflicts: 0, exceptions: 0 })
+  })
+
+  it('filters stable review queues without hiding manually confirmed logs', () => {
+    const files: WorkbenchFile[] = [
+      { id: 'ok', name: 'ok.log', ruleResult: 'PASS', ruleNeedsReview: false },
+      { id: 'review', name: 'review.log', ruleResult: 'UNKNOWN', ruleNeedsReview: true, ruleExceptionCode: 'NO_MATCH' },
+      { id: 'conflict', name: 'conflict.log', ruleResult: 'UNKNOWN', ruleNeedsReview: true, ruleExceptionCode: 'RULE_CONFLICT' },
+      { id: 'confirmed', name: 'confirmed.log', decision: 'DIAG_FAIL', ruleNeedsReview: true, ruleExceptionCode: 'RULE_CONFLICT' },
+    ]
+    expect(filterWorkbenchFiles(files, 'all')).toHaveLength(4)
+    expect(filterWorkbenchFiles(files, 'review').map((file) => file.id)).toEqual(['review', 'conflict'])
+    expect(filterWorkbenchFiles(files, 'conflict').map((file) => file.id)).toEqual(['conflict'])
+  })
+
   it('reports whether a project rule is unused, folder-only, or project-wide', () => {
     const pass = rule('pass', 'PASS', 'candidate')
     const halt = rule('halt', 'SYSTEM_HALT', 'candidate')
@@ -549,7 +589,12 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
     expect(workbenchSource).toContain("scope === 'project'")
     expect(workbenchSource).toContain('mergeAppliedFolderRules(effectiveRulesByFolder[group.key] ?? [], new Set(), uniqueRules)')
-    expect(workbenchSource).toContain("recipeSaved ? '저장 완료' : '규칙 저장'")
+    expect(workbenchSource).toContain("recipeSaved ? '적용 완료'")
+    expect(workbenchSource).toContain("editingRecipeId ? '수정 적용' : '현재 폴더에 추가'")
+    expect(workbenchSource).toContain('<strong>규칙 추가</strong>')
+    expect(workbenchSource).not.toContain('confirm-decision-revision')
+    expect(workbenchSource).not.toContain('변경 확정')
+    expect(workbenchSource).toContain('workbench-file-filters')
     expect(workbenchSource).toContain('<strong>현재 폴더</strong>')
     expect(workbenchSource).toContain('<strong>전체 프로젝트</strong>')
     expect(workbenchSource).toContain("void applySavedRecipe(recipe, 'folder')")
