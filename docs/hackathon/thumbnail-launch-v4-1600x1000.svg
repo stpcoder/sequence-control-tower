@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#080b12"/>
+      <stop offset="0.55" stop-color="#0b111c"/>
+      <stop offset="1" stop-color="#101724"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="72%" cy="42%" r="54%">
+      <stop offset="0" stop-color="#335ea8" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#17325f" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#080b12" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="metric" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8db5ff"/>
+      <stop offset="1" stop-color="#a5df78"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-25%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+    <clipPath id="screenClip">
+      <rect x="560" y="128" width="980" height="638" rx="28"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <rect width="1600" height="1000" fill="url(#glow)"/>
+  <circle cx="1488" cy="66" r="190" fill="#6ea2ff" opacity="0.045" filter="url(#soft)"/>
+
+  <g transform="translate(78 70)">
+    <rect x="0" y="0" width="62" height="62" rx="16" fill="#131b28" stroke="#2b394c"/>
+    <g transform="translate(7 7)">
+      <path d="M16 10v24M16 22h10c7 0 8 6 12 12" fill="none" stroke="#a9ef67" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="16" cy="10" r="5" fill="#a9ef67"/>
+      <circle cx="16" cy="34" r="5" fill="#10151c" stroke="#a9ef67" stroke-width="4"/>
+      <circle cx="38" cy="34" r="6" fill="#ff6754"/>
+      <path d="M35 34h6" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+    <text x="82" y="40" fill="#f4f7fb" font-family="NanumSquare_ac, sans-serif" font-size="27">DRAM 불량 분석 툴</text>
+  </g>
+
+  <g font-family="NanumSquare_ac, sans-serif">
+    <text x="80" y="244" fill="#9bd777" font-size="22" font-weight="700">불량 데이터 분석 5시간 → 10분 단축</text>
+    <text x="80" y="346" fill="#f6f8fb" font-size="72">Sequence</text>
+    <text x="80" y="432" fill="#f6f8fb" font-size="64">Control Tower</text>
+    <text x="80" y="520" fill="#dfe6ef" font-size="27">평가 조건을 자동으로 파악해</text>
+    <text x="80" y="560" fill="#dfe6ef" font-size="25">필요한 분석으로 원인 후보를 좁히는</text>
+    <text x="80" y="600" fill="#dfe6ef" font-size="27">DRAM 불량 분석 AI Agent</text>
+
+    <g transform="translate(80 688)">
+      <rect x="0" y="0" width="376" height="54" rx="27" fill="#111b28" stroke="#2c4059"/>
+      <circle cx="27" cy="27" r="6" fill="#9bd777"/>
+      <text x="48" y="35" fill="#aebaca" font-size="21" font-weight="700">Windows · macOS 동시 지원</text>
+    </g>
+  </g>
+
+  <rect x="542" y="110" width="1016" height="674" rx="38" fill="#0a0d13" stroke="#2a3b51" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="560" y="128" width="980" height="638" rx="28" fill="#11151c"/>
+  <g clip-path="url(#screenClip)">
+    <image href="/Users/taehoje/sequence-control-tower/docs/hackathon/video/product-flow-agent-response.png" x="560" y="128" width="980" height="638" preserveAspectRatio="xMidYMid slice"/>
+    <rect x="560" y="128" width="980" height="638" fill="none" stroke="#6f98d2" stroke-opacity="0.16" stroke-width="3"/>
+  </g>
+
+  <g font-family="NanumSquare_ac, sans-serif">
+    <g transform="translate(552 818)">
+      <rect x="0" y="0" width="988" height="112" rx="24" fill="#121a27" stroke="#2b3b50"/>
+      <text x="28" y="40" fill="#83aefa" font-size="18">CONTEXT</text>
+      <text x="28" y="76" fill="#edf2f8" font-size="21">평가 조건·과거 이력 파악</text>
+      <text x="278" y="40" fill="#9bd777" font-size="18">AI AGENT</text>
+      <text x="278" y="76" fill="#edf2f8" font-size="21">불량 경향·개선 효과 분석</text>
+      <text x="572" y="40" fill="#83aefa" font-size="18">ENGINEER</text>
+      <text x="572" y="76" fill="#edf2f8" font-size="21">원인 가설·예외 확인</text>
+      <text x="812" y="40" fill="#9bd777" font-size="18">NEXT RUN</text>
+      <text x="812" y="76" fill="#edf2f8" font-size="21">분석 기준·결과 적용</text>
+    </g>
+  </g>
+</svg>
