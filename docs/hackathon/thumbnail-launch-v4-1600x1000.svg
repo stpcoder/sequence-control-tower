@@ -66,14 +66,14 @@
   <g font-family="NanumSquare_ac, sans-serif">
     <g transform="translate(552 818)">
       <rect x="0" y="0" width="988" height="112" rx="24" fill="#121a27" stroke="#2b3b50"/>
-      <text x="28" y="40" fill="#83aefa" font-size="18">CONTEXT</text>
-      <text x="28" y="76" fill="#edf2f8" font-size="21">평가 조건·과거 이력 파악</text>
-      <text x="278" y="40" fill="#9bd777" font-size="18">AI AGENT</text>
-      <text x="278" y="76" fill="#edf2f8" font-size="21">불량 경향·개선 효과 분석</text>
-      <text x="572" y="40" fill="#83aefa" font-size="18">ENGINEER</text>
-      <text x="572" y="76" fill="#edf2f8" font-size="21">원인 가설·예외 확인</text>
-      <text x="812" y="40" fill="#9bd777" font-size="18">NEXT RUN</text>
-      <text x="812" y="76" fill="#edf2f8" font-size="21">분석 기준·결과 적용</text>
+      <text x="124" y="40" fill="#83aefa" font-size="18" text-anchor="middle">CONTEXT</text>
+      <text x="124" y="76" fill="#edf2f8" font-size="21" text-anchor="middle">평가 조건·과거 이력 파악</text>
+      <text x="371" y="40" fill="#9bd777" font-size="18" text-anchor="middle">AI AGENT</text>
+      <text x="371" y="76" fill="#edf2f8" font-size="21" text-anchor="middle">불량 경향·개선 효과 분석</text>
+      <text x="618" y="40" fill="#83aefa" font-size="18" text-anchor="middle">ENGINEER</text>
+      <text x="618" y="76" fill="#edf2f8" font-size="21" text-anchor="middle">원인 가설·예외 확인</text>
+      <text x="865" y="40" fill="#9bd777" font-size="18" text-anchor="middle">NEXT RUN</text>
+      <text x="865" y="76" fill="#edf2f8" font-size="21" text-anchor="middle">분석 기준·결과 적용</text>
     </g>
   </g>
 </svg>
