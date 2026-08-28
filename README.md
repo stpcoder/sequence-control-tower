@@ -4,9 +4,9 @@
 
 # Sequence Control Tower
 
-<p align="center"><strong>불량의 의미와 개선 효과 판단까지 연결하는 DRAM 평가 분석 Agent</strong></p>
+<p align="center"><strong>엔지니어와 함께하는 DRAM 불량 분석 AI Agent</strong></p>
 
-Sequence Control Tower는 현재 평가의 불량 경향을 기존 평가 이력과 연결해, 불량 원인 가설과 개선 효과를 엔지니어와 함께 점검하는 DRAM 평가 분석 Agent입니다. 평가마다 반복되는 로그 판정, 조건별 데이터 정리와 시각화를 10분 미만에 끝냅니다. 내장 LPDDR 불량 분석 Skill은 원인 가설, 개선 효과, 새로운 사이드이펙트와 다음 평가 근거를 정리합니다. 엔지니어의 검색, 판정, 보정, 결과 구성은 Evaluation Harness로 축적되어 다음 평가에 적용됩니다.
+Sequence Control Tower의 AI Agent가 현재 평가 조건을 파악하고, 저장된 분석 기준과 과거 평가 이력을 비교해 확인 순서를 선택합니다. 처음 보는 명령과 판단이 필요한 예외만 엔지니어에게 확인하고, 확정된 판단과 결과 형식은 다음 평가에 재사용합니다. 조건별 전체 평가 수와 FAIL 수, 불량 주소 분포는 앱이 일괄 계산합니다. 한 달간 실제 DRAM 평가 업무에 사용한 결과, 평가 1회당 5시간 이상 걸리던 로그 판정과 시각화를 10분 미만으로 줄였습니다.
 
 [![CI](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml/badge.svg)](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/stpcoder/sequence-control-tower?display_name=tag&sort=semver)](https://github.com/stpcoder/sequence-control-tower/releases/latest)
@@ -23,7 +23,7 @@ Sequence Control Tower는 현재 평가의 불량 경향을 기존 평가 이력
 
 제출 화면과 영상에 사용한 로그는 모두 공개 합성 데이터이며, 실제 사내 로그와 비공개 데이터는 포함하지 않았습니다.
 
-## DRAM 불량 분석용 Agent
+## DRAM 불량 분석용 AI Agent
 
 앱에는 [`lpddr-failure-analysis` Skill](agent-skills/lpddr-failure-analysis/SKILL.md)이 포함되어 있습니다. 이 Skill은 LPDDR 평가의 기본 구조와 불량 분석 순서를 Agent의 공통 기준으로 제공합니다.
 
@@ -97,7 +97,7 @@ Sequence Control Tower는 현재 평가의 불량 경향을 기존 평가 이력
 
 ## Agent 네이티브 구조
 
-Agent는 내장 LPDDR 불량 분석 Skill에 따라 프로젝트 데이터와 읽기 전용 도구를 호출합니다. 현재 평가의 근거를 먼저 확정한 뒤 기존 이력과 유사 사례를 연결합니다.
+AI Agent는 내장 LPDDR 불량 분석 Skill에 따라 프로젝트 데이터와 읽기 전용 도구를 호출합니다. 현재 평가의 근거를 먼저 확정한 뒤 기존 이력과 유사 사례를 연결합니다.
 
 - 프로젝트 문맥, 평가 이력, 유사 사례
 - 파일명 조건과 Sequence signature
