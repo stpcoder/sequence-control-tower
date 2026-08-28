@@ -4,9 +4,9 @@
 
 # Sequence Control Tower
 
-<p align="center"><strong>엔지니어와 함께하는 DRAM 불량 분석 AI Agent</strong></p>
+<p align="center"><strong>평가 조건을 자동으로 파악해 필요한 분석으로 원인 후보를 좁히는 DRAM 불량 분석 AI Agent</strong></p>
 
-Sequence Control Tower의 AI Agent가 현재 평가 조건을 파악하고, 저장된 분석 기준과 과거 평가 이력을 비교해 확인 순서를 선택합니다. 처음 보는 명령과 판단이 필요한 예외만 엔지니어에게 확인하고, 확정된 판단과 결과 형식은 다음 평가에 재사용합니다. 조건별 전체 평가 수와 FAIL 수, 불량 주소 분포는 앱이 일괄 계산합니다. 한 달간 실제 DRAM 평가 업무에 사용한 결과, 평가 1회당 5시간 이상 걸리던 로그 판정과 시각화를 10분 미만으로 줄였습니다.
+Sequence Control Tower의 AI Agent는 평가 폴더를 열면 Sample, SKEW, 온도, 전압, 동작 모드와 과거 평가 이력을 자동으로 파악합니다. 현재 평가에 필요한 분석 절차를 선택해 전체 로그를 판정하고, 조건별 FAIL률과 불량 주소 분포를 계산한 뒤 기준 평가와 개선 평가를 비교해 불량 경향, 개선 효과와 원인 후보를 정리합니다. 판단이 필요한 예외만 엔지니어에게 확인하고, 확정된 분석 기준과 결과 형식은 다음 평가에 적용합니다. 한 달간 실제 DRAM 평가 업무에 사용한 결과, 평가 1회당 5시간 이상 걸리던 로그 판정과 시각화를 10분 미만으로 줄였습니다.
 
 [![CI](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml/badge.svg)](https://github.com/stpcoder/sequence-control-tower/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/stpcoder/sequence-control-tower?display_name=tag&sort=semver)](https://github.com/stpcoder/sequence-control-tower/releases/latest)
@@ -18,34 +18,35 @@ Sequence Control Tower의 AI Agent가 현재 평가 조건을 파악하고, 저�
 [실제 제품 90초 데모](docs/hackathon/video/sequence-control-tower-90s.mp4) | [온라인 매뉴얼](https://stpcoder.github.io/sequence-control-tower/) | [Agent 사용](docs/manual/05-Agent.md) | [LLM, OpenCode 설정](docs/manual/07-LLM-OpenCode.md) | [모든 Release](https://github.com/stpcoder/sequence-control-tower/releases)
 
 <p align="center">
-  <img src="docs/hackathon/thumbnail-human-loop-v3-800x500.png" width="800" alt="Sequence Control Tower human-in-the-loop DRAM evaluation Agent">
+  <img src="docs/hackathon/thumbnail-launch-v4-800x500.png" width="800" alt="Sequence Control Tower DRAM failure analysis AI Agent">
 </p>
 
 제출 화면과 영상에 사용한 로그는 모두 공개 합성 데이터이며, 실제 사내 로그와 비공개 데이터는 포함하지 않았습니다.
 
-## DRAM 불량 분석용 AI Agent
+## AI Agent가 실제로 하는 일
 
-앱에는 [`lpddr-failure-analysis` Skill](agent-skills/lpddr-failure-analysis/SKILL.md)이 포함되어 있습니다. 이 Skill은 LPDDR 평가의 기본 구조와 불량 분석 순서를 Agent의 공통 기준으로 제공합니다.
+앱에는 [`lpddr-failure-analysis` Skill](agent-skills/lpddr-failure-analysis/SKILL.md)이 포함되어 있습니다. AI Agent는 이 Skill과 프로젝트에 저장된 분석 기준을 함께 사용해 다음 순서로 평가를 분석합니다.
 
-| 분석 단계 | Agent가 확인하는 내용 |
+| Agent 단계 | 실제 동작 |
 | --- | --- |
-| **평가 구조 파악** | 프로젝트, 평가 폴더, Sample, SKEW, Grid, Sequence를 구분하고 온도, VDD, 주파수, Test Mode, Pattern을 비교합니다. |
-| **실패 단계 판정** | Qualcomm과 MediaTek 부팅 흐름을 구분하고 Training Fail, Hdiag Fail, Halt, Reboot, 미완료를 판정합니다. |
-| **불량 경향 계산** | Sample과 SKEW별 평가 범위, 조건별 전체 평가 수와 FAIL 수, Hdiag 본문의 DQ, BL, Channel, Rank, Bank Group, Bank, Row, Column 분포를 계산합니다. |
-| **원인 가설 점검** | 실패 단계, 평가 조건 경향, Fail address 패턴, 기존 평가 이력을 함께 비교해 원인 후보의 지지 근거와 반대 근거를 정리합니다. |
-| **개선 방법 확인** | 동일 조건 재평가, 가속 조건, 개선 조건, 사이드이펙트와 안정성 검증 기록을 이어 보고 기존 불량 패턴 감소와 새로운 불량 발생 여부를 확인합니다. |
-| **다음 평가 제안** | 현재 가설을 구분할 수 있는 조건을 제안하고 엔지니어가 확인한 결과를 평가 이력과 다음 Harness에 남깁니다. |
+| **평가 조건 자동 파악** | 프로젝트, 평가 폴더, Sample, SKEW, Grid, Sequence를 구분하고 온도, VDD, 주파수, Test Mode와 Pattern을 읽습니다. |
+| **분석 절차 선택** | 현재 조건과 호환되는 확정 분석 기준을 찾고 LPDDR 평가 Skill에 따라 확인할 로그 구간과 도구를 선택합니다. |
+| **전체 로그 판정** | 부팅 흐름을 구분하고 Training Fail, Hdiag Fail, Halt, Reboot와 미완료를 판정하며 근거가 부족한 로그는 확인 대상으로 남깁니다. |
+| **불량 경향 분석** | 조건별 전체 평가 수와 FAIL 수, Hdiag 본문의 DQ, BL, Channel, Rank, Bank Group, Bank, Row와 Column 분포를 계산합니다. |
+| **개선 효과와 원인 후보 정리** | 기준 평가, 동일 조건 재평가와 개선 평가를 비교해 불량 패턴 감소, 새로운 사이드이펙트, 원인 후보의 지지 근거와 반대 근거를 정리합니다. |
+| **다음 평가 연결** | 현재 가설을 구분할 다음 평가를 제안하고 엔지니어가 확인한 분석 기준과 결과 형식을 다음 평가에 적용합니다. |
 
-분석 전문성은 내장 LPDDR Skill이 제공하고, 프로젝트별 판단 기준은 엔지니어가 확정한 행동과 평가 이력으로 축적됩니다.
+LPDDR 분석 전문성은 내장 Skill이 제공하고, 프로젝트별 분석 기준은 엔지니어가 확인한 결과와 평가 이력으로 축적됩니다.
 
-`현재 로그 근거 → 불량 경향 → 원인 가설 → 기존 평가 비교 → 개선 효과와 사이드이펙트 점검 → 다음 평가 → 엔지니어 확인 → 다음 분석에 반영`
+`평가 조건 자동 파악 → 분석 절차 선택 → 전체 로그 판정 → 불량 경향과 개선 효과 분석 → 원인 후보 정리 → 엔지니어 확인 → 다음 평가 적용`
 
-## 제품의 세 가지 장점
+## 제품의 핵심 강점
 
 | 장점 | 실제 동작 |
 | --- | --- |
-| **LPDDR 불량 분석 Skill** | 실패 단계, 조건별 불량률, Fail address 집중도, 동일 조건 재평가, 개선 효과와 사이드이펙트를 같은 분석 기준으로 확인합니다. |
-| **프로젝트별 개선 루프** | 엔지니어가 확정한 검색, 판정, 보정, 결과 형식과 평가 이력이 Harness로 누적되고 다음 평가의 분석 절차에 반영됩니다. |
+| **평가 조건에 맞는 분석** | AI Agent가 현재 조건과 과거 평가 이력을 파악하고 필요한 분석 절차와 로컬 도구를 선택합니다. |
+| **불량 원인 분석에 필요한 결과** | 실패 단계, 조건별 FAIL률, Fail address 집중도, 개선 효과와 사이드이펙트를 같은 평가 흐름에서 비교합니다. |
+| **엔지니어와 이어지는 분석 루프** | Agent가 새로운 예외와 원인 후보를 제시하고, 엔지니어가 확정한 분석 기준과 결과 형식은 다음 평가에 적용됩니다. |
 | **업무 환경에 맞는 실행** | Windows와 macOS 앱에서 평가 폴더를 직접 열고, 사내 OpenAI-compatible LLM 또는 Vertex AI endpoint와 연결할 수 있습니다. |
 
 ## 왜 만들었나
