@@ -24,6 +24,10 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      - name: Enable long fixture paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - name: Check out repository
         uses: actions/checkout@v7
 

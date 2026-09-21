@@ -79,7 +79,7 @@ describe('result metadata review', () => {
 it('blocks result export and explains why while address inspection is incomplete', () => {
   const rows = projectLogRecords([{ id: 'one', name: 'one.log', rootId: 'a', text: '@PASS' }])
   const render = (status: 'loading' | 'ready') => renderToStaticMarkup(createElement(ResultsView, {
-    records: rows, onOpenFile: () => {}, stageInspectionStates: { one: { status: 'ready' } },
+    records: rows, project: null, onProjectUpdated: () => {}, onOpenFile: () => {}, stageInspectionStates: { one: { status: 'ready' } },
     addressInspectionStates: { one: { status } },
   }))
   const pending = render('loading')
