@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EngineerWorkflowMemoryView } from '../shared/contracts'
-import { engineerWorkflowCompatibility, extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
+import { classifyLpddrStatus, engineerWorkflowCompatibility, extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
@@ -10,6 +10,10 @@ const project = {
 }
 
 describe('LPDDR agent tools', () => {
+  it('prioritizes Training Fail over reboot recovery markers', () => {
+    expect(classifyLpddrStatus({ 'training-fail': 1, reboot: 1, halt: 1, 'at-fail': 1 })).toMatchObject({ status: 'TRAINING_FAIL' })
+  })
+
   it('shows only known saved result/pivot layout fields to the Agent', async () => {
     const contextProject = { ...project, exportPresets: [
       { id: 'sequence-control-tower.results-export.v1', name: '결과 열', format: 'csv' as const, options: { columns: ['filename', 'result'], secret: 'do-not-send' }, createdAt: '', updatedAt: '' },
@@ -57,7 +61,7 @@ describe('LPDDR agent tools', () => {
     })
     const result = await tools.execute('p', { name: 'project_context_get' }, ['s1'])
     expect(result.data).toMatchObject({
-      contextScope: 'project',
+      contextScope: 'evaluation',
       description: 'LPDDR6 전체 프로젝트에서 VPERI 불량을 개선한다.',
       currentEvaluation: {
         folders: ['01-screening'], logCount: 1, confirmed: true,
@@ -322,9 +326,9 @@ describe('LPDDR agent tools', () => {
     }
     expect(data.denominator).toBe(3)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: '온도', value: '85', failures: 1, total: 2, failureRate: 0.5 }))
-    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'SKEW', value: 'SS' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Skew', value: 'SS' }))
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Sub Channel', value: '1' }))
-    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Timing SKEW (ps)', value: '12' }))
+    expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'Timing Skew (ps)', value: '12' }))
     expect(data.live.some((item) => item.dimension === 'sku')).toBe(false)
     expect(data.live).toContainEqual(expect.objectContaining({ dimension: 'command', value: 'diagnostic:hdiag', failures: 1, total: 2, failureRate: 0.5 }))
     expect(data.coverage).toContainEqual(expect.objectContaining({ skew: 'SS', sampleCount: 2, logCount: 2, pass: 1, fail: 1 }))

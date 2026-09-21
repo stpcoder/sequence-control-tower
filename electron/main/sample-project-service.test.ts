@@ -18,40 +18,43 @@ describe('SampleProjectService', () => {
     const artifacts = new ArtifactService(root); const projects = new ProjectStore(root)
     await Promise.all([artifacts.initialize(), projects.initialize()])
     const result = await new SampleProjectService(root, { artifacts, projects }).create()
-    expect(result.project.lpddrDevelopmentContext).toMatchObject({ product: 'LPDDR6', customer: 'Xiaomi', densityGb: 16 })
+    expect(result.project).toMatchObject({ name: 'LPDDR 합성 평가 데모' })
+    expect(result.project.description).toContain('공개 가능한 합성 데이터')
+    expect(result.project.lpddrDevelopmentContext).toMatchObject({ product: 'LPDDR Demo', customer: 'Demo Customer', densityGb: 16 })
     expect(result.project.artifacts).toHaveLength(13)
     expect(result.project.folders.map((item) => item.displayLabel).sort()).toEqual([
-      '01-vperi-screening', '02-vperi-retest', '03-vdd-improvement', '04-retention', '05-boot-training', '06-four-corner',
+      '01-margin-screening', '02-margin-retest', '03-voltage-improvement', '04-retention', '05-boot-training', '06-four-corner',
     ])
     expect(result.project.evaluationNodes).toHaveLength(5)
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-screen-rt2')).toMatchObject({ retestOf: 'sample-n-screen', attemptNo: 2, relation: 'retest' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-vdd-up')).toMatchObject({ parentId: 'sample-n-screen-rt2', purpose: 'improvement', relation: 'improvement' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-retention')).toMatchObject({ hypothesisId: 'sample-h-retention', branchId: 'issue:sample-h-retention:main', relation: 'baseline', status: 'inconclusive' })
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-retention')?.parentId).toBeUndefined()
-    expect(new Set(result.project.evaluationNodes?.map((item) => item.branchId))).toEqual(new Set(['issue:sample-h-vperi-dq9:main', 'issue:sample-h-retention:main']))
+    expect(new Set(result.project.evaluationNodes?.map((item) => item.branchId))).toEqual(new Set(['issue:sample-h-margin-dq9:main', 'issue:sample-h-retention:main']))
     expect(result.project.evaluationNodes?.find((item) => item.id === 'sample-n-four-corner')).toMatchObject({
-      parentId: 'sample-n-screen', relation: 'condition-comparison', dimensions: { sample: 'CHAE-25', conditionCorner: 'HH/CH/HL/CL' }, status: 'fail',
+      parentId: 'sample-n-screen', relation: 'condition-comparison', dimensions: { sample: 'DEMO-D01', conditionCorner: 'HH/CH/HL/CL' }, status: 'fail',
     })
     expect(new Set(result.project.evaluationNodes?.map((item) => item.evaluationScopeId)).size).toBe(5)
-    expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-8975'] })
+    expect(result.project.equipmentProfiles[0]).toMatchObject({ profileId: 'qualcomm-default', socModels: ['SM-9999'] })
     const allArtifacts = new Map((await artifacts.list()).map((artifact) => [artifact.id, artifact]))
+    expect(new Set([...allArtifacts.values()].filter((artifact) => artifact.sources?.some((source) => source.relativePath.endsWith('.log'))).map((artifact) => artifact.fingerprint?.lineCount))).toEqual(new Set([7_601]))
     expect(result.project.artifacts.every((item) => Boolean(parsePositionalLabFilename(item.relativePath)))).toBe(true)
     expect([...new Set(result.project.artifacts.map((item) => parsePositionalLabFilename(item.relativePath)?.material))]).toEqual(expect.arrayContaining([
-      'DHCST-89', 'CHAE-1', 'DHBCT-4', 'BCT-7', 'RTN-21', 'RTN-22', 'CHAE-25',
+      'DEMO-A01', 'DEMO-A02', 'DEMO-A03', 'DEMO-B01', 'DEMO-C01', 'DEMO-C02', 'DEMO-D01',
     ]))
-    const initial = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_BASE_'))!
-    const rt = result.project.artifacts.find((item) => item.relativePath.includes('_DHCST-89_C_Fail.log') && item.relativePath.includes('_RT2_'))!
+    const initial = result.project.artifacts.find((item) => item.relativePath.includes('_DEMO-A01_C_Fail.log') && item.relativePath.includes('_BASE_'))!
+    const rt = result.project.artifacts.find((item) => item.relativePath.includes('_DEMO-A01_C_Fail.log') && item.relativePath.includes('_RT2_'))!
     expect(initial).toBeDefined()
     expect(rt).toBeDefined()
     expect(parsePositionalLabFilename(initial.relativePath)).toMatchObject({
       equipmentChannel: '8', gridId: '1', temperatureC: 85, vdd: 1.295,
-      eccMode: 'EN', material: 'DHCST-89', evaluationStep: 'C', frequencyMHz: 9600,
+      eccMode: 'EN', material: 'DEMO-A01', evaluationStep: 'C', frequencyMHz: 9600,
       outcome: 'TEST_FAIL',
     })
     expect(extractLpddrFilenameDimensions(initial.relativePath)).toMatchObject({
-      sample: 'DHCST-89', material: 'DHCST-89', skew: 'SS', lot: 'A1', die: '03',
-      socVendor: 'qualcomm', socModel: 'SM-8975', equipmentChannel: '8', gridId: '1',
-      temperatureC: 85, vdd: 1.295, frequencyMHz: 9600, testMode: 'VPERI', pattern: 'WR',
+      sample: 'DEMO-A01', material: 'DEMO-A01', skew: 'SS', lot: 'A1', die: '03',
+      socVendor: 'qualcomm', socModel: 'SM-9999', equipmentChannel: '8', gridId: '1',
+      temperatureC: 85, vdd: 1.295, frequencyMHz: 9600, testMode: 'MARGIN-A', pattern: 'WR',
       evaluationStep: 'C', eccMode: 'EN',
     })
     expect(extractLpddrFilenameDimensions(initial.relativePath).channel).toBeUndefined()
@@ -59,10 +62,10 @@ describe('SampleProjectService', () => {
     const corners = result.project.artifacts.filter((item) => /_CORNER-(?:HH|CH|HL|CL)_/.test(item.relativePath))
     expect(corners).toHaveLength(4)
     expect(corners.map((item) => extractLpddrFilenameDimensions(item.relativePath))).toEqual(expect.arrayContaining([
-      expect.objectContaining({ conditionCorner: 'HH', temperatureC: 85, vdd: 1.315, sample: 'CHAE-25' }),
-      expect.objectContaining({ conditionCorner: 'CH', temperatureC: -20, vdd: 1.315, sample: 'CHAE-25' }),
-      expect.objectContaining({ conditionCorner: 'HL', temperatureC: 85, vdd: 1.275, sample: 'CHAE-25' }),
-      expect.objectContaining({ conditionCorner: 'CL', temperatureC: -20, vdd: 1.275, sample: 'CHAE-25' }),
+      expect.objectContaining({ conditionCorner: 'HH', temperatureC: 85, vdd: 1.315, sample: 'DEMO-D01' }),
+      expect.objectContaining({ conditionCorner: 'CH', temperatureC: -20, vdd: 1.315, sample: 'DEMO-D01' }),
+      expect.objectContaining({ conditionCorner: 'HL', temperatureC: 85, vdd: 1.275, sample: 'DEMO-D01' }),
+      expect.objectContaining({ conditionCorner: 'CL', temperatureC: -20, vdd: 1.275, sample: 'DEMO-D01' }),
     ]))
     expect(sourceEngineeringContext(initial.relativePath, allArtifacts.get(initial.artifactId)).sequenceSignature).toBe(
       sourceEngineeringContext(rt.relativePath, allArtifacts.get(rt.artifactId)).sequenceSignature,
@@ -77,7 +80,14 @@ describe('SampleProjectService', () => {
       'training-control:erase-ddr', 'test-mode-control:dtvs', 'firmware-control:reset', 'firmware-control:exit',
       'clock-control:setddrclk', 'diagnostic:hdiag', 'shell:stressapptest', 'timing:sleep',
     ]))
-    const initialText = await readFile(join(root, 'samples', 'evaluation-demo-v5', '01-vperi-screening', basename(initial.relativePath)), 'utf8')
+    const initialText = await readFile(join(root, 'samples', 'public-synthetic-demo-v6', '01-margin-screening', basename(initial.relativePath)), 'utf8')
+    expect(initialText).toContain('# SYNTHETIC_PUBLIC_FLOW_CORPUS: not a vendor capture')
+    expect(initialText.trimEnd().split(/\r?\n/)).toHaveLength(7_600)
+    const publicSampleSurface = JSON.stringify({
+      project: result.project,
+      filenames: result.project.artifacts.map((item) => item.relativePath),
+    })
+    expect(publicSampleSurface).not.toMatch(/xiaomi|sk[ -]?hynix|vperi|dhcst|chae|dhbct|utf02a|sm8975/i)
     const stage = (marker: string) => initialText.indexOf(marker)
     expect(stage('B - 000000 - Power key pressed')).toBeGreaterThan(0)
     expect(stage('UEFI] erase ddr')).toBeGreaterThan(stage('DDR training, Start'))
@@ -89,7 +99,7 @@ describe('SampleProjectService', () => {
     expect(stage('console:/ # hdiag')).toBeGreaterThan(stage('console:/ #'))
     expect(result.project.evidenceRecords?.find((item) => item.id === 'sample-e-screen-fail')?.sourceIds).toHaveLength(2)
     const all = await projects.list(true)
-    expect(all.some((item) => item.archived && item.lpddrDevelopmentContext?.product === 'LPDDR5')).toBe(true)
+    expect(all.some((item) => item.archived && item.lpddrDevelopmentContext?.product === 'LPDDR5 Demo')).toBe(true)
   })
 
   it('replaces active legacy generated samples and removes only their generated folders', async () => {
@@ -106,9 +116,9 @@ describe('SampleProjectService', () => {
 
     expect(migrated).toBe(true)
     expect((await projects.get(legacy.id))?.archived).toBe(true)
-    expect((await projects.list()).some((item) => item.description?.includes('SCT_SAMPLE_EVALUATION_V5'))).toBe(true)
+    expect((await projects.list()).some((item) => item.description?.includes('SCT_PUBLIC_SYNTHETIC_DEMO_V6'))).toBe(true)
     await expect(access(join(root, 'samples', 'lpddr6-xiaomi'))).rejects.toThrow()
     await expect(access(join(root, 'samples', 'lpddr6-xiaomi-v2'))).rejects.toThrow()
-    await expect(access(join(root, 'samples', 'evaluation-demo-v5'))).resolves.toBeUndefined()
+    await expect(access(join(root, 'samples', 'public-synthetic-demo-v6'))).resolves.toBeUndefined()
   })
 })

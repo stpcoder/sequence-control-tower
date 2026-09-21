@@ -21,6 +21,6 @@ describe('Agent Results Summary proposals', () => {
   it('uses short familiar labels for menu context', () => {
     expect(analysisContextLabel('log_search')).toBe('로그 검색')
     expect(analysisContextLabel('analysis_view')).toBe('결과 정리')
-    expect(analysisContextLabel('project_compare')).toBe('평가 비교')
+    expect(analysisContextLabel('project_compare')).toBe('폴더 비교')
   })
 })

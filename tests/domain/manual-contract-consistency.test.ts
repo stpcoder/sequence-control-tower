@@ -17,7 +17,8 @@ describe('manual and product contract', () => {
     const manual = await readFile(resolve('docs/manual/07-LLM-OpenCode.md'), 'utf8')
     for (const label of ['RPM', 'TPM', '응답 제한 시간', '재시도 횟수']) expect(manual).toContain(label)
     expect(manual).toContain('분석은 백그라운드에서 실행합니다')
-    expect(manual).toContain('내장 Agent로 전환합니다')
+    expect(manual).toContain('같은 세션의 호환 경로')
+    expect(manual).toContain('다음 요청에서 다시 OpenCode를 사용합니다')
   })
 
   it('builds a GitBook-compatible and GitHub Pages-compatible manual', async () => {

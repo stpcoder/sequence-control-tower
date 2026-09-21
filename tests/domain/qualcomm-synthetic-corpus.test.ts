@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(".");
 const corpusRoot = resolve("tests/fixtures/qualcomm-bringup");
 const generator = resolve("tests/fixtures/soc-logs/generators/generate-qualcomm-bringup-corpus.mjs");
-const referenceParserRoot = "/Users/taehoje/study_lp/lpddr6-packet-mapper";
+const referenceParserRoot = "/Users/taehoje/lpddr6-packet-mapper";
 const temporaryRoots: string[] = [];
 const expectedFlow = [
   "SYN_POWER_ON",

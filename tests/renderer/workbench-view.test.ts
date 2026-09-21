@@ -28,6 +28,7 @@ import {
   clampSearchHitIndex,
   clampWorkbenchPaneWidth,
   compactIncrementalSearchObservations,
+  confirmedWorkflowChecksFromObservations,
   defaultRuleObservationIds,
   deferredSearchHitIndex,
   DEFAULT_WORKBENCH_PANE_WIDTHS,
@@ -158,6 +159,36 @@ describe('Log Workbench UI data hardening', () => {
     expect(defaultRuleObservationIds(['pass'], compacted)).toEqual(['pass'])
   })
 
+  it('builds a first folder rule without asking the engineer to re-check every search', () => {
+    const observation = (id: string, query: string, matched: boolean) => ({
+      id, sourceId: 'log-a', query, matcherKind: 'literal' as const, target: 'content' as const,
+      caseSensitive: false, matched, matchCount: matched ? 1 : 0, role: 'search_history' as const, excerpts: [],
+    })
+    const searches = [
+      observation('hdiag', 'hdiag', true),
+      observation('pass', '@PASS', false),
+      observation('fail', '@FAIL', false),
+      observation('explore', 'unrelated exploratory term', false),
+    ]
+    expect(defaultRuleObservationIds([], searches, 'SYSTEM_REBOOT')).toEqual(['hdiag', 'pass', 'fail'])
+    expect(defaultRuleObservationIds([], searches, 'DIAG_FAIL')).toEqual(['hdiag', 'pass', 'fail'])
+    expect(defaultRuleObservationIds([], searches, 'PASS')).toEqual(['hdiag'])
+  })
+
+  it('stores only the searches promoted into the applied rule as Agent memory', () => {
+    const searches = [
+      { id: 'hdiag', sourceId: 'log-a', query: 'hdiag', matcherKind: 'literal' as const, target: 'content' as const, caseSensitive: false, matched: true, matchCount: 1, role: 'search_history' as const, excerpts: [] },
+      { id: 'pass', sourceId: 'log-a', query: '@PASS', matcherKind: 'literal' as const, target: 'content' as const, caseSensitive: false, matched: false, matchCount: 0, role: 'search_history' as const, excerpts: [] },
+    ]
+    const checks = [
+      { query: '@PASS', mode: 'literal' as const, caseSensitive: false, expected: 'absent' as const, matchCount: 0, stage: 'memory-test' as const, order: 1 },
+      { query: 'ignored exploration', mode: 'literal' as const, caseSensitive: false, expected: 'absent' as const, matchCount: 0, stage: 'memory-test' as const, order: 2 },
+      { query: 'hdiag', mode: 'literal' as const, caseSensitive: false, expected: 'present' as const, matchCount: 1, stage: 'memory-test' as const, order: 3 },
+    ]
+    expect(confirmedWorkflowChecksFromObservations(checks, searches).map((check) => [check.query, check.order]))
+      .toEqual([['hdiag', 1], ['@PASS', 2]])
+  })
+
   it('groups workspace matches by file while preserving navigation indexes', () => {
     const groups = groupWorkspaceSearchHits([
       { fileId: 'a', line: 1, start: 0, end: 4, excerpt: 'FAIL' },
@@ -225,14 +256,14 @@ describe('Log Workbench UI data hardening', () => {
     expect(ordered.clauses[1].order).toEqual({ afterClauseId: 'clause-b' })
   })
 
-  it('keeps the rule editor mounted when an asynchronous workflow review arrives', () => {
+  it('keeps Agent memory confirmation out of the per-file judgment UI', () => {
     expect(ruleEditorPresentation({
       hasDraft: true,
       hasObservations: true,
       editorOpen: true,
       hasWorkflowReview: true,
     })).toEqual({
-      showWorkflowReview: true,
+      showWorkflowReview: false,
       showEditor: true,
       showOpenButton: false,
     })
@@ -242,7 +273,7 @@ describe('Log Workbench UI data hardening', () => {
       editorOpen: false,
       hasWorkflowReview: true,
     })).toEqual({
-      showWorkflowReview: true,
+      showWorkflowReview: false,
       showEditor: false,
       showOpenButton: true,
     })
@@ -327,7 +358,7 @@ describe('Log Workbench UI data hardening', () => {
     expect(result).toMatchObject({ outcomes: { 'log-b': 'DIAG_FAIL' }, conflicts: 0, exceptions: 0 })
   })
 
-  it('filters stable review queues without hiding manually confirmed logs', () => {
+  it('keeps rule exceptions visible even when an engineer decision wins', () => {
     const files: WorkbenchFile[] = [
       { id: 'ok', name: 'ok.log', ruleResult: 'PASS', ruleNeedsReview: false },
       { id: 'review', name: 'review.log', ruleResult: 'UNKNOWN', ruleNeedsReview: true, ruleExceptionCode: 'NO_MATCH' },
@@ -335,8 +366,8 @@ describe('Log Workbench UI data hardening', () => {
       { id: 'confirmed', name: 'confirmed.log', decision: 'DIAG_FAIL', ruleNeedsReview: true, ruleExceptionCode: 'RULE_CONFLICT' },
     ]
     expect(filterWorkbenchFiles(files, 'all')).toHaveLength(4)
-    expect(filterWorkbenchFiles(files, 'review').map((file) => file.id)).toEqual(['review', 'conflict'])
-    expect(filterWorkbenchFiles(files, 'conflict').map((file) => file.id)).toEqual(['conflict'])
+    expect(filterWorkbenchFiles(files, 'review').map((file) => file.id)).toEqual(['review', 'conflict', 'confirmed'])
+    expect(filterWorkbenchFiles(files, 'conflict').map((file) => file.id)).toEqual(['conflict', 'confirmed'])
   })
 
   it('reports whether a project rule is unused, folder-only, or project-wide', () => {
@@ -381,13 +412,11 @@ describe('Log Workbench UI data hardening', () => {
     expect(planRuleApplication(groups, {}, [shared], 'folder', 'root:a').map((item) => item.group.key)).toEqual(['root:a'])
   })
 
-  it('renders the pin, accessible order modal, and opt-in metadata apply affordances', () => {
+  it('renders the rule controls without the duplicate quick-review suggestions', () => {
     expect(workbenchSource).toContain('판정 조건 추가')
     expect(workbenchSource).toContain('role="dialog" aria-modal="true"')
-    expect(workbenchSource).toContain('onApplyMetadataSuggestion')
-    expect(workbenchSource).toContain('field}</b> {suggestion.value}')
-    expect(workbenchSource).toContain('신뢰도')
-    expect(workbenchSource).toContain('suggestedTags.slice(0, 6).map')
+    expect(workbenchSource).not.toContain('field}</b> {suggestion.value}')
+    expect(workbenchSource).not.toContain('suggestedTags.slice(0, 6).map')
   })
 
   it('keeps source text immutable while applying current and scoped replace-all lazily', () => {
@@ -555,7 +584,7 @@ describe('Log Workbench UI data hardening', () => {
     expect(shouldCancelAnalysisJob('running', '')).toBe(false)
   })
 
-  it('wires the review UI to the existing analysis lifecycle and keeps it review-only', () => {
+  it('keeps search navigation visible while removing the duplicate quick-review surface', () => {
     expect(workbenchSource).toContain('api.analysis.start({')
     expect(workbenchSource).toContain('api.analysis.get(started.id)')
     expect(workbenchSource).toContain('api.analysis.cancel(jobId)')
@@ -571,10 +600,9 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchSource).toContain('검색 중…')
     expect(workbenchSource).toContain('find-match-count')
     expect(workbenchSource).toContain('aria-live="polite"')
-    expect(workbenchSource).toContain('placeholder="확인할 내용 (선택)"')
-    expect(workbenchSource).toContain('<SearchCode size={13} /> AI로 검토')
-    expect(workbenchSource).not.toContain("patternReviewBusy ? '검토 중' : 'AI로 검토'")
-    expect(workbenchSource).toContain('경고 {patternReview.result.warnings.length}건')
+    expect(workbenchSource).not.toContain('<section className="pattern-review"')
+    expect(workbenchSource).not.toContain('placeholder="확인할 내용 (선택)"')
+    expect(workbenchSource).not.toContain('<SearchCode size={13} /> 검토')
     expect(workbenchSource).not.toContain('검토용 제안 · 판정은 엔지니어가 확정')
     expect(workbenchSource).not.toContain('pattern-review-source')
     expect(workbenchSource).not.toContain('pattern-review-disclaimer')
@@ -586,22 +614,19 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).toContain('font-size: var(--wb-type-body)')
     expect(workbenchCss).toContain('.search-result-line {')
     expect(workbenchCss).toContain('font-size: 13px')
-    expect(workbenchSource).toContain('applySuggestedSearch(suggestion)')
     expect(workbenchSource).toContain("scope === 'project'")
     expect(workbenchSource).toContain('mergeAppliedFolderRules(effectiveRulesByFolder[group.key] ?? [], new Set(), uniqueRules)')
-    expect(workbenchSource).toContain("recipeSaved ? '적용 완료'")
-    expect(workbenchSource).toContain("editingRecipeId ? '수정 적용' : '현재 폴더에 추가'")
-    expect(workbenchSource).toContain('<strong>규칙 추가</strong>')
+    expect(workbenchSource).toContain("recipeSaved ? '다시 적용'")
+    expect(workbenchSource).toContain("editingRecipeId ? '변경 적용' : '현재 폴더에 적용'")
+    expect(workbenchSource).toContain("'현재 폴더에 적용'")
     expect(workbenchSource).not.toContain('confirm-decision-revision')
     expect(workbenchSource).not.toContain('변경 확정')
     expect(workbenchSource).toContain('workbench-file-filters')
-    expect(workbenchSource).toContain('<strong>현재 폴더</strong>')
-    expect(workbenchSource).toContain('<strong>전체 프로젝트</strong>')
-    expect(workbenchSource).toContain("void applySavedRecipe(recipe, 'folder')")
-    expect(workbenchSource).toContain("void applySavedRecipe(recipe, 'project')")
-    expect(workbenchSource).toContain("? '전체 프로젝트'")
-    expect(workbenchSource).toContain("? '현재 폴더'")
-    expect(workbenchSource).toContain('<Trash2 size={12} />삭제')
+    expect(workbenchSource).toContain('현재 폴더에 적용됨')
+    expect(workbenchSource).toContain('unapplyRecipe(recipe) : applySavedRecipe(recipe)')
+    expect(workbenchSource).not.toContain("void applySavedRecipe(recipe, 'project')")
+    expect(workbenchSource).not.toContain('<strong>전체 프로젝트</strong>')
+    expect(workbenchSource).toContain('<Trash2 size={12} />프로젝트에서 삭제')
     expect(workbenchSource).toContain('className="recipe-details-toggle"')
     expect(workbenchSource).toContain('className="recipe-delete-observation"')
     expect(workbenchSource).toContain('<SearchConditionRow')
@@ -611,7 +636,9 @@ describe('Log Workbench UI data hardening', () => {
     expect(workbenchCss).not.toContain('.recipe-logic')
     expect(workbenchSource).toContain('submitCurrentSearch()')
     expect(workbenchSource).not.toContain('observationTimer')
-    expect(workbenchSource).toContain('prepareRuleFromWorkflow(workflowChecks)')
+    expect(workbenchSource).toContain('rememberAppliedWorkflow(')
+    expect(workbenchSource).toContain('batch-review-files')
+    expect(workbenchSource).toContain("setFileFilter('all')")
     expect(workbenchSource).not.toContain('다시 분류')
     expect(workbenchSource).not.toContain('r${recipe.revision}')
     expect(workbenchSource).not.toContain('>보관<')

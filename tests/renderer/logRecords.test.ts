@@ -326,7 +326,7 @@ describe('renderer log result projection', () => {
     const filters = { query: '', result: 'all' as const, review: 'all' as const }
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'sample_count', filters }).total).toBe(3)
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_count', filters }).total).toBe(2)
-    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_fail', filters }).breakdown).toEqual({ passCount: 2, failCount: 1, definitiveCount: 3 })
+    expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'pass_fail', filters }).breakdown).toEqual({ passCount: 2, failCount: 1, definitiveCount: 3, pendingCount: 1 })
     expect(buildPivotGrid(rows, { rows: [], columns: [], aggregation: 'fail_rate', filters }).total).toBe(33.3)
   })
 

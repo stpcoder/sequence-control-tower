@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { EVALUATION_OUTCOMES, EvaluationAgentRuntime, proposalToEvaluationMemory, type EvaluationAgentSession, type EvaluationAgentSkillPolicy, type EvaluationFile, type EvaluationOutcome, type LogReader } from '../../src/domain/evaluation-agent'
+import { EVALUATION_DIMENSIONS, EVALUATION_OUTCOMES, EvaluationAgentRuntime, proposalToEvaluationMemory, type EvaluationAgentSession, type EvaluationAgentSkillPolicy, type EvaluationDimension, type EvaluationFile, type EvaluationFolderSummary, type EvaluationOutcome, type LogReader } from '../../src/domain/evaluation-agent'
 import type { AssessmentOrigin, EvidenceRecord, EvaluationNode, FailureHypothesis } from '../../src/domain/evaluation-memory'
+import type { EvaluationReportOutcome } from '../../src/domain/evaluation-report'
 import { extractLpddrFilenameDimensions } from '../../src/domain/lpddr-filename-dimensions'
 import type { ArtifactRecord, ProjectSnapshot } from '../shared/contracts'
+import { getActiveEvaluationDecisions } from '../shared/contracts'
+import { evaluationRuleResolver } from '../../src/domain/evaluation-rules'
 import type { ArtifactService } from './artifact-service'
 import type { OpenAiCompatibleClient } from './llm-service'
 import type { NativeAgentStore } from './native-agent-store'
 import type { ProjectStore } from './project-store'
+import type { EvaluationStore } from './evaluation-store'
 import { classifyLpddrStatus, LPDDR_STATUS_SPECS } from './lpddr-agent-tools'
 
-export interface EvaluationAgentStartInput { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
+export interface EvaluationAgentStartInput { projectId: string; sourceIds?: string[]; evaluationScopeId?: string; intent?: string; issueId?: string }
 export interface EvaluationAgentStoredSession { projectId: string; evaluationScopeId?: string; sourceIds: string[]; session: EvaluationAgentSession; updatedAt: string }
 export interface EvaluationAgentPersistence {
   load?(id: string): Promise<EvaluationAgentStoredSession | null>
@@ -20,6 +24,7 @@ export interface EvaluationAgentPersistence {
 export interface EvaluationAgentServiceDeps {
   artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow'> & Partial<Pick<ArtifactService, 'inspectStages' | 'inspectEvidence'>>
   projects: Pick<ProjectStore, 'get'>
+  evaluations?: Pick<EvaluationStore, 'snapshot'>
   llm: Pick<OpenAiCompatibleClient, 'complete'>
   engineerMemory?: Pick<NativeAgentStore, 'workflowMemories'>
   sessions?: EvaluationAgentPersistence
@@ -72,12 +77,12 @@ export class EvaluationAgentService {
 
   async start(input: EvaluationAgentStartInput): Promise<EvaluationAgentSession> {
     const project = await this.project(input.projectId)
-    const sources = await this.authorize(project, input.sourceIds)
+    const sources = await this.authorize(project, input.sourceIds, input.evaluationScopeId)
     const id = this.id(); this.sourceMaps.set(id, sources); this.projectIds.set(id, project.id)
     const roots = [...new Set(sources.map((source) => source.rootId))]
     const evaluationScopeId = roots.length === 1 ? roots[0] : undefined
     this.evaluationScopeIds.set(id, evaluationScopeId)
-    const runtime = this.runtime(sources)
+    const runtime = this.runtime(sources, project.id)
     const requestedIntent = safe(input.intent, 400)
     const evaluationIntent = /^(?:failure[- ]?trend|analysis)$/i.test(requestedIntent) ? '' : requestedIntent
     const session = await runtime.prepare(id, {
@@ -109,7 +114,7 @@ export class EvaluationAgentService {
     const sources = this.sourceMaps.get(id)
     if (!sources) throw new Error('evaluation agent source scope is unavailable; start a new session')
     if (session.status === 'running' && this.runners.has(id)) return session
-    const runtime = this.runtime(sources)
+    const runtime = this.runtime(sources, this.projectIds.get(id)!)
     session = runtime.transition(session, input)
     await this.remember(session)
     if (session.status === 'running') this.schedule(id, runtime)
@@ -134,7 +139,7 @@ export class EvaluationAgentService {
   }
   private async hydrate(record: EvaluationAgentStoredSession, requiredScopeId?: string): Promise<EvaluationAgentSession> {
     const project = await this.project(record.projectId)
-    const sources = await this.authorize(project, record.sourceIds)
+    const sources = await this.authorize(project, record.sourceIds, record.evaluationScopeId)
     const scopeIds = [...new Set(sources.map((source) => source.rootId))]
     const scopeId = record.evaluationScopeId ?? (scopeIds.length === 1 ? scopeIds[0] : undefined)
     if (requiredScopeId && scopeId !== requiredScopeId) throw new Error('evaluation agent source scope mismatch')
@@ -176,7 +181,13 @@ export class EvaluationAgentService {
         relation: node.relation,
         previousEvaluation: safeEvidence(node.parentId ? nodeById.get(node.parentId)?.name ?? '' : '', 160),
         sameFolder: Boolean(evaluationScopeId && node.evaluationScopeId === evaluationScopeId),
-        interpretation: safeEvidence(node.interpretation ?? '', 300), dimensions: node.dimensions,
+        interpretation: safeEvidence(node.interpretation ?? '', 300),
+        ...(node.report ? { report: {
+          purpose: safeEvidence(node.report.purpose.text, 300), results: safeEvidence(node.report.results.summary, 300),
+          interpretation: safeEvidence(node.report.interpretation.text, 400), trends: safeEvidence(node.report.trends.text, 400),
+          nextPlan: safeEvidence(node.report.nextPlan.text, 400), revision: node.report.revision,
+        } } : {}),
+        dimensions: node.dimensions,
       }))
     const procedures = workflows.slice(0, 8).map((workflow) => ({
       purpose: safeEvidence(workflow.purpose, 160), result: workflow.result, stages: workflow.stages,
@@ -192,11 +203,16 @@ export class EvaluationAgentService {
       confirmedSearchProcedures: procedures,
     }), 2_400)
   }
-  private async authorize(project: ProjectSnapshot, requested?: string[]): Promise<Source[]> {
+  private async authorize(project: ProjectSnapshot, requested?: string[], evaluationScopeId?: string): Promise<Source[]> {
     const requestedIds = requested?.map((id) => safe(id)).filter(Boolean)
-    if (requestedIds && (new Set(requestedIds).size !== requestedIds.length || requestedIds.length > 32)) throw new Error('invalid source selection')
-    const allowed = project.artifacts.filter((source) => !requestedIds || requestedIds.includes(source.sourceId)).slice(0, 32)
-    if (requestedIds && allowed.length !== requestedIds.length) throw new Error('source is not authorized for this project')
+    if (requestedIds && new Set(requestedIds).size !== requestedIds.length) throw new Error('invalid source selection')
+    const scopeId = safe(evaluationScopeId, 160)
+    const scoped = scopeId ? project.artifacts.filter((source) => source.rootId === scopeId) : []
+    if (scopeId && !scoped.length) throw new Error('evaluation folder is not authorized for this project')
+    const selected = scopeId ? scoped : project.artifacts.filter((source) => !requestedIds || requestedIds.includes(source.sourceId))
+    if (!scopeId && requestedIds && selected.length !== requestedIds.length) throw new Error('source is not authorized for this project')
+    if (selected.length > 20_000) throw new Error('evaluation folder contains too many sources')
+    const allowed = selected
     if (!allowed.length) throw new Error('no authorized sources')
     const artifacts = new Map((await this.deps.artifacts.list()).map((artifact) => [artifact.id, artifact]))
     return allowed.map((source) => ({
@@ -209,47 +225,123 @@ export class EvaluationAgentService {
       artifact: artifacts.get(source.artifactId),
     }))
   }
-  private runtime(sources: Source[]): EvaluationAgentRuntime {
+  private runtime(sources: Source[], projectId: string): EvaluationAgentRuntime {
     const bySource = new Map(sources.map((source) => [source.sourceId, source]))
-    const reader: LogReader = {
-      listFiles: async () => {
+    type ResolvedFile = EvaluationFile & { reportOutcome: EvaluationReportOutcome; resultSource: keyof EvaluationFolderSummary['resultSources'] }
+    let scanPromise: Promise<ResolvedFile[]> | undefined
+    const filenameOutcome = (fileName: string): EvaluationReportOutcome => {
+      const token = basename(fileName).replace(/\.log$/i, '').split('_').at(-1)?.toUpperCase() ?? ''
+      if (/^PASS$/.test(token)) return 'PASS'
+      if (/HDIAGREBOOT|HIDAGREBOOT|REBOOT/.test(token)) return 'SYSTEM_REBOOT'
+      if (/MBEFAIL|TRAININGFAIL/.test(token)) return 'TRAINING_FAIL'
+      if (/FAIL/.test(token)) return 'TEST_FAIL'
+      return 'UNKNOWN'
+    }
+    const scan = () => {
+      if (scanPromise) return scanPromise
+      scanPromise = (async () => {
         const sourceInput = sources.map((source) => ({
           sourceId: source.sourceId,
           artifactId: source.artifactId,
           rootId: source.artifactRootId,
           relativePath: source.relativePath,
         }))
-        const [inspected, statusInspected] = await Promise.all([
+        const [inspected, statusInspected, evaluationSnapshot] = await Promise.all([
           this.deps.artifacts.inspectStages
-          ? this.deps.artifacts.inspectStages({
-              sources: sourceInput,
-            }).catch(() => null)
-          : null,
+            ? this.deps.artifacts.inspectStages({ sources: sourceInput }).catch(() => null)
+            : null,
           this.deps.artifacts.inspectEvidence
             ? this.deps.artifacts.inspectEvidence({ sources: sourceInput, specs: LPDDR_STATUS_SPECS }).catch(() => null)
             : null,
+          this.deps.evaluations?.snapshot(projectId).catch(() => null) ?? Promise.resolve(null),
         ])
         const stagesBySource = new Map(inspected?.sources.map((item) => [item.sourceId, item.stages]) ?? [])
-        const outcomesBySource = new Map(statusInspected?.sources.flatMap((item) => {
+        const localBySource = new Map(statusInspected?.sources.flatMap((item) => {
           if (item.error) return []
           const counts = Object.fromEntries(LPDDR_STATUS_SPECS.map((spec) => [spec.id, item.evidence.find((entry) => entry.specId === spec.id)?.occurrenceCount ?? 0]))
           const classified = classifyLpddrStatus(counts)
-          return EVALUATION_OUTCOMES.includes(classified.status as EvaluationOutcome)
-            ? [[item.sourceId, { outcome: classified.status as EvaluationOutcome, reason: classified.reason }] as const]
-            : []
+          return [[item.sourceId, classified] as const]
         }) ?? [])
-        return sources.map((source) => ({
-          id: source.sourceId,
-          name: source.fileName,
-          size: source.artifact?.size,
-          lineCount: source.artifact?.fingerprint?.lineCount,
-          metadata: filenameDimensions(source.fileName),
-          stages: stagesBySource.get(source.sourceId),
-          ...(outcomesBySource.get(source.sourceId) ? {
-            deterministicOutcome: outcomesBySource.get(source.sourceId)!.outcome,
-            deterministicReason: outcomesBySource.get(source.sourceId)!.reason,
-          } : {}),
-        }))
+        const decisionBySource = new Map<string, NonNullable<typeof evaluationSnapshot>['decisions'][number]>()
+        getActiveEvaluationDecisions(evaluationSnapshot?.decisions ?? []).forEach((decision) => decisionBySource.set(decision.source.sourceId, decision))
+        const ruleBySource = new Map<string, NonNullable<typeof evaluationSnapshot>['batches'][number]['outcomes'][number]>()
+        const staleSources = new Set<string>()
+        const resolver = evaluationSnapshot ? evaluationRuleResolver(evaluationSnapshot) : null
+        evaluationSnapshot?.batches.forEach((batch) => {
+          batch.outcomes.forEach((outcome) => {
+            // A stale latest run must not resurrect an older accepted result.
+            ruleBySource.delete(outcome.source.sourceId)
+            staleSources.delete(outcome.source.sourceId)
+            if (!resolver?.isCurrent(batch) || (outcome.outcomeSource === 'engineer-preserved' && !decisionBySource.has(outcome.source.sourceId))) staleSources.add(outcome.source.sourceId)
+            if (resolver?.isCurrent(batch) && outcome.outcomeSource !== 'engineer-preserved') ruleBySource.set(outcome.source.sourceId, outcome)
+          })
+        })
+        return sources.map((source): ResolvedFile => {
+          const decision = decisionBySource.get(source.sourceId)
+          const rule = ruleBySource.get(source.sourceId)
+          const local = localBySource.get(source.sourceId)
+          const hint = filenameOutcome(source.fileName)
+          const localOutcome = EVALUATION_OUTCOMES.includes(local?.status as EvaluationOutcome) ? local!.status as EvaluationOutcome : undefined
+          const stale = staleSources.has(source.sourceId)
+          const reportOutcome = decision?.result
+            ?? (stale ? 'UNKNOWN' : undefined)
+            ?? (rule?.result && rule.result !== 'UNKNOWN' ? rule.result : undefined)
+            ?? (localOutcome && localOutcome !== 'UNKNOWN' ? localOutcome : undefined)
+            ?? (hint !== 'UNKNOWN' ? hint : 'UNKNOWN')
+          const resultSource: ResolvedFile['resultSource'] = decision
+            ? 'engineer' : stale ? 'unknown' : rule?.result && rule.result !== 'UNKNOWN'
+              ? 'rule' : localOutcome && localOutcome !== 'UNKNOWN'
+                ? 'local-marker' : hint !== 'UNKNOWN' ? 'filename' : 'unknown'
+          return {
+            id: source.sourceId,
+            name: source.fileName,
+            size: source.artifact?.size,
+            lineCount: source.artifact?.fingerprint?.lineCount,
+            metadata: filenameDimensions(source.fileName),
+            stages: stagesBySource.get(source.sourceId),
+            commandSignatures: [...new Set(source.artifact?.fingerprint?.commandSignatures ?? [])].slice(0, 40),
+            ...(reportOutcome !== 'EXCLUDED' && reportOutcome !== 'UNKNOWN' && EVALUATION_OUTCOMES.includes(reportOutcome as EvaluationOutcome) ? {
+              deterministicOutcome: reportOutcome as EvaluationOutcome,
+              deterministicReason: `${resultSource}: ${decision?.result ?? rule?.result ?? local?.reason ?? hint}`,
+            } : {}),
+            reportOutcome,
+            resultSource,
+          }
+        })
+      })()
+      return scanPromise
+    }
+    const reader: LogReader = {
+      listFiles: scan,
+      folderSummary: async () => {
+        const files = await scan()
+        const resultCounts: EvaluationFolderSummary['resultCounts'] = {}
+        const resultSources: EvaluationFolderSummary['resultSources'] = {}
+        const commandFiles = new Map<string, number>()
+        files.forEach((file) => {
+          resultCounts[file.reportOutcome] = (resultCounts[file.reportOutcome] ?? 0) + 1
+          resultSources[file.resultSource] = (resultSources[file.resultSource] ?? 0) + 1
+          new Set(file.commandSignatures ?? []).forEach((command) => commandFiles.set(command, (commandFiles.get(command) ?? 0) + 1))
+        })
+        const commonDimensions = Object.fromEntries(EVALUATION_DIMENSIONS.flatMap((key) => {
+          const values = files.map((file) => file.metadata?.[key])
+          const first = values[0]
+          return first !== undefined && values.every((value) => value !== undefined && String(value) === String(first)) ? [[key, first]] : []
+        })) as EvaluationFolderSummary['commonDimensions']
+        const variedDimensions = EVALUATION_DIMENSIONS.filter((key) => {
+          const values = new Set(files.flatMap((file) => file.metadata?.[key] === undefined ? [] : [String(file.metadata[key])]))
+          return values.size > 1
+        }) as EvaluationDimension[]
+        return {
+          totalFiles: files.length,
+          analyzedFiles: files.length,
+          resultCounts,
+          resultCoverage: (resultCounts.UNKNOWN ?? 0) === 0 ? 'complete' : 'partial',
+          resultSources,
+          commonDimensions,
+          variedDimensions,
+          commandSignatures: [...commandFiles.entries()].map(([command, count]) => ({ command, files: count })).sort((left, right) => right.files - left.files || left.command.localeCompare(right.command)).slice(0, 80),
+        }
       },
       search: async (sourceId, query, options) => {
         const source = bySource.get(sourceId); if (!source) throw new Error('unauthorized source')

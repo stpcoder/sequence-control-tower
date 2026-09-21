@@ -33,7 +33,7 @@ The corpus uses the ordered flow convention `SYN_POWER_ON -> SYN_UEFI_ENTER -> S
 
 Memory records are deliberately synthetic and follow the read-only reference parser grammar. stressapptest cases use full `Hardware Error: miscompare on CPU ... at outer(inner:DIMM...): read..., reread... expected...` records plus a CRC form; they cover low/high/both-half mismatches and repeated physical addresses. tSKHYNIX cases begin with `tSKHYNIX_<test-name>` and cover 32-bit, 64-bit split, supported field aliases and context (`AP`/`IDX`/`CS`/`BK`/`ROW`/`COL`), repeated addresses, equal/missing fields, misalignment, and overlong values.
 
-Each memory fixture has a `parserOracle` in `manifest.json` with expected stressapptest and tSKHYNIX row/record counts and an expected parser-error classification where applicable. The Vitest suite always checks the local grammar and oracle; when `/Users/taehoje/study_lp/lpddr6-packet-mapper` and `python3` are available, it also invokes the reference parser's read-only line parser conditionally.
+Each memory fixture has a `parserOracle` in `manifest.json` with expected stressapptest and tSKHYNIX row/record counts and an expected parser-error classification where applicable. The Vitest suite always checks the local grammar and oracle; when `/Users/taehoje/lpddr6-packet-mapper` and `python3` are available, it also invokes the reference parser's read-only line parser conditionally.
 
 ## Safety notice
 

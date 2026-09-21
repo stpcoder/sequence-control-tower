@@ -40,6 +40,24 @@ describe('underscore-delimited lab filename', () => {
     expect(extractLpddrFilenameDimensions(name).testMode).toBeUndefined()
   })
 
+  it('keeps PAT-WR before COM as a pattern without inventing writeData C', () => {
+    const patternName = '26-08-07-14-13-17_RIG-DEMO_Ch8_SM8975_1_85_1.295_DEMO_EN_DEFAULT_PAT-WR_COM74_DHCST-89_C_Fail.log'
+    expect(extractLpddrFilenameDimensions(patternName)).toMatchObject({
+      pattern: 'WR',
+      sample: 'DHCST-89',
+      evaluationStep: 'C',
+    })
+    expect(extractLpddrFilenameDimensions(patternName).writeData).toBeUndefined()
+  })
+
+  it('still parses explicit WR and RD data tokens', () => {
+    expect(extractLpddrFilenameDimensions('run_PAT-WR_WR_55_RD-AA_COM74_SAMPLE-01_C_Fail.log')).toMatchObject({
+      pattern: 'WR',
+      writeData: '55',
+      readData: 'AA',
+    })
+  })
+
   it('uses the final filename token for the normalized result', () => {
     const replaceResult = (result: string) => name.replace(/Pass\.log$/, `${result}.log`)
     expect(extractLpddrFilenameOutcome(name)).toBe('PASS')
@@ -104,6 +122,40 @@ describe('underscore-delimited lab filename', () => {
       })
     },
   )
+
+  it('preserves the full engineer-authored evaluation title between ECC and COM', () => {
+    const titled = name.replace('_EN_DEFAULT_5333MHZ_COM74_', '_EF_VPERI_UP_RT_COLD_5333MHZ_COM74_')
+    expect(parsePositionalLabFilename(titled)).toMatchObject({
+      eccMode: 'EF',
+      customCondition: 'VPERI_UP_RT_COLD_5333MHZ',
+      frequencyMHz: 5333,
+    })
+    expect(extractLpddrFilenameDimensions(titled)).toMatchObject({
+      customCondition: 'VPERI_UP_RT_COLD_5333MHZ',
+      frequencyMHz: 5333,
+    })
+  })
+
+  it.each([
+    ['DEFAULT_547', 547],
+    ['DEFAULT_5333', 5333],
+    ['Enable5333Only', 5333],
+  ])('accepts abbreviated evaluation-title clock %s as a candidate', (title, frequencyMHz) => {
+    const abbreviated = name.replace('DEFAULT_5333MHZ', title)
+    expect(parsePositionalLabFilename(abbreviated)).toMatchObject({ customCondition: title, frequencyMHz })
+  })
+
+  it('leaves frequency unknown when the usual filename title does not state it', () => {
+    const withoutFrequency = name.replace('DEFAULT_5333MHZ', 'DEFAULT')
+    expect(parsePositionalLabFilename(withoutFrequency)).toMatchObject({ customCondition: 'DEFAULT' })
+    expect(parsePositionalLabFilename(withoutFrequency)).not.toHaveProperty('frequencyMHz')
+  })
+
+  it('keeps multiple title clocks as a sweep hint instead of choosing one fixed value', () => {
+    const sweep = name.replace('DEFAULT_5333MHZ', 'SWEEP_547_5333')
+    expect(parsePositionalLabFilename(sweep)).toMatchObject({ customCondition: 'SWEEP_547_5333' })
+    expect(parsePositionalLabFilename(sweep)).not.toHaveProperty('frequencyMHz')
+  })
 
   it('normalizes explicit MATERIAL and SAMPLE tokens to the same value', () => {
     expect(extractLpddrFilenameDimensions('run_MATERIAL_DHCST-91.log')).toMatchObject({

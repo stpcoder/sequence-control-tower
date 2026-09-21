@@ -8,6 +8,8 @@ import {
   LPDDR_AGENT_TOOL_DESCRIPTIONS, type LpddrAgentToolName, type LpddrAgentToolResult, type LpddrAgentToolService
 } from './lpddr-agent-tools'
 
+const MAX_SCOPE_SOURCES = 10_000
+
 export interface SctMcpToolTrace {
   name: string
   label: string
@@ -36,8 +38,9 @@ export class SctMcpScopeRegistry {
 
   create(projectId: string, sourceIds: readonly string[], ttlMs = 10 * 60_000): string {
     const safeProjectId = projectId.trim().slice(0, 160)
-    const safeSourceIds = [...new Set(sourceIds.map((item) => item.trim().slice(0, 160)).filter(Boolean))].slice(0, 100)
+    const safeSourceIds = [...new Set(sourceIds.map((item) => item.trim().slice(0, 160)).filter(Boolean))]
     if (!safeProjectId || !safeSourceIds.length) throw new Error('MCP 평가 범위가 비어 있습니다.')
+    if (safeSourceIds.length > MAX_SCOPE_SOURCES) throw new Error(`AGENT_SOURCE_SCOPE_LIMIT:${safeSourceIds.length}:${MAX_SCOPE_SOURCES}`)
     const token = randomBytes(24).toString('hex')
     this.scopes.set(token, {
       projectId: safeProjectId, sourceIds: new Set(safeSourceIds), expiresAt: Date.now() + Math.max(1_000, ttlMs),
@@ -53,7 +56,7 @@ export class SctMcpScopeRegistry {
       name: result.name,
       label: result.label,
       summary: result.summary.slice(0, 1_000),
-      evidenceSourceIds: result.evidenceSourceIds.filter((sourceId) => scope.sourceIds.has(sourceId)).slice(0, 100),
+      evidenceSourceIds: result.evidenceSourceIds.filter((sourceId) => scope.sourceIds.has(sourceId)),
     }
     scope.traces.push(trace)
     if (scope.traces.length > 20) scope.traces.splice(0, scope.traces.length - 20)
@@ -79,7 +82,7 @@ export class SctMcpScopeRegistry {
     const requested = requestedSourceIds?.length
       ? [...new Set(requestedSourceIds.map((item) => item.trim()).filter(Boolean))]
       : [...scope.sourceIds]
-    if (!requested.length || requested.length > 100 || requested.some((sourceId) => !scope.sourceIds.has(sourceId))) throw new Error('MCP 로그 범위를 벗어났습니다.')
+    if (!requested.length || requested.length > MAX_SCOPE_SOURCES || requested.some((sourceId) => !scope.sourceIds.has(sourceId))) throw new Error('MCP 로그 범위를 벗어났습니다.')
     return requested
   }
 

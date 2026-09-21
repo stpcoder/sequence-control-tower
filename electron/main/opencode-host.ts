@@ -12,7 +12,7 @@ import { isVertexOpenAiBaseUrl, vertexAccessTokenProvider, type VertexAccessToke
 import type { SctMcpToolTrace } from './sct-mcp-server'
 
 const execFileAsync = promisify(execFile)
-const clean = (value: unknown, max = 12_000): string => typeof value === 'string'
+const clean = (value: unknown, max = 800_000): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
   : ''
 
@@ -145,8 +145,11 @@ export class OpenCodeHost {
     title: string
     content: string
     requiredToolNames?: string[]
+    signal?: AbortSignal
+    onSessionCreated?: (id: string) => Promise<void>
     onToolTrace?: (trace: SctMcpToolTrace) => void
   }): Promise<OpenCodeReply> {
+    if (input.signal?.aborted) throw new Error('ABORTED')
     const config = await this.authenticatedLlm()
     const state = await this.ensureStarted(config)
     const scopeToken = this.options.createMcpScope(input.projectId, input.sourceIds)
@@ -165,6 +168,8 @@ export class OpenCodeHost {
       externalSessionId = created.data?.id
     }
     if (!externalSessionId) throw new Error('OPENCODE_SESSION_CREATE_FAILED')
+    await input.onSessionCreated?.(externalSessionId)
+    if (input.signal?.aborted) { await this.abort(externalSessionId); throw new Error('ABORTED') }
     const requiredTools = [...new Set((input.requiredToolNames ?? []).map((name) => clean(name, 100).replace(/^sct_/, '')).filter(Boolean))].slice(0, 4)
     const required = requiredTools.length
       ? `\n이 요청의 최소 근거 도구: ${requiredTools.join(', ')}. 답변을 작성하기 전에 각각 한 번 실행하십시오. 도구 결과가 비어 있어도 실행 사실과 미확인 상태를 근거로 사용하십시오.`
@@ -173,14 +178,19 @@ export class OpenCodeHost {
       ? `\n새 분석 세션입니다. 다른 분석보다 먼저 skill 도구로 ${REQUIRED_OPEN_CODE_SKILL}을 로드하고 그 기준을 이번 대화 전체에 적용하십시오.`
       : ''
     const scope = `\n\n[Sequence Control Tower scope]\nprojectId=${input.projectId}\nscopeToken=${scopeToken}\nallowedSourceIds=${input.sourceIds.join(',')}\n각 MCP 도구에 projectId와 scopeToken을 반드시 전달하십시오. sourceIds를 생략하면 현재 평가 폴더 전체가 사용되며, 허용 범위 밖 sourceId는 서버에서 거부됩니다.${skill}${required}`
+    const userContent = clean(input.content, 800_001)
+    if (userContent.length > 800_000) throw new Error(`AGENT_CONTEXT_LIMIT:${userContent.length}:800000`)
+    const onAbort = () => { void this.abort(externalSessionId!).catch(() => undefined) }
+    input.signal?.addEventListener('abort', onAbort, { once: true })
     const response = await state.client.session.prompt({
       sessionID: externalSessionId,
       directory: join(this.options.dataRoot, 'agent-workspace'),
       model: { providerID: state.providerID, modelID: state.modelID }, agent: 'sct-analyst',
       system: NATIVE_AGENT_SYSTEM_PROMPT,
-      tools: { bash: false, edit: false, write: false, read: false, glob: false, grep: false, webfetch: false, websearch: false, task: false },
-      parts: [{ type: 'text', text: `${clean(input.content)}${scope}` }]
-    }, { throwOnError: true })
+      tools: { bash: false, edit: false, write: false, read: false, glob: false, grep: false, webfetch: false, websearch: false, task: false, question: false },
+      parts: [{ type: 'text', text: `${userContent}${scope}` }]
+    }, { throwOnError: true, ...(input.signal ? { signal: input.signal } : {}) }).finally(() => input.signal?.removeEventListener('abort', onAbort))
+    if (input.signal?.aborted) throw new Error('ABORTED')
     const parts = Array.isArray(response.data?.parts) ? response.data.parts : []
     const content = parts.filter((part: any) => part?.type === 'text').map((part: any) => clean(part.text)).filter(Boolean).join('\n\n')
     const history = await state.client.session.messages({
@@ -252,7 +262,7 @@ export class OpenCodeHost {
       mkdir(isolated.stateHome, { recursive: true })
     ])
     const password = randomBytes(24).toString('hex')
-    const builtinTools = Object.fromEntries(['bash', 'edit', 'write', 'read', 'glob', 'grep', 'list', 'task', 'webfetch', 'websearch', 'lsp', 'todowrite'].map((name) => [name, false]))
+    const builtinTools = Object.fromEntries(['bash', 'edit', 'write', 'read', 'glob', 'grep', 'list', 'task', 'webfetch', 'websearch', 'lsp', 'todowrite', 'question'].map((name) => [name, false]))
     const deny = Object.fromEntries(['read', 'edit', 'glob', 'grep', 'list', 'bash', 'task', 'external_directory', 'todowrite', 'question', 'webfetch', 'websearch', 'lsp'].map((name) => [name, 'deny']))
     const config = {
       autoupdate: false, share: 'disabled', snapshot: false, formatter: false, lsp: false,
@@ -273,14 +283,14 @@ export class OpenCodeHost {
             'google-vertex': {
               name: 'Sequence Control Tower Vertex AI', npm: '@ai-sdk/google-vertex',
               options: { project: vertex.project, location: vertex.location },
-              models: { [modelID]: { id: modelID, name: modelID, tool_call: true, reasoning: true, temperature: true, limit: { context: 128_000, output: 4_096 } } }
+              models: { [modelID]: { id: modelID, name: modelID, tool_call: true, reasoning: true, temperature: true, limit: { context: 200_000, output: 8_192 } } }
             }
           }
         : {
             sct: {
               name: 'Sequence Control Tower LLM', npm: '@ai-sdk/openai-compatible',
               options: { baseURL: llm.baseUrl, apiKey: llm.apiKey ?? '', timeout: llm.timeoutMs },
-              models: { [llm.model]: { id: llm.model, name: llm.model, tool_call: true, temperature: true, limit: { context: 128_000, output: 4_096 } } }
+              models: { [llm.model]: { id: llm.model, name: llm.model, tool_call: true, temperature: true, limit: { context: 200_000, output: 8_192 } } }
             }
           },
       mcp: { sct: { type: 'remote', url: this.options.mcpUrl, enabled: true, headers: { Authorization: `Bearer ${this.options.mcpToken}` }, oauth: false, timeout: Math.min(llm.timeoutMs, 120_000) } }

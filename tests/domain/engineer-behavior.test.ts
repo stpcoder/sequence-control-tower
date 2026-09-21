@@ -15,10 +15,10 @@ describe('engineer behavior workflow', () => {
     expect(candidate?.suggestions).toContain('Training 안정성 확인')
   })
 
-  it('does not treat one ordinary Ctrl-F as a learned workflow', () => {
+  it('accepts one deliberate marker when the engineer saves a result', () => {
     expect(buildEngineerWorkflowCandidate([
       { query: '@FAIL', mode: 'literal', caseSensitive: false, matchCount: 0, occurredAt: '2026-08-09T01:00:00Z' },
-    ], 'PASS')).toBeNull()
+    ], 'PASS')?.checks).toEqual([expect.objectContaining({ query: '@FAIL', expected: 'absent', order: 1 })])
   })
 
   it('keeps only the submitted term from legacy incremental live-search drafts', () => {

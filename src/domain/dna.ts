@@ -176,6 +176,7 @@ function extractEcc(items: EvidenceText[]): EvidenceValue<EccMode> {
 function extractClocks(items: EvidenceText[]): EvidenceValue<ClockSetting> {
   const fixed = collectMatches(items, [
     /\b(?:clk|clock|frequency|freq)\s*(?:=|:|_|-)?\s*(\d{2,6}(?:\.\d+)?(?:\s*[,/]\s*\d{2,6}(?:\.\d+)?)*)\s*(?:mhz)?\b/gi,
+    /\bclk\.sh\s+((?:\d{2,6}(?:\.\d+)?(?:\s+|\s*[,/]\s*))*\d{2,6}(?:\.\d+)?)(?=\s*[;\n]|$)/gi,
     /\bclk(?:\.sh)?\b[^;\n]*?\s-f\s+((?:\d{2,6}(?:\.\d+)?(?:\s*[,/]\s*|\s+))*\d{2,6}(?:\.\d+)?)(?=\s+-|\s*[;\n]|$)/gi,
   ]);
   const sweep = collectMatches(items, [

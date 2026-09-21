@@ -6,6 +6,7 @@ import {
   PATTERN_LAYOUT_PRESET_ID,
   PATTERN_LAYOUT_PRESET_NAME,
   normalizePatternLayout,
+  patternLayoutFromPreset,
   patternLayoutPreset,
   patternLayoutWithAgentProposal,
 } from './patternLayout'
@@ -34,6 +35,14 @@ describe('pattern layout persistence', () => {
     const preset = patternLayoutPreset({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['testMode', 'run'], failOnly: true })
     expect(preset).toMatchObject({ id: PATTERN_LAYOUT_PRESET_ID, name: PATTERN_LAYOUT_PRESET_NAME, format: 'json' })
     expect(preset.options).toMatchObject({ rowAxes: ['testMode', 'run'], failOnly: true })
+  })
+
+  it('keeps independent table layouts for each evaluation folder and comparison view', () => {
+    const first = patternLayoutPreset({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['sample'] }, undefined, 'evaluation-a')
+    const second = patternLayoutPreset({ ...DEFAULT_PATTERN_LAYOUT, rowAxes: ['dq'], aggregation: 'fail_count' }, { ...first, createdAt: '', updatedAt: '' }, 'evaluation-b')
+    const preset = { ...second, createdAt: '', updatedAt: '' }
+    expect(patternLayoutFromPreset(preset, 'evaluation-a').rowAxes).toEqual(['sample'])
+    expect(patternLayoutFromPreset(preset, 'evaluation-b')).toMatchObject({ rowAxes: ['dq'], aggregation: 'fail_count' })
   })
 
   it('retains DRAM and operating-condition axes', () => {

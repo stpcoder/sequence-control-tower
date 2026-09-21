@@ -78,16 +78,37 @@ export function normalizePatternLayout(value: unknown): PatternLayout {
   }
 }
 
-export function patternLayoutFromPreset(preset: ProjectExportPreset | undefined): PatternLayout {
-  return normalizePatternLayout(preset?.options)
+function scopedPatternLayouts(preset: ProjectExportPreset | undefined): Record<string, unknown> {
+  const options = preset?.options as Record<string, unknown> | undefined
+  const layouts = options?.layoutsByEvaluation
+  return layouts && typeof layouts === 'object' && !Array.isArray(layouts) ? layouts as Record<string, unknown> : {}
 }
 
-export function patternLayoutPreset(layout: PatternLayout, existing?: ProjectExportPreset): Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } {
+export function patternLayoutFromPreset(preset: ProjectExportPreset | undefined, evaluationScopeId?: string): PatternLayout {
+  const scoped = evaluationScopeId ? scopedPatternLayouts(preset)[evaluationScopeId] : undefined
+  if (scoped) return normalizePatternLayout(scoped)
+  const options = preset?.options as Record<string, unknown> | undefined
+  return normalizePatternLayout(options?.defaultLayout ?? options)
+}
+
+export function patternLayoutPreset(
+  layout: PatternLayout,
+  existing?: ProjectExportPreset,
+  evaluationScopeId?: string,
+): Omit<ProjectExportPreset, 'createdAt' | 'updatedAt'> & { id?: string } {
+  const normalized = normalizePatternLayout(layout)
+  const options = evaluationScopeId
+    ? {
+        version: 2,
+        defaultLayout: patternLayoutFromPreset(existing),
+        layoutsByEvaluation: { ...scopedPatternLayouts(existing), [evaluationScopeId]: normalized },
+      }
+    : normalized
   return {
     id: PATTERN_LAYOUT_PRESET_ID,
     name: PATTERN_LAYOUT_PRESET_NAME,
     format: 'json',
-    options: normalizePatternLayout(layout) as unknown as Record<string, JsonValue>,
+    options: options as unknown as Record<string, JsonValue>,
     ...(existing?.archived ? { archived: false } : {}),
   }
 }

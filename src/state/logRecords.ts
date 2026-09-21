@@ -44,6 +44,8 @@ export type FailureAddressEventsBySource = Record<string, { events: readonly Art
 
 export interface LogResultRecord {
   id: string
+  /** Stable project folder id. One evaluation folder is one analysis scope. */
+  evaluationScopeId: string
   fileName: string
   folder: string
   relativePath: string
@@ -103,6 +105,8 @@ export interface PivotCell {
 }
 
 export interface PivotOutcomeBreakdown {
+  pendingCount?: number
+  excludedCount?: number
   passCount: number
   failCount: number
   definitiveCount: number
@@ -492,6 +496,11 @@ function runFromPath(path: string): string | undefined {
 
 const SOURCE_KEY_SEPARATOR = '\u001f'
 
+export function evaluationScopeIdForFile(file: Pick<WorkbenchFile, 'origin' | 'relativePath' | 'sourceKey' | 'rootId' | 'name'>): string {
+  if (file.rootId) return file.rootId
+  return rootGroupKey(file)
+}
+
 function rootGroupKey(file: Pick<WorkbenchFile, 'origin' | 'relativePath' | 'sourceKey' | 'rootId' | 'name'>): string {
   if (file.rootId) return `root:${file.rootId}`
   const sourceKeyRoot = file.sourceKey?.split(SOURCE_KEY_SEPARATOR, 1)[0]
@@ -547,9 +556,12 @@ function matchingLineCount(text: string, pattern: RegExp): number {
 export function inferResultCandidate(file: WorkbenchFile): { result: ResultLabel; evidenceCount: number } {
   const text = file.text ?? ''
   const failureCandidates: Array<{ result: ResultLabel; pattern: RegExp }> = [
+    // Training failure is the earliest decisive failure stage. A platform may
+    // emit a watchdog/reboot marker while recovering from it, but the result
+    // must remain TRAINING_FAIL rather than being collapsed into reboot/halt.
+    { result: 'TRAINING_FAIL', pattern: /TRAINING_FAIL|training:\s*.+timeout/i },
     { result: 'SYSTEM_REBOOT', pattern: /reboot_reason|WATCHDOG_RESET|session recovery detected|\bTERMINAL_RESULT=SYSTEM_REBOOT\b/i },
     { result: 'SYSTEM_HALT', pattern: /\b(?:TERMINAL_RESULT=)?SYSTEM_HALT\b/i },
-    { result: 'TRAINING_FAIL', pattern: /TRAINING_FAIL|training:\s*.+timeout/i },
     { result: 'DIAG_FAIL', pattern: /DIAG_FAIL|hidag[^\n]*(?:fail|error)/i },
     { result: 'TEST_FAIL', pattern: /TEST_FAIL|@FAIL/i },
   ]
@@ -629,6 +641,7 @@ export function projectLogRecords(
   metadataApprovals: MetadataApprovalsBySource = {},
   stageResultsBySource: StageResultsBySource = {},
   failureAddressEventsBySource: FailureAddressEventsBySource = {},
+  evaluationScopeIdsBySource: Readonly<Record<string, string>> = {},
 ): LogResultRecord[] {
   const folderLabels = rootAwareFolderLabels(files)
   return files.map((file) => {
@@ -654,10 +667,11 @@ export function projectLogRecords(
     const grid = applyMetadataApproval(gridCandidate, approvals.grid)
     const inferred = inferResultCandidate(file)
     const stageResults = stageResultsBySource[file.id] ?? inferStageResults(file)
-    const result = file.decision ?? file.ruleResult ?? inferred.result
+    const result = file.decision ?? (file.ruleStale ? 'UNKNOWN' : file.ruleResult ?? inferred.result)
     const failureAddress = failureAddressEventsBySource[file.id]
     const resultSource: ResultSource = file.decision
       ? 'engineer'
+      : file.ruleStale ? 'unreviewed'
       : file.ruleResult && file.ruleResult !== 'UNKNOWN'
         ? 'rule'
         : inferred.result !== 'UNKNOWN'
@@ -668,6 +682,11 @@ export function projectLogRecords(
     const run = runFromPath(file.relativePath ?? '') ?? runFromPath(file.name)
     return {
       id: file.id,
+      // Persisted Agent memory and evaluation history use the project folder
+      // id, while WorkbenchFile.rootId identifies the imported artifact root.
+      // App supplies the explicit mapping so folder-scoped results cannot mix
+      // those two identities.
+      evaluationScopeId: evaluationScopeIdsBySource[file.id] ?? evaluationScopeIdForFile(file),
       fileName: file.name,
       folder: folderLabels.get(file.id) ?? rootLabel(file),
       relativePath: file.relativePath ?? file.name,
@@ -696,6 +715,59 @@ export function projectLogRecords(
       selectedEvidenceCount,
     }
   })
+}
+
+export const PROJECT_COMPARISON_SCOPE_ID = '__project_compare__'
+
+export interface EvaluationScopeOption {
+  id: string
+  label: string
+  count: number
+}
+
+/** Evaluation folders are the hard default boundary for rules, results and Agent calls. */
+export function evaluationScopeOptions(records: readonly LogResultRecord[]): EvaluationScopeOption[] {
+  const grouped = new Map<string, EvaluationScopeOption>()
+  for (const record of records) {
+    const current = grouped.get(record.evaluationScopeId)
+    if (current) current.count += 1
+    else grouped.set(record.evaluationScopeId, { id: record.evaluationScopeId, label: record.folder, count: 1 })
+  }
+  return [...grouped.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko-KR'))
+}
+
+export function defaultEvaluationScopeId(
+  records: readonly LogResultRecord[],
+  preferredScopeId?: string,
+): string | undefined {
+  if (preferredScopeId && records.some((record) => record.evaluationScopeId === preferredScopeId)) return preferredScopeId
+  return records[0]?.evaluationScopeId
+}
+
+/**
+ * Keeps the folder selected in the log workbench authoritative when opening a
+ * folder-scoped result page. Local comparison mode is the only intentional
+ * exception; otherwise a stale per-view selection must not override the
+ * current evaluation folder supplied by App.
+ */
+export function resolveEvaluationScopeId(
+  records: readonly LogResultRecord[],
+  localScopeId?: string,
+  currentScopeId?: string,
+): string | undefined {
+  if (localScopeId === PROJECT_COMPARISON_SCOPE_ID && evaluationScopeOptions(records).length > 1) {
+    return PROJECT_COMPARISON_SCOPE_ID
+  }
+  return defaultEvaluationScopeId(records, currentScopeId || localScopeId)
+}
+
+export function recordsInEvaluationScope(
+  records: readonly LogResultRecord[],
+  scopeId?: string,
+): LogResultRecord[] {
+  if (scopeId === PROJECT_COMPARISON_SCOPE_ID) return [...records]
+  const effective = defaultEvaluationScopeId(records, scopeId)
+  return effective ? records.filter((record) => record.evaluationScopeId === effective) : []
 }
 
 function pivotFailureResult(result: ResultLabel): boolean {
@@ -759,6 +831,8 @@ function pivotFailure(row: LogResultRecord): boolean {
 }
 
 type PivotAccumulator = {
+  pendingCount: number
+  excludedCount: number
   recordCount: number
   definitiveCount: number
   passCount: number
@@ -773,7 +847,7 @@ type PivotAccumulator = {
 }
 
 function freshPivotAccumulator(): PivotAccumulator {
-  return { recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set(), gridIds: new Set(), sourceIds: [], failureEventCount: 0, signatureCounts: new Map(), failureSourceIds: new Set() }
+  return { pendingCount: 0, excludedCount: 0, recordCount: 0, definitiveCount: 0, passCount: 0, failCount: 0, evidenceCount: 0, sampleIds: new Set(), gridIds: new Set(), sourceIds: [], failureEventCount: 0, signatureCounts: new Map(), failureSourceIds: new Set() }
 }
 
 function failureSignature(fields: ArtifactFailureAddressFields): string | undefined {
@@ -857,6 +931,10 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
         addFailureEvent(cell, event, row.id)
         addFailureEvent(total, event, row.id)
       } else {
+        cell.pendingCount += !definitive && row.result !== 'EXCLUDED' ? 1 : 0
+        cell.excludedCount += row.result === 'EXCLUDED' ? 1 : 0
+        total.pendingCount += !definitive && row.result !== 'EXCLUDED' ? 1 : 0
+        total.excludedCount += row.result === 'EXCLUDED' ? 1 : 0
         cell.definitiveCount += definitive ? 1 : 0
         cell.passCount += passed ? 1 : 0
         cell.failCount += failed ? 1 : 0
@@ -880,7 +958,7 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
         || (config.aggregation === 'sample_count' && sampleId !== undefined && sampleId !== null && String(sampleId).trim() !== '')
         || (config.aggregation === 'grid_count' && Boolean(gridKey))
         || (config.aggregation === 'pass_count' && passed)
-        || (config.aggregation === 'pass_fail' && definitive)
+        || config.aggregation === 'pass_fail'
         || (config.aggregation === 'fail_rate' && definitive)
         || (config.aggregation === 'fail_count' && failed)
         || (config.aggregation === 'evidence_count' && row.evidenceCount > 0)
@@ -902,6 +980,8 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
         passCount: cell?.passCount ?? 0,
         failCount: cell?.failCount ?? 0,
         definitiveCount: cell?.definitiveCount ?? 0,
+        ...(cell?.pendingCount ? { pendingCount: cell.pendingCount } : {}),
+        ...(cell?.excludedCount ? { excludedCount: cell.excludedCount } : {}),
         ...(topFailureSignature(cell) ? { topFailureSignature: topFailureSignature(cell) } : {}),
       } } : {}),
       ...(cell?.failureEventCount ? { failureAddress: {
@@ -923,6 +1003,8 @@ export function buildPivotGrid(rows: readonly LogResultRecord[], config: PivotCo
       passCount: total.passCount,
       failCount: total.failCount,
       definitiveCount: total.definitiveCount,
+      ...(total.pendingCount ? { pendingCount: total.pendingCount } : {}),
+      ...(total.excludedCount ? { excludedCount: total.excludedCount } : {}),
       ...(topFailureSignature(total) ? { topFailureSignature: topFailureSignature(total) } : {}),
     } } : {}),
     ...(total.failureEventCount ? { failureAddress: {
@@ -1069,15 +1151,15 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'run', label: 'Run', section: 'identity' },
   { key: 'filename', label: '파일명', section: 'identity' },
   { key: 'folder', label: '폴더', section: 'identity' },
-  { key: 'skew', label: 'SKEW', section: 'condition' },
+  { key: 'skew', label: 'Skew', section: 'condition' },
   { key: 'lot', label: 'Lot', section: 'condition' },
   { key: 'die', label: 'Die', section: 'condition' },
   { key: 'soc_model', label: 'SoC', section: 'condition' },
   { key: 'equipment_channel', label: '실장기 채널', section: 'condition' },
   { key: 'ecc_mode', label: 'ECC', section: 'condition' },
-  { key: 'custom_condition', label: '사용자 조건', section: 'condition' },
+  { key: 'custom_condition', label: '평가 제목', section: 'condition' },
   { key: 'evaluation_step', label: '평가 Step', section: 'condition' },
-  { key: 'sample_value', label: '자재 (Sample)', section: 'condition' },
+  { key: 'sample_value', label: 'Sample', section: 'condition' },
   { key: 'temperature_value', label: '온도 (°C)', section: 'condition' },
   { key: 'temperature_corner', label: '온도 조건', section: 'condition' },
   { key: 'test_mode', label: 'Test Mode', section: 'condition' },
@@ -1098,7 +1180,7 @@ export const EXPORT_COLUMN_DEFINITIONS: ReadonlyArray<{
   { key: 'column', label: 'Column', section: 'condition' },
   { key: 'write_data', label: 'WR', section: 'condition' },
   { key: 'read_data', label: 'RD', section: 'condition' },
-  { key: 'timing_skew_ps', label: 'Timing SKEW (ps)', section: 'condition' },
+  { key: 'timing_skew_ps', label: 'Timing Skew (ps)', section: 'condition' },
   { key: 'grid_value', label: 'Grid', section: 'condition' },
   { key: 'sample_state', label: 'Sample 상태', section: 'result' },
   { key: 'temperature_state', label: '온도 상태', section: 'result' },

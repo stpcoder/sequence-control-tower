@@ -3,13 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 const bridge = vi.hoisted(() => ({ exposed: null as Record<string, unknown> | null, invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() }))
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_name: string, api: Record<string, unknown>) => { bridge.exposed = api } }, ipcRenderer: { invoke: bridge.invoke, on: bridge.on, removeListener: bridge.removeListener } }))
 
-describe('preload evaluation agent API', () => {
-  it('exposes only the five allow-listed evaluation-agent methods', async () => {
+describe('preload Agent API', () => {
+  it('exposes one OpenCode-centered Agent surface and retires the legacy evaluation Agent bridge', async () => {
     await import('./index')
-    const api = bridge.exposed?.evaluationAgent as Record<string, (input: unknown) => unknown>
-    expect(Object.keys(api)).toEqual(['start', 'restore', 'get', 'resume', 'memorySavePayload'])
-    api.start({ projectId: 'p1' }); api.restore({ projectId: 'p1', evaluationScopeId: 'root-1' }); api.get('s1'); api.resume({ sessionId: 's1' }); api.memorySavePayload({ sessionId: 's1' })
-    expect(bridge.invoke.mock.calls.map((call) => call[0])).toEqual(['evaluation-agent:start', 'evaluation-agent:restore', 'evaluation-agent:get', 'evaluation-agent:resume', 'evaluation-agent:memory-save-payload'])
+    expect(bridge.exposed).not.toHaveProperty('evaluationAgent')
+    expect(bridge.exposed).toHaveProperty('nativeAgent')
   })
 
   it('exposes bounded native workflow-memory operations without raw file access', async () => {

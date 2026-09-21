@@ -1,3 +1,7 @@
+import { inspectionSummary, type InspectionStates } from '../state/inspectionStatus'
+import { InspectionNotice } from '../components/InspectionNotice'
+import { useViewDraft, useViewScopeGuard } from '../state/viewDrafts'
+import { mergeProjectPresets } from '../state/projectPresets'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronDown, Clipboard, Download, FilterX, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import type { ResultLabel } from '../domain/workbench'
@@ -18,6 +22,11 @@ import {
   selectAllFilteredLogRecords,
   serializeLogRecordsCsv,
   exportCellValue,
+  defaultEvaluationScopeId,
+  evaluationScopeOptions,
+  PROJECT_COMPARISON_SCOPE_ID,
+  recordsInEvaluationScope,
+  resolveEvaluationScopeId,
   sortLogRecords,
   toggleLogRecordSelection,
   type CandidateValue,
@@ -37,8 +46,19 @@ import {
   resultExportLayoutPreset,
 } from '../state/resultExportLayout'
 import { resultRowsAgentContext, type AgentAnalysisContextRequest } from '../domain/analysis-context'
+import {
+  EVALUATION_HARNESS_PRESET_ID,
+  evaluationHarnessesFromPreset,
+  evaluationHarnessForScope,
+  evaluationHarnessPreset,
+  evaluationHarnessWithColumns,
+  upsertEvaluationHarness,
+} from '../state/evaluationHarness'
 
 interface ResultsViewProps {
+  stageInspectionStates?: InspectionStates
+  addressInspectionStates?: InspectionStates
+  onRetryInspections?: () => void
   records: readonly LogResultRecord[]
   onOpenFile: (fileId: string) => void
   onEditMetadata?: (record: LogResultRecord, field: PatternAxis, value: string) => void | Promise<void>
@@ -47,6 +67,8 @@ interface ResultsViewProps {
   project: ProjectSnapshot | null
   onProjectUpdated: (project: ProjectSnapshot) => void
   onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
+  selectedEvaluationScopeId?: string
+  onSelectedEvaluationScopeChange?: (evaluationScopeId: string) => void
 }
 
 const PAGE_SIZE = 200
@@ -54,14 +76,13 @@ const PAGE_SIZE = 200
 const COLUMNS: Array<{ key: LogRecordSortKey; label: string }> = [
   { key: 'fileName', label: '파일명' },
   { key: 'folder', label: '폴더' },
-  { key: 'sample', label: '자재 (Sample)' },
+  { key: 'sample', label: 'Sample' },
   { key: 'temperature', label: '온도' },
   { key: 'vdd', label: 'VDD' },
   { key: 'grid', label: 'Grid' },
   { key: 'stageResults', label: '진행 단계' },
   { key: 'result', label: '결과' },
   { key: 'review', label: '판정 상태' },
-  { key: 'evidenceCount', label: '판정 근거 줄' },
 ]
 
 const DEFAULT_UI_EXPORT_COLUMNS = EXPORT_COLUMN_DEFINITIONS
@@ -81,7 +102,7 @@ const EXPORT_SECTIONS = [
   { key: 'result' as const, label: '판정' },
 ] as const
 
-const METADATA_LABEL: Record<PatternAxis, string> = { sample: '자재 (Sample)', temperature: '온도', vdd: 'VDD', grid: 'Grid' }
+const METADATA_LABEL: Record<PatternAxis, string> = { sample: 'Sample', temperature: '온도', vdd: 'VDD', grid: 'Grid' }
 
 export function normalizedMetadataEdit(field: PatternAxis, input: string): string | null {
   const value = input.trim()
@@ -101,42 +122,51 @@ function metadataValue(field: CandidateValue, suffix = '', onOpen?: () => void) 
   return <button className={`candidate-value candidate-action ${field.state}`} title="클릭하여 수정" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
 }
 
-export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSelectedMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext }: ResultsViewProps) {
-  const [query, setQuery] = useState('')
-  const [result, setResult] = useState<ResultLabel | 'all'>('all')
-  const [review, setReview] = useState<ReviewState | 'all'>('all')
-  const [folder, setFolder] = useState('all')
-  const [stage, setStage] = useState<ResultStageGroup | 'all'>('all')
-  const [stageStatus, setStageStatus] = useState<EvaluationStageStatus | 'all'>('all')
-  const [sortKey, setSortKey] = useState<LogRecordSortKey>('fileName')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
-  const [page, setPage] = useState(1)
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [selectedExportColumnKeys, setSelectedExportColumnKeys] = useState<ReadonlySet<LogRecordExportColumn>>(
-    () => new Set(DEFAULT_UI_EXPORT_COLUMNS),
-  )
-  const [preset, setPreset] = useState<'fail' | 'needs_review' | null>(null)
+export function ResultsView({ stageInspectionStates, addressInspectionStates, onRetryInspections, records, onOpenFile, onEditMetadata, onApproveSelectedMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext, selectedEvaluationScopeId, onSelectedEvaluationScopeChange }: ResultsViewProps) {
+  const [scopeId, setScopeId] = useViewDraft<string>(`${project?.id ?? 'preview'}:ResultsView:scope`, selectedEvaluationScopeId ?? '')
+  const scopeOptions = useMemo(() => evaluationScopeOptions(records), [records])
+  const effectiveScopeId = resolveEvaluationScopeId(records, scopeId, selectedEvaluationScopeId)
+  const comparisonMode = effectiveScopeId === PROJECT_COMPARISON_SCOPE_ID
+  const scopeRecords = useMemo(() => recordsInEvaluationScope(records, effectiveScopeId), [effectiveScopeId, records])
+  const draftKey = `${project?.id ?? 'preview'}:${effectiveScopeId ?? ''}:ResultsView`
+  const captureViewScope = useViewScopeGuard(draftKey)
+  const saveInFlight = useRef(false)
+  const initialLayout = resultExportLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === RESULT_EXPORT_PRESET_ID && !preset.archived), effectiveScopeId)
+  const [query, setQuery] = useViewDraft(draftKey + ':query', '')
+  const [result, setResult] = useViewDraft<ResultLabel | 'all'>(draftKey + ':result', 'all')
+  const [review, setReview] = useViewDraft<ReviewState | 'all'>(draftKey + ':review', 'all')
+
+  const [stage, setStage] = useViewDraft<ResultStageGroup | 'all'>(draftKey + ':stage', 'all')
+  const [stageStatus, setStageStatus] = useViewDraft<EvaluationStageStatus | 'all'>(draftKey + ':stageStatus', 'all')
+  const [sortKey, setSortKey] = useViewDraft<LogRecordSortKey>(draftKey + ':sortKey', 'fileName')
+  const [sortDirection, setSortDirection] = useViewDraft<SortDirection>(draftKey + ':sortDirection', 'asc')
+  const [page, setPage] = useViewDraft(draftKey + ':page', 1)
+  const [selectedIds, setSelectedIds] = useViewDraft<ReadonlySet<string>>(draftKey + ':selection', new Set())
+  const [selectedExportColumnKeys, setSelectedExportColumnKeys] = useViewDraft<ReadonlySet<LogRecordExportColumn>>(draftKey + ':columns', new Set(initialLayout.columns))
+  const [preset, setPreset] = useViewDraft<'fail' | 'needs_review' | null>(draftKey + ':preset', null)
   const [exportPreview, setExportPreview] = useState<LogRecordExportPreview | null>(null)
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: PatternAxis } | null>(null)
   const [editingValue, setEditingValue] = useState('')
   const [savingMetadata, setSavingMetadata] = useState(false)
   const [approvingSelection, setApprovingSelection] = useState(false)
   const [savingExportLayout, setSavingExportLayout] = useState(false)
+  const harnesses = useMemo(() => evaluationHarnessesFromPreset(project?.exportPresets.find((item) => item.id === EVALUATION_HARNESS_PRESET_ID && !item.archived)), [project?.exportPresets])
+  const activeHarness = useMemo(() => comparisonMode ? undefined : evaluationHarnessForScope(harnesses, effectiveScopeId), [comparisonMode, effectiveScopeId, harnesses])
 
   useEffect(() => {
-    const layout = resultExportLayoutFromPreset(project?.exportPresets.find((item) => item.id === RESULT_EXPORT_PRESET_ID && !item.archived))
-    setSelectedExportColumnKeys(new Set(layout.columns))
-  }, [project?.id])
+    setScopeId((current) => resolveEvaluationScopeId(records, current, selectedEvaluationScopeId) ?? '')
+  }, [project?.id, records, selectedEvaluationScopeId])
 
-  const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((a, b) => a.localeCompare(b, 'ko-KR')), [records])
-  const filtered = useMemo(() => sortLogRecords(filterLogRecords(records, { query, result, review, folder }).filter((row) => {
+  useEffect(() => { setExportPreview(null); setEditingCell(null) }, [draftKey])
+
+  const filtered = useMemo(() => sortLogRecords(filterLogRecords(scopeRecords, { query, result, review, folder: 'all' }).filter((row) => {
     const checkpoints = resultStageCheckpoints(row.stageResults, row.fileName, row.result)
     if (stage !== 'all' && !checkpoints.some((item) => item.group === stage && (stageStatus === 'all' || item.status === stageStatus))) return false
     if (stage === 'all' && stageStatus !== 'all' && !checkpoints.some((item) => item.status === stageStatus)) return false
     if (preset === 'fail') return new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT']).has(row.result)
     if (preset === 'needs_review') return row.review === 'needs_review' || [row.sample, row.temperature, row.vdd, row.grid].some((field) => field.state === 'missing' || field.state === 'malformed')
     return true
-  }), sortKey, sortDirection), [folder, query, records, result, review, stage, stageStatus, preset, sortDirection, sortKey])
+  }), sortKey, sortDirection), [query, result, review, scopeRecords, stage, stageStatus, preset, sortDirection, sortKey])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
   const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -149,7 +179,7 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
     () => EXPORT_COLUMN_DEFINITIONS.filter((column) => selectedExportColumnKeys.has(column.key)).map((column) => column.key),
     [selectedExportColumnKeys],
   )
-  const hasFilters = Boolean(query || folder !== 'all' || result !== 'all' || review !== 'all' || stage !== 'all' || stageStatus !== 'all' || preset)
+  const hasFilters = Boolean(query || result !== 'all' || review !== 'all' || stage !== 'all' || stageStatus !== 'all' || preset)
   const evidenceColumnsSelected = EVIDENCE_EXPORT_COLUMNS.every((column) => selectedExportColumnKeys.has(column))
   const toggleExportColumn = (key: LogRecordExportColumn, checked: boolean) => setSelectedExportColumnKeys((current) => {
     const next = new Set(current)
@@ -172,15 +202,16 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
     setQuery('')
     setResult('all')
     setReview('all')
-    setFolder('all')
     setStage('all')
     setStageStatus('all')
     setPreset(null)
     setPage(1)
   }
 
+  const inspectionIncomplete = inspectionSummary(stageInspectionStates, scopeRecords).incomplete
+
   const beginExport = (format: 'csv' | 'tsv') => {
-    if (!exportRows.length || !exportColumns.length) return
+    if (inspectionIncomplete || !exportRows.length || !exportColumns.length) return
     setExportPreview(buildLogRecordExportPreview(filtered, selectedIds, exportColumns, format))
   }
 
@@ -224,7 +255,7 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
     try {
       await onEditMetadata(row, editingCell.field, value)
       setEditingCell(null)
-    } finally { setSavingMetadata(false) }
+    } catch { /* The durable queue reports the failure; keep the editor open. */ } finally { setSavingMetadata(false) }
   }
 
   const approveSelection = async () => {
@@ -254,18 +285,20 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
   }
 
   const saveExportLayout = async () => {
-    if (!project || !window.sequenceIntelligence?.projects || savingExportLayout || !exportColumns.length) return
+    if (saveInFlight.current || !project || !window.sequenceIntelligence?.projects || savingExportLayout || !exportColumns.length) return
+    saveInFlight.current = true
+    const isCurrentView = captureViewScope()
     setSavingExportLayout(true)
     try {
       const api = window.sequenceIntelligence.projects
-      const persist = (target: ProjectSnapshot) => api.saveExportPreset({
-        projectId: target.id,
-        expectedRevision: target.revision,
-        preset: resultExportLayoutPreset(
-          { columns: exportColumns },
-          target.exportPresets.find((item) => item.id === RESULT_EXPORT_PRESET_ID),
-        ),
-      })
+      const persist = async (target: ProjectSnapshot) => {
+        const updates = [resultExportLayoutPreset({ columns: exportColumns }, target.exportPresets.find((preset) => preset.id === RESULT_EXPORT_PRESET_ID), effectiveScopeId)]
+        const storedHarnessPreset = target.exportPresets.find((item) => item.id === EVALUATION_HARNESS_PRESET_ID)
+        const storedHarnesses = evaluationHarnessesFromPreset(storedHarnessPreset)
+        const selectedHarness = comparisonMode ? undefined : evaluationHarnessForScope(storedHarnesses, effectiveScopeId)
+        if (selectedHarness) updates.push(evaluationHarnessPreset(upsertEvaluationHarness(storedHarnesses, evaluationHarnessWithColumns(selectedHarness, exportColumns)), storedHarnessPreset))
+        return api.save({ projectId: target.id, expectedRevision: target.revision, exportPresets: mergeProjectPresets(target, updates) })
+      }
       let next: ProjectSnapshot
       try { next = await persist(project) }
       catch (error) {
@@ -276,10 +309,12 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
         next = await persist(refreshed)
       }
       onProjectUpdated(next)
-      onNotify?.('내보내기 열을 프로젝트에 저장했습니다.', 'success')
+      if (!isCurrentView()) return
+      onNotify?.(comparisonMode ? '폴더 비교용 열 구성을 저장했습니다.' : '현재 폴더의 내보내기 열을 저장했습니다.', 'success')
     } catch (error) {
+      if (!isCurrentView()) return
       onNotify?.(error instanceof Error ? `내보내기 열을 저장하지 못했습니다: ${error.message}` : '내보내기 열을 저장하지 못했습니다.', 'error')
-    } finally { setSavingExportLayout(false) }
+    } finally { saveInFlight.current = false; setSavingExportLayout(false) }
   }
 
   return (
@@ -305,14 +340,19 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
               <div className="export-columns-footer"><button className="export-columns-save" type="button" onClick={() => void saveExportLayout()} disabled={!project || savingExportLayout || !exportColumns.length}>{savingExportLayout ? '저장 중…' : '기본값 저장'}</button></div>
             </div>
           </details>
-          <button onClick={() => beginExport('tsv')} disabled={!exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>
-          <button onClick={() => beginExport('csv')} disabled={!exportRows.length || !exportColumns.length}><Download size={16} />CSV</button>
+          <button onClick={() => beginExport('tsv')} disabled={inspectionIncomplete || !exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>
+          <button onClick={() => beginExport('csv')} disabled={inspectionIncomplete || !exportRows.length || !exportColumns.length}><Download size={16} />{selectedIds.size ? `선택 ${selectedFilteredCount}개 CSV` : `결과 ${exportRows.length}개 CSV`}</button>
         </div>
       </header>
+      <InspectionNotice label="단계 검사" states={stageInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
+      {activeHarness ? <section className="evaluation-harness-strip" aria-label="현재 폴더 분석 기준">
+        <div><span>현재 폴더 기준</span><strong>분석 규칙 {activeHarness.rules.length}개</strong></div>
+        <button type="button" onClick={() => { setSelectedExportColumnKeys(new Set(activeHarness.output.columns)); onNotify?.('현재 폴더의 열 구성을 적용했습니다.') }}>열 적용</button>
+      </section> : null}
 
       <section className="data-filter-bar" aria-label="결과 필터">
         <label className="data-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="파일명, 폴더, 조건 검색" aria-label="결과 검색" /></label>
-        <label><span>평가 폴더</span><select value={folder} onChange={(event) => { setFolder(event.target.value); setPage(1) }}><option value="all">전체 폴더</option>{folders.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
+        <label><span>평가 폴더</span><select value={effectiveScopeId ?? ''} onChange={(event) => { const next = event.target.value; setScopeId(next); setPage(1); setSelectedIds(new Set()); if (next !== PROJECT_COMPARISON_SCOPE_ID) onSelectedEvaluationScopeChange?.(next) }}>{scopeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}{scopeOptions.length > 1 ? <option value={PROJECT_COMPARISON_SCOPE_ID}>폴더 비교</option> : null}</select></label>
         <label><span>결과</span><select value={result} onChange={(event) => { setResult(event.target.value as ResultLabel | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_LABEL_KO).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
         <label><span>판정 상태</span><select value={review} onChange={(event) => { setReview(event.target.value as ReviewState | 'all'); setPage(1) }}><option value="all">전체</option><option value="needs_review">확인 필요</option><option value="confirmed">판정 완료</option></select></label>
         <label><span>진행 단계</span><select value={stage} onChange={(event) => { setStage(event.target.value as ResultStageGroup | 'all'); setPage(1) }}><option value="all">전체</option>{Object.entries(RESULT_STAGE_GROUP_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
@@ -328,30 +368,29 @@ export function ResultsView({ records, onOpenFile, onEditMetadata, onApproveSele
             <th scope="col" className="selection-column">
               <input type="checkbox" checked={allFilteredSelected} ref={(element) => { if (element) element.indeterminate = selectedFilteredCount > 0 && !allFilteredSelected }} onChange={toggleAllFiltered} aria-label="필터된 행 전체 선택" />
             </th>
-            {COLUMNS.map((column) => <th scope="col" key={column.key}><button onClick={() => updateSort(column.key)} aria-label={`${column.label} 기준 정렬`}>{column.label}{sortKey === column.key ? sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} /> : null}</button></th>)}
+            {COLUMNS.filter((column) => comparisonMode || column.key !== 'folder').map((column) => <th scope="col" key={column.key}><button onClick={() => updateSort(column.key)} aria-label={`${column.label} 기준 정렬`}>{column.label}{sortKey === column.key ? sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} /> : null}</button></th>)}
           </tr></thead>
           <tbody>
             {visible.map((row) => (
               <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}>
                 <td className="selection-cell"><input type="checkbox" checked={selectedIds.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={() => setSelectedIds((current) => toggleLogRecordSelection(current, row.id))} aria-label={`${row.fileName} 선택`} /></td>
                 <td><button className="file-link" onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }} title={row.relativePath}>{row.fileName}</button></td>
-                <td title={row.folder}>{row.folder}</td>
+                {comparisonMode ? <td title={row.folder}>{row.folder}</td> : null}
                 {(['sample', 'temperature', 'vdd', 'grid'] as const).map((field) => <td key={field}>
                   {metadataValue(row[field], field === 'temperature' ? '°C' : field === 'vdd' ? 'V' : '', onEditMetadata ? () => beginEdit(row, field) : undefined)}
                 </td>)}
                 <td><div className="stage-results">{resultStageCheckpoints(row.stageResults, row.fileName, row.result).length ? resultStageCheckpoints(row.stageResults, row.fileName, row.result).map((item) => <span className={`stage-result ${item.status}`} key={item.group}>{item.label} <b>{item.status === 'reached' ? '도달' : item.status.toUpperCase()}</b></span>) : <span className="stage-result unknown">미확인</span>}</div></td>
                 <td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td>
                 <td><span className={`review-label ${row.review}`}>{row.review === 'confirmed' ? '판정 완료' : '확인 필요'}</span></td>
-                <td title="PASS·FAIL·Halt·Reboot 등 현재 판정에 사용된 로그 줄 수"><span className="evidence-count">{row.evidenceCount}</span>{row.selectedEvidenceCount ? <small className="row-note">직접 선택</small> : null}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!visible.length ? <div className="data-empty"><strong>{records.length ? '조건에 맞는 로그가 없습니다.' : '분석할 로그가 없습니다.'}</strong><span>{records.length ? '필터를 초기화해 보세요.' : '로그 화면에서 폴더를 추가하세요.'}</span></div> : null}
+        {!visible.length ? <div className="data-empty"><strong>{scopeRecords.length ? '조건에 맞는 로그가 없습니다.' : '현재 폴더에 로그가 없습니다.'}</strong><span>{scopeRecords.length ? '필터를 초기화해 보세요.' : '로그 화면에서 폴더를 선택하세요.'}</span></div> : null}
       </div>
 
       <footer className="data-pagination">
-        <div className="data-pagination-status"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>{selectedRows.length && onAnalyzeContext ? <button className="data-agent-action" type="button" onClick={() => onAnalyzeContext(resultRowsAgentContext(selectedRows))}><Sparkles size={15} />선택 비교</button> : null}</div>
+        <div className="data-pagination-status"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)}` : '0'} / {filtered.length.toLocaleString()}{selectedIds.size ? ` · ${selectedIds.size.toLocaleString()}개 선택됨` : ''}{selectedIds.size && selectedRows.length !== selectedIds.size ? ` · 현재 범위 ${selectedRows.length.toLocaleString()}개` : ''}</span>{selectedIds.size ? <button type="button" onClick={() => setSelectedIds(new Set())}>선택 해제</button> : null}{selectedRows.length && onAnalyzeContext ? <button className="data-agent-action" type="button" onClick={() => onAnalyzeContext(resultRowsAgentContext(selectedRows))}><Sparkles size={15} />선택 비교</button> : null}</div>
         <div><button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>이전</button><span>{currentPage} / {pageCount}</span><button onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={currentPage === pageCount}>다음</button></div>
       </footer>
       {editingCell && editingRow ? <MetadataReviewDialog
@@ -400,8 +439,7 @@ function MetadataReviewDialog({ field, value, busy, onValueChange, onClose, onSa
 
 function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogRecordExportPreview; onClose: () => void; onCopy: (preview: LogRecordExportPreview) => void; onCsv: (preview: LogRecordExportPreview) => void }) {
   const dialogRef = useRef<HTMLDivElement>(null)
-  const conciseColumns = preview.columns.filter((column) => column !== 'filename' && column !== 'relative_path')
-  const previewColumns = conciseColumns.length ? conciseColumns : preview.columns
+  const previewColumns = preview.columns
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
@@ -419,9 +457,9 @@ function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogR
     return () => dialog.removeEventListener('keydown', onKeyDown)
   }, [onClose])
   return <div className="export-preview-modal" role="dialog" aria-modal="true" aria-labelledby="export-preview-title" ref={dialogRef}>
-        <div className="export-preview-dialog"><header><div><h2 id="export-preview-title">{preview.format.toUpperCase()} 내보내기 확인</h2><span>{preview.rows.length}개 행 · {preview.columns.length}개 열 · 파일 정보 제외 미리보기</span></div><button onClick={onClose} aria-label="내보내기 미리보기 닫기"><X size={16} /></button></header>
-          <div className="export-preview-table"><table><thead><tr>{previewColumns.map((column) => <th key={column}>{PREVIEW_LABELS.get(column) ?? column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 5).map((row) => <tr key={row.id}>{previewColumns.map((column) => <td key={column}>{exportCellValue(row, column)}</td>)}</tr>)}</tbody></table></div>
-          <footer><button onClick={onClose}>취소</button><button onClick={() => preview.format === 'tsv' ? void onCopy(preview) : onCsv(preview)}>확정</button></footer>
+        <div className="export-preview-dialog"><header><div><h2 id="export-preview-title">{preview.format.toUpperCase()} 내보내기 확인</h2><span>{preview.rows.length}개 행 · {preview.columns.length}개 열 · 상위 5행 미리보기</span></div><button onClick={onClose} aria-label="내보내기 미리보기 닫기"><X size={16} /></button></header>
+          <div className="export-preview-table"><table><thead><tr>{previewColumns.map((column) => <th key={column}>{PREVIEW_LABELS.get(column) ?? column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 5).map((row) => <tr key={row.id}>{previewColumns.map((column) => <td key={column} title={exportCellValue(row, column)}>{exportCellValue(row, column)}</td>)}</tr>)}</tbody></table></div>
+          <footer><button onClick={onClose}>취소</button><button onClick={() => preview.format === 'tsv' ? void onCopy(preview) : onCsv(preview)}>{preview.format === 'tsv' ? 'TSV 복사' : 'CSV 저장'}</button></footer>
         </div>
       </div>
 }

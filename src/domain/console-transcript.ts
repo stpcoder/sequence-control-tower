@@ -82,7 +82,7 @@ function promptMatch(raw: string): PromptMatch | null {
   const line = withoutCapturePrefix(raw)
   const patterns: Array<{ expression: RegExp; kind: ConsolePromptKind; signature: string; confidence: number; promptGroup: number; commandGroup: number; ambiguous?: boolean }> = [
     { expression: /^((?:UEFI|EDK2|Shell|FS\d+:\\?)\s*(?:>|\]))[ \t]*(.+)$/i, kind: 'uefi', signature: 'uefi-firmware-prompt', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
-    { expression: /^((?:LK2?|PBL|XBL|ABL|BOOTLOADER)\s*>)[ \t]*(.+)$/i, kind: 'bootloader', signature: 'bootloader-angle', confidence: 0.98, promptGroup: 1, commandGroup: 2 },
+    { expression: /^((?:LK2?|PBL|XBL|ABL|BOOTLOADER)\s*(?:>|\]))[ \t]*(.+)$/i, kind: 'bootloader', signature: 'bootloader-angle', confidence: 0.98, promptGroup: 1, commandGroup: 2 },
     { expression: /^((?:root|shell)@[A-Za-z0-9._-]+(?::[^#$\s]*)?\s*#)[ \t]+(.+)$/i, kind: 'os-root', signature: 'os-root-host', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^([A-Za-z0-9._-]+@[A-Za-z0-9._-]+(?::[^$\s]*)?\s*\$)[ \t]+(.+)$/i, kind: 'os-user', signature: 'os-user-host', confidence: 0.99, promptGroup: 1, commandGroup: 2 },
     { expression: /^([A-Za-z0-9._-]+:\/[^#\s]*\s*#)[ \t]+(.+)$/i, kind: 'os-root', signature: 'android-root', confidence: 0.98, promptGroup: 1, commandGroup: 2 },

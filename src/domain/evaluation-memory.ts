@@ -1,3 +1,5 @@
+import type { EvaluationReport } from './evaluation-report'
+
 /**
  * Local, serialisable memory for an LPDDR6 evaluation.  This module is
  * intentionally independent of parsers, storage, and UI code.
@@ -86,6 +88,9 @@ export interface EvaluationNode {
   status?: EvaluationStatus;
   /** Qualitative engineering description authored by Agent or an engineer. */
   interpretation?: string;
+  /** Structured five-part evaluation report. `interpretation` remains as a
+   * compact legacy/search summary for projects created before report v1. */
+  report?: EvaluationReport;
   /** Creation source and review state are kept separately for clear provenance. */
   authorship?: EvaluationAuthorship;
   reviewState?: EvaluationReviewState;
@@ -230,7 +235,7 @@ export function inferEvaluationTrends(memory: EvaluationMemory): DominanceFindin
 export interface EvaluationExportRow {
   projectId: string; projectName: string; product: string; projectSkew: string; customer: string; targetDevice: string; densityGb: string; nominalVoltage: string; program: string; phase: string;
   hypothesisId: string; hypothesisTitle: string; hypothesisOrigin: string;
-  nodeId: string; parentNodeId: string; branchId: string; evaluationScopeId: string; nodeName: string; nodePurpose: string; nodeStatus: string; interpretation: string; authorship: string; reviewState: string; sequenceSignature: string; attemptNo: string; retestOf: string; relation: string; relationConfidence: string; relationReason: string;
+  nodeId: string; parentNodeId: string; branchId: string; evaluationScopeId: string; nodeName: string; nodePurpose: string; nodeStatus: string; interpretation: string; reportPurpose: string; reportResults: string; reportInterpretation: string; reportTrends: string; reportNextPlan: string; authorship: string; reviewState: string; sequenceSignature: string; attemptNo: string; retestOf: string; relation: string; relationConfidence: string; relationReason: string;
   evidenceId: string; occurredAt: string; status: string; result: string; sourceIds: string; logRef: string; note: string; evidenceOrigin: string;
   skew: string; lot: string; material: string; die: string; sample: string; socVendor: string; socModel: string; bootProfileId: string; equipmentChannel: string; eccMode: string; customCondition: string; evaluationStep: string; bl: string; dq: string; channel: string; subChannel: string; chipSelect: string; rank: string; bank: string; bankGroup: string; row: string; column: string;
   pattern: string; writeData: string; readData: string; gridId: string; frequencyMHz: string; temperatureC: string; temperatureCorner: string; vdd: string; vddCorner: string; conditionCorner: string; timingSkewPs: string; testMode: string;
@@ -249,7 +254,7 @@ export function flattenEvaluationMemory(memory: EvaluationMemory): EvaluationExp
     return {
       projectId: memory.project.id, projectName: memory.project.name, product: text(memory.project.product), projectSkew: text(memory.project.skew), customer: text(memory.project.customer), targetDevice: text(memory.project.targetDevice), densityGb: text(memory.project.densityGb), nominalVoltage: text(memory.project.nominalVoltage), program: text(memory.project.program), phase: text(memory.project.phase),
       hypothesisId: text(hypothesis?.id), hypothesisTitle: text(hypothesis?.title), hypothesisOrigin: text(hypothesis?.origin),
-      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), evaluationScopeId: text(node.evaluationScopeId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), interpretation: text(node.interpretation), authorship: text(node.authorship), reviewState: text(node.reviewState), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf), relation: text(node.relation), relationConfidence: text(node.relationConfidence), relationReason: text(node.relationReason),
+      nodeId: node.id, parentNodeId: text(node.parentId), branchId: text(node.branchId), evaluationScopeId: text(node.evaluationScopeId), nodeName: node.name, nodePurpose: text(node.purpose), nodeStatus: text(node.status), interpretation: text(node.interpretation), reportPurpose: text(node.report?.purpose.text), reportResults: text(node.report?.results.summary), reportInterpretation: text(node.report?.interpretation.text), reportTrends: text(node.report?.trends.text), reportNextPlan: text(node.report?.nextPlan.text), authorship: text(node.authorship), reviewState: text(node.reviewState), sequenceSignature: text(node.sequenceSignature), attemptNo: text(node.attemptNo), retestOf: text(node.retestOf), relation: text(node.relation), relationConfidence: text(node.relationConfidence), relationReason: text(node.relationReason),
       evidenceId: record.id, occurredAt: text(record.occurredAt), status: record.status, result: text(record.result), sourceIds: (record.sourceIds ?? []).join(","), logRef: text(record.logRef), note: text(record.note), evidenceOrigin: text(record.origin),
       skew: text(d.skew), lot: text(d.lot), material: text(d.material), die: text(d.die), sample: text(d.sample), socVendor: text(d.socVendor), socModel: text(d.socModel), bootProfileId: text(d.bootProfileId), equipmentChannel: text(d.equipmentChannel), eccMode: text(d.eccMode), customCondition: text(d.customCondition), evaluationStep: text(d.evaluationStep), bl: text(d.bl), dq: text(d.dq), channel: text(d.channel), subChannel: text(d.subChannel), chipSelect: text(d.chipSelect), rank: text(d.rank), bank: text(d.bank), bankGroup: text(d.bankGroup), row: text(d.row), column: text(d.column), pattern: text(d.pattern), writeData: text(d.writeData), readData: text(d.readData), gridId: text(d.gridId), frequencyMHz: text(d.frequencyMHz), temperatureC: text(d.temperatureC), temperatureCorner: text(d.temperatureCorner), vdd: text(d.vdd), vddCorner: text(d.vddCorner), conditionCorner: text(d.conditionCorner), timingSkewPs: text(d.timingSkewPs), testMode: text(d.testMode),
     };

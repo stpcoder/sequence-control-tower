@@ -54,6 +54,14 @@ describe('renderer results export', () => {
     expect(resultExportLayoutFromPreset({ ...preset, createdAt: '', updatedAt: '' }).columns).toEqual(['filename', 'result', 'evidence_count'])
     expect(normalizeResultExportLayout({ columns: ['not-a-column'] }).columns).not.toHaveLength(0)
   })
+
+  it('stores export columns independently for each evaluation folder', () => {
+    const first = resultExportLayoutPreset({ columns: ['filename', 'result'] }, undefined, 'evaluation-a')
+    const second = resultExportLayoutPreset({ columns: ['sample_value', 'temperature_value', 'result'] }, { ...first, createdAt: '', updatedAt: '' }, 'evaluation-b')
+    const preset = { ...second, createdAt: '', updatedAt: '' }
+    expect(resultExportLayoutFromPreset(preset, 'evaluation-a').columns).toEqual(['filename', 'result'])
+    expect(resultExportLayoutFromPreset(preset, 'evaluation-b').columns).toEqual(['sample_value', 'temperature_value', 'result'])
+  })
 })
 
 describe('result metadata review', () => {

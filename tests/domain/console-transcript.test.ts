@@ -58,4 +58,18 @@ describe('console transcript classification', () => {
     expect(analysis.promptKinds).toEqual(expect.arrayContaining(['uefi', 'os-root']))
     expect(analysis.ambiguousCount).toBe(0)
   })
+
+  it('recognizes MediaTek LK] and LK2] prompts as operator input', () => {
+    const analysis = analyzeConsoleTranscript([
+      'LK]',
+      'LK] boot recovery',
+      'LK2]',
+      'LK2] set_mode diag',
+      'console:/ # hdiag --pattern WR',
+    ].join('\n'))
+
+    expect(analysis.inputs.map((item) => item.command)).toEqual(['boot recovery', 'set_mode diag', 'hdiag --pattern WR'])
+    expect(analysis.promptKinds).toEqual(expect.arrayContaining(['bootloader', 'os-root']))
+    expect(analysis.ambiguousCount).toBe(0)
+  })
 })

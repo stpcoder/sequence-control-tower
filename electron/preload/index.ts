@@ -21,10 +21,6 @@ import type {
   EvaluationSaveDecisionInput,
   EvaluationSaveRecipeInput,
   EvaluationSaveRecipeAndBatchInput,
-  EvaluationAgentStartRequest,
-  EvaluationAgentRestoreRequest,
-  EvaluationAgentResumeRequest,
-  EvaluationAgentMemoryPayloadRequest,
   LlmConfigInput,
   LlmModelDiscoveryInput,
   NativeAgentCancelRequest,
@@ -101,13 +97,6 @@ const api: SequenceIntelligenceApi = {
       ipcRenderer.on(IPC_CHANNELS.agentUpdate, handler)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.agentUpdate, handler)
     }
-  },
-  evaluationAgent: {
-    start: (input: EvaluationAgentStartRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentStart, input),
-    restore: (input: EvaluationAgentRestoreRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentRestore, input),
-    get: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentGet, sessionId),
-    resume: (input: EvaluationAgentResumeRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentResume, input),
-    memorySavePayload: (input: EvaluationAgentMemoryPayloadRequest) => ipcRenderer.invoke(IPC_CHANNELS.evaluationAgentMemorySavePayload, input)
   },
   nativeAgent: {
     backendStatus: () => ipcRenderer.invoke(IPC_CHANNELS.nativeAgentBackendStatus),

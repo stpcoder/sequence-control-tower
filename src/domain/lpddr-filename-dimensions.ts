@@ -17,6 +17,23 @@ const decimal = (value: string | undefined): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+/** Lab filenames usually omit the clock, but an evaluation title can sometimes
+ * abbreviate it as `547`, `5333`, or `Enable5333Only`. Treat one unambiguous
+ * value as a filename candidate. When
+ * multiple values are present, keep the title but do not select one clock. A
+ * command or script trace can provide separate evidence when the title does
+ * not state the frequency. */
+const evaluationTitleFrequency = (tokens: readonly string[]): number | undefined => {
+  const values = tokens.flatMap((token) => {
+    const direct = /^(\d{3,5})(?:MHZ|MT|MTPS)?$/i.exec(token)?.[1]
+    const only = /^(?:ENABLE)?(\d{3,5})ONLY$/i.exec(token)?.[1]
+      ?? /^ONLY(\d{3,5})$/i.exec(token)?.[1]
+    return direct ?? only ? [Number(direct ?? only)] : []
+  })
+  const unique = [...new Set(values.filter(Number.isFinite))]
+  return unique.length === 1 ? unique[0] : undefined
+}
+
 export interface PositionalLabFilename {
   equipmentChannel: string
   gridId: string
@@ -61,14 +78,17 @@ export function parsePositionalLabFilename(fileName: string): PositionalLabFilen
   const eccMode = tokens[channelIndex + 6]
   if (!/^(?:SM-?\d{3,5}|SDM-?\d{3,5}|MSM-?\d{3,5}|MTK-?[A-Z0-9-]+)$/i.test(soc)) return undefined
   if (!/^\d+$/.test(gridId) || !/^-?\d{1,3}(?:\.\d+)?$/.test(temperature) || !/^\d+(?:[p.]\d+)?$/i.test(voltage)) return undefined
-  if (!/^(?:EN|DIS|ENABLE|DISABLE|ON|OFF|ECCON|ECCOFF)$/i.test(eccMode)) return undefined
+  if (!/^(?:EN|EF|DIS|ENABLE|DISABLE|ON|OFF|ECCON|ECCOFF)$/i.test(eccMode)) return undefined
   const comIndex = tokens.findIndex((token, index) => index > channelIndex + 6 && /^COM\d+$/i.test(token))
   if (comIndex < 0 || comIndex + 1 >= tokens.length) return undefined
   const outcomeIndex = tokens.length - 1
   const outcome = positionalOutcome(tokens[outcomeIndex])
   if (!outcome || outcomeIndex <= comIndex + 1) return undefined
+  // Everything after the ECC token and before COM* is an engineer-authored
+  // evaluation title. Keep the full underscore-delimited text even when
+  // explicit sub-tokens such as frequency or Test Mode can also be parsed.
   const conditions = tokens.slice(channelIndex + 7, comIndex)
-  const frequency = conditions.map((token) => /^(\d{3,5})(?:MHZ|MT|MTPS)$/i.exec(token)?.[1]).find(Boolean)
+  const frequency = evaluationTitleFrequency(conditions)
   const stepTokens = tokens.slice(comIndex + 2, outcomeIndex)
   return {
     equipmentChannel: tokens[channelIndex].replace(/^CH/i, ''),
@@ -79,7 +99,7 @@ export function parsePositionalLabFilename(fileName: string): PositionalLabFilen
     ...(conditions.length ? { customCondition: conditions.join('_') } : {}),
     material: tokens[comIndex + 1].toUpperCase(),
     ...(stepTokens.length ? { evaluationStep: stepTokens.join('_').toUpperCase() } : {}),
-    ...(frequency ? { frequencyMHz: Number(frequency) } : {}),
+    ...(frequency !== undefined ? { frequencyMHz: frequency } : {}),
     outcome,
   }
 }
@@ -115,7 +135,7 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
   const vdd = capture(name, /(?:^|[_\-.])VDD(?:=|_|-)?(\d+(?:[p.]\d+)?)(?:V)?(?:[_\-.]|$)/i)
   const frequency = capture(name, /(?:^|[_\-.])(?:FREQ|F)(?:=|_|-)?(\d{3,5})(?:MHZ|MT)?(?:[_\-.]|$)/i)
     ?? capture(name, /(?:^|[_\-.])(\d{3,5})MT(?:[_\-.]|$)/i)
-  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9][A-Z0-9_-]*?)(?=[_.-](?:DQ|BL|CH|CHANNEL|SUBCH|SCH|CS|RANK|RK|BANK|BG|ROW|COL|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|COM|ECC|PASS|FAIL|HALT|REBOOT|TRAIN)(?:=|_|-)?|\.LOG$|$)/i)
+  const pattern = capture(name, /(?:^|[_\-.])(?:PATTERN|PAT)(?:=|_|-)?([A-Z0-9][A-Z0-9_-]*?)(?=[_.-](?:DQ|BL|CH|CHANNEL|SUBCH|SCH|CS|RANK|RK|BANK|BG|ROW|COL|WR|WRITE|RD|READ|FREQ|TEMP|VDD|SKEW|TSKEW|TM|MODE|COM|ECC|PASS|FAIL|HALT|REBOOT|TRAIN)(?:=|_|-)?|\.LOG$|$)/i)
   const samples = captures(name, /(?:^|[_\-.])(?:SAMPLE|SMP)(?:=|_|-)?([A-Z0-9]+(?:-[A-Z0-9]+)*?)(?=[_.-](?:SAMPLE|SMP)(?:=|_|-)|[_.]|$)/gi)
   const explicitMaterial = capture(name, /(?:^|[_\-.])(?:MATERIAL|MAT)(?:=|_|-)([A-Z0-9-]+)/i)
   // In this workflow "material" and "Sample" are the same physical identifier.
@@ -147,8 +167,13 @@ export function extractLpddrFilenameDimensions(fileName: string, profiles: reado
     bankGroup: capture(name, /(?:^|[_\-.])(?:BG|BANKGROUP)(?:=|_|-)?(\d+)/i),
     row: capture(name, /(?:^|[_\-.])ROW(?:=|_|-)?([A-F0-9x]+)/i),
     column: capture(name, /(?:^|[_\-.])(?:COL|COLUMN)(?:=|_|-)?([A-F0-9x]+)/i),
-    writeData: capture(name, /(?:^|[_\-.])(?:WR|WRITE)(?:=|_|-)?([A-F0-9x]+)/i),
-    readData: capture(name, /(?:^|[_\-.])(?:RD|READ)(?:=|_|-)?([A-F0-9x]+)/i),
+    // WR/RD without an explicit value separator is commonly a Pattern label
+    // (for example PAT-WR_COM74). Requiring the whole value token prevents the
+    // following COM port token from being misread as writeData="C".
+    writeData: capture(name, /(?:^|[_\-.])(?:WR|WRITE)(?:=|_|-)(0X[A-F0-9]+|[A-F0-9]{2,})(?=[_.-]|$)/i)
+      ?? capture(name, /(?:^|[_\-.])WR(0X[A-F0-9]+|[A-F0-9]{2,})(?=[_.-]|$)/i),
+    readData: capture(name, /(?:^|[_\-.])(?:RD|READ)(?:=|_|-)(0X[A-F0-9]+|[A-F0-9]{2,})(?=[_.-]|$)/i)
+      ?? capture(name, /(?:^|[_\-.])RD(0X[A-F0-9]+|[A-F0-9]{2,})(?=[_.-]|$)/i),
     pattern,
     equipmentChannel: positional?.equipmentChannel,
     gridId: positional?.gridId,

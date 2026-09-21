@@ -31,6 +31,7 @@ import type {
   EvaluationStorageNotice
 } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
+import { getActiveEvaluationDecisions } from '../shared/contracts'
 
 interface StoredEvaluationProject {
   revision: number
@@ -394,6 +395,9 @@ export class EvaluationStore {
   async saveDecision(input: EvaluationSaveDecisionInput): Promise<EvaluationDecisionSaveResult> {
     rejectSensitivePayload(input)
     if (!RESULT_LABELS.has(input.result)) throw new Error('판정 결과가 올바르지 않습니다.')
+    if (input.reset !== undefined && (input.reset !== true || input.result !== 'UNKNOWN')) throw new Error('판정 취소 요청이 올바르지 않습니다.')
+    if (input.resetSourceIds && (!input.reset || !Array.isArray(input.resetSourceIds) || input.resetSourceIds.length > 50)) throw new Error('판정 취소 source 목록이 올바르지 않습니다.')
+    const aliases = (input.resetSourceIds ?? []).map((id) => safeIdentifier(id, 'sourceId'))
     const source = sourceRef(input.source)
     const refs = evidenceRefs(input.evidenceRefs)
     let saved!: EvaluationDecisionRevision
@@ -405,10 +409,18 @@ export class EvaluationStore {
         revision: (previous?.revision ?? 0) + 1,
         source,
         result: input.result,
+        ...(input.reset ? { reset: true } : {}),
         decidedBy: 'engineer',
         evidenceRefs: refs,
         createdAt: this.now().toISOString(),
         ...(previous ? { supersedesId: previous.id } : {})
+      }
+      // Old renderer versions and Agent decisions used different IDs for the
+      // same exact artifact location. Retire both in this single transaction.
+      for (const alias of new Set(aliases.filter((id) => id !== source.sourceId))) {
+        const previousAlias = [...project.decisions].reverse().find((item) => item.source.sourceId === alias && item.source.artifactId === source.artifactId)
+        if (!previousAlias || previousAlias.source.sourceKeyHash !== source.sourceKeyHash) throw new Error('판정 취소 source가 원본 위치와 일치하지 않습니다.')
+        project.decisions.push({ ...saved, id: this.makeId(), source: previousAlias.source, revision: previousAlias.revision + 1, supersedesId: previousAlias.id })
       }
       project.decisions.push(saved)
     })
@@ -481,7 +493,7 @@ export class EvaluationStore {
       if (referencedRecipes.length !== recipeRevisionIds.length) throw new Error('존재하지 않는 recipe revision입니다.')
       const referencedRules = new Map(referencedRecipes.flatMap((recipe) => recipe.rules.map((rule) => [rule.id, rule] as const)))
       const latestDecisions = new Map<string, EvaluationDecisionRevision>()
-      project.decisions.forEach((decision) => {
+      getActiveEvaluationDecisions(project.decisions).forEach((decision) => {
         latestDecisions.set(`${decision.source.sourceId}\0${decision.source.artifactId}`, decision)
       })
       for (const outcome of outcomes) {
@@ -524,7 +536,7 @@ export class EvaluationStore {
 
   async saveRecipeAndBatch(input: EvaluationSaveRecipeAndBatchInput): Promise<EvaluationRecipeAndBatchSaveResult> {
     rejectSensitivePayload(input)
-    if (!Array.isArray(input.recipe.rules) || !input.recipe.rules.length || input.recipe.rules.length > MAX_RULES_PER_RECIPE) {
+    if (!Array.isArray(input.recipe.rules) || (!input.recipe.rules.length && input.recipe.recipeId !== 'active-batch-ruleset') || input.recipe.rules.length > MAX_RULES_PER_RECIPE) {
       throw new Error('저장할 규칙 개수가 올바르지 않습니다.')
     }
     const name = safeText(input.recipe.name, 'recipe name', 160)
@@ -685,7 +697,7 @@ export class EvaluationStore {
     if (referencedRecipes.length !== recipeRevisionIds.length) throw new Error('존재하지 않는 recipe revision입니다.')
     const referencedRules = new Map(referencedRecipes.flatMap((recipe) => recipe.rules.map((rule) => [rule.id, rule] as const)))
     const latestDecisions = new Map<string, EvaluationDecisionRevision>()
-    project.decisions.forEach((decision) => latestDecisions.set(`${decision.source.sourceId}\0${decision.source.artifactId}`, decision))
+    getActiveEvaluationDecisions(project.decisions).forEach((decision) => latestDecisions.set(`${decision.source.sourceId}\0${decision.source.artifactId}`, decision))
     for (const outcome of outcomes) {
       if (outcome.outcomeSource === 'rule' && !outcome.matchedRuleId) throw new Error('rule 결과에는 matchedRuleId가 필요합니다.')
       const matchedRule = outcome.matchedRuleId ? referencedRules.get(outcome.matchedRuleId) : undefined

@@ -14,26 +14,34 @@ function setup(actions: string[]) {
 
 describe('EvaluationAgentRuntime', () => {
   it('keeps only dimensions shared by every selected log in aggregate context', async () => {
+    const prompts: string[] = []
     const runtime = new EvaluationAgentRuntime({
       listFiles: async () => [
         { id: 'a', name: 'a.log', metadata: { testMode: 'HDIAG', vdd: 1.295, temperatureC: 25 } },
         { id: 'b', name: 'b.log', metadata: { testMode: 'HDIAG', vdd: 1.315, temperatureC: 85 } },
       ],
       search: async () => [], lineWindow: async () => [],
-    }, { complete: async () => ({ content: '{"action":"complete"}' }) })
+    }, { complete: async (prompt) => { prompts.push(prompt); return { content: '{"action":"complete"}' } } })
     const session = await runtime.start('common-dimensions')
     expect(session.context.dimensions).toEqual({ testMode: 'HDIAG' })
-    expect(session.question?.field).toBe('evaluationIntent')
+    expect(session.question).toBeUndefined()
+    expect(session.status).toBe('waiting_confirmation')
+    expect(prompts[0]).toContain('ENGINEER-CONFIRMED EVALUATION INTENT: missing')
   })
-  it('asks the folder intent before any provider call and carries the answer into analysis', async () => {
-    const { runtime, prompts } = setup(['{"action":"propose","outcome":"TEST_FAIL","dimensions":{"dq":"8"},"rationale":"DQ8 failure"}'])
+  it('lets the planner ask one evidence-specific purpose question after inspection and carries the answer into analysis', async () => {
+    const { runtime, prompts } = setup([
+      '{"action":"ask","field":"evaluationIntent","impact":"high","question":"파일명에는 DIAG가 있고 DQ8 FAIL이 확인되지만 이전 FAIL 재현인지 검출 조건 탐색인지 구분되지 않습니다. 어느 쪽인가요?","choices":["이전 FAIL 재현","불량 검출 조건 탐색"]}',
+      '{"action":"propose","outcome":"TEST_FAIL","dimensions":{"dq":"8"},"rationale":"DQ8 failure"}',
+    ])
     const session = await runtime.start('intent-first')
     expect(session).toMatchObject({ status: 'waiting_question', question: { field: 'evaluationIntent', impact: 'high' } })
-    expect(prompts).toHaveLength(0)
+    expect(session.question?.prompt).toContain('DQ8 FAIL')
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('ENGINEER-CONFIRMED EVALUATION INTENT: missing')
     const resumed = await runtime.resume(session, { answer: '불량 검출 가속 조건 확인' })
     expect(resumed).toMatchObject({ status: 'waiting_confirmation', proposal: { purpose: 'screening' } })
     expect(resumed.context.evaluationIntent).toBe('불량 검출 가속 조건 확인')
-    expect(prompts[0]).toContain('ENGINEER-CONFIRMED EVALUATION INTENT: 불량 검출 가속 조건 확인')
+    expect(prompts[1]).toContain('ENGINEER-CONFIRMED EVALUATION INTENT: 불량 검출 가속 조건 확인')
   })
   it('records and sends the exact failure-analysis Skill contract applied to the run', async () => {
     const prompts: string[] = []
@@ -56,13 +64,19 @@ describe('EvaluationAgentRuntime', () => {
     expect(session.status).toBe('waiting_confirmation')
     expect(session.proposal).toMatchObject({ outcome: 'TEST_FAIL', dimensions: { bank: '3', subChannel: '1', timingSkewPs: '12' } })
     expect(session.evidence.find((item) => item.kind === 'window')?.excerpt?.split('\n')).toHaveLength(24)
-    expect(prompts.every((prompt) => prompt.length <= 8_000)).toBe(true)
+    expect(prompts.every((prompt) => prompt.length <= 800_000)).toBe(true)
+    expect(prompts.every((prompt) => prompt.includes('FOLDER SUMMARY') && prompt.includes('REPRESENTATIVE FILES') && prompt.includes('BOUNDED EVIDENCE'))).toBe(true)
     expect(prompts.join('\n')).not.toContain('late secret')
     const accepted = await runtime.resume(session, { confirm: 'accept' }); expect(accepted.status).toBe('completed')
     const memory = proposalToEvaluationMemory(accepted, { projectId: 'p1', hypothesisId: 'h1', nodeId: 'n1', evidenceId: (id) => `persisted-${id}` })
     expect(memory?.node.purpose).toBe('screening')
     expect(memory?.node.status).toBe('fail')
-    expect(memory?.node).toMatchObject({ interpretation: 'failure evidence', authorship: 'agent', reviewState: 'proposed' })
+    expect(memory?.node).toMatchObject({ authorship: 'agent', reviewState: 'proposed' })
+    expect(memory?.node.interpretation).toContain('failure evidence')
+    expect(memory?.node.report).toMatchObject({
+      purpose: { state: 'agent-proposed' }, results: { state: 'computed', total: 1 },
+      interpretation: { state: 'agent-proposed' }, trends: { state: 'agent-proposed' }, nextPlan: { state: 'agent-proposed' },
+    })
     expect(memory?.evidence[0]).toMatchObject({ logRef: 'a', id: 'persisted-search-1' })
   })
 
@@ -73,6 +87,43 @@ describe('EvaluationAgentRuntime', () => {
     const resumed = await runtime.resume(session, { answer: 'READ' })
     expect(resumed.status).toBe('waiting_confirmation'); expect(resumed.context.dimensions.testMode).toBe('READ')
     expect(resumed.transcript.some((item) => item.type === 'answer')).toBe(true)
+    expect(resumed.transcript.filter((item) => item.type === 'clarification-question')).toHaveLength(1)
+  })
+
+  it('rejects a second clarification in the same run instead of turning analysis into a questionnaire', async () => {
+    const { runtime } = setup([
+      '{"action":"ask","field":"evaluationIntent","impact":"high","question":"DQ8 FAIL은 재현 평가인가요, 검출 평가인가요?"}',
+      '{"action":"ask","dimension":"testMode","impact":"high","question":"Test Mode도 알려주세요."}',
+    ])
+    const first = await runtime.start('one-question-budget')
+    expect(first.status).toBe('waiting_question')
+    const resumed = await runtime.resume(first, { answer: '동일 조건 재현' })
+    expect(resumed.status).toBe('waiting_confirmation')
+    expect(resumed.question).toBeUndefined()
+    expect(resumed.transcript.some((item) => item.type === 'question-rejected')).toBe(true)
+  })
+
+  it('rejects a generic purpose intake question even when a provider emits it', async () => {
+    const { runtime } = setup(['{"action":"ask","field":"evaluationIntent","impact":"high","question":"이번 폴더에서 확인하려는 평가 목적은 무엇인가요?"}'])
+    const result = await runtime.start('no-generic-intake')
+    expect(result.status).toBe('waiting_confirmation')
+    expect(result.question).toBeUndefined()
+    expect(result.transcript.some((item) => item.type === 'question-rejected')).toBe(true)
+  })
+
+  it('persists an engineer answer as the folder purpose in evaluation history memory', async () => {
+    const { runtime } = setup([
+      '{"action":"ask","field":"evaluationIntent","impact":"high","question":"VPERI-UP과 이전 FAIL 조건이 함께 보여 재현 평가와 개선 효과 확인이 모두 가능합니다. 어느 목적에 가깝나요?","choices":["동일 불량 재현","개선 효과 확인"]}',
+      '{"action":"propose","outcome":"TEST_FAIL","purpose":"verification","rationale":"개선 조건에서도 DQ8 FAIL이 남음","report":{"purpose":"VPERI-UP 개선 효과 확인"}}',
+    ])
+    const questioned = await runtime.start('purpose-memory')
+    const proposed = await runtime.resume(questioned, { answer: 'VPERI-UP 개선 효과 확인' })
+    const completed = await runtime.resume(proposed, { confirm: 'accept' })
+    const memory = proposalToEvaluationMemory(completed, {
+      projectId: 'p', hypothesisId: 'h', nodeId: 'n', evidenceId: (id) => `e-${id}`,
+    })
+    expect(memory?.node.name).toBe('VPERI-UP 개선 효과 확인')
+    expect(memory?.node.report?.purpose.text).toBe('VPERI-UP 개선 효과 확인')
   })
 
   it('turns low-impact questions and tool loops into a reviewable safe fallback', async () => {
@@ -130,7 +181,7 @@ describe('EvaluationAgentRuntime', () => {
         sourceAssessments: [{ sourceId: 'fail', outcome: 'TEST_FAIL', evidenceIds: ['meta-fail'] }],
       },
     })
-    expect(session.proposal?.rationale).toContain('1개 로그의 로컬 종료 marker 판정이 모두 TEST_FAIL')
+    expect(session.proposal?.rationale).toContain('1개 로그의 확정 판정이 모두 TEST_FAIL')
   })
 
   it('allows only one qualitative search after every file already has a local outcome', async () => {
@@ -180,6 +231,7 @@ describe('EvaluationAgentRuntime', () => {
     })
     expect(proposed.proposal?.rationale).toContain('PASS 1 · SYSTEM_HALT 1')
     expect(proposed.proposal?.rationale).not.toContain('first file passed')
+    expect(proposed.proposal?.report?.results).toMatchObject({ total: 2, byOutcome: { PASS: 1, SYSTEM_HALT: 1 }, state: 'computed' })
     const accepted = await runtime.resume(proposed, { confirm: 'accept' })
     const persisted = proposalToEvaluationMemory(accepted, { projectId: 'p', hypothesisId: 'h', nodeId: 'n', evidenceId: (value) => `e-${value}` })
     expect(persisted?.node.status).toBe('inconclusive')

@@ -151,8 +151,10 @@ export function buildEngineerWorkflowCandidate(
         order: seen.size,
       }]
     })
-  // One search is ordinary navigation, not enough evidence of a workflow.
-  if (checks.length < 2) return null
+  // The explicit result save is the confirmation signal. A single deliberate
+  // marker such as @PASS is therefore a valid rule; live typing drafts were
+  // already compacted above and are not mistaken for separate checks.
+  if (!checks.length) return null
   const stages = [...new Set(checks.map((check) => check.stage))]
   const signature = engineerWorkflowSignature(checks, result)
   return { checks, stages, suggestions: purposeSuggestions(stages, result, dimensions), signature }

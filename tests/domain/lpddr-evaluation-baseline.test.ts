@@ -34,6 +34,12 @@ describe('LPDDR evaluation baseline', () => {
     expect(extractLpddrGridLineEvent('UEFI> setddrclk 8533')).toMatchObject({
       boundary: false, command: 'setddrclk 8533', conditions: { frequencyMHz: 8533 },
     })
+    expect(extractLpddrGridLineEvent('console:/ # clk.sh 5333')).toMatchObject({
+      boundary: false, command: 'clk.sh 5333', conditions: { frequencyMHz: 5333 },
+    })
+    expect(extractLpddrGridLineEvent('console:/ # clk.sh -lf')).toMatchObject({
+      boundary: false, command: 'clk.sh -lf', conditions: {},
+    })
     expect(extractLpddrGridLineEvent('HIDAG @FAIL DQ=9')).toMatchObject({ boundary: false, result: 'FAIL' })
     expect(extractLpddrGridLineEvent('POWER_ON')).toMatchObject({ boundary: true, boundaryKind: 'power-on' })
   })

@@ -1,8 +1,10 @@
+import { normalizeAgentRuleProposal } from '../../src/domain/agent-rule-proposal'
+import { normalizeAgentQuestion } from '../../src/domain/agent-question'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type {
   EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerConsolePromptRuleView, EngineerEvaluationAttemptView, EngineerWorkflowCheckView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
-  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentContextKind, NativeAgentMessageView, NativeAgentSearchEventInput,
+  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentContextKind, NativeAgentEvaluationStage, NativeAgentMessageView, NativeAgentSearchEventInput,
   NativeAgentSessionStatus, NativeAgentSessionSummary, NativeAgentSessionView,
   NativeAgentToolTraceView, ProjectEvaluationDimensions
 } from '../shared/contracts'
@@ -10,10 +12,11 @@ import { AtomicJsonStore } from './json-store'
 import { buildEngineerWorkflowCandidate, compactIncrementalWorkflowChecks, engineerWorkflowContextCompatibility, engineerWorkflowSignature, engineerWorkflowSimilarity } from '../../src/domain/engineer-behavior'
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 import { normalizeAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
+import { normalizeNativeEvaluationProposal } from '../../src/domain/agent-evaluation-proposal'
 
 export interface StoredNativeAgentSession extends NativeAgentSessionView {
   externalSessionId?: string
-  lastRequest?: { content: string; sourceIds: string[]; contextKind?: NativeAgentContextKind }
+  lastRequest?: { content: string; sourceIds: string[]; contextKind?: NativeAgentContextKind; evaluationStage?: NativeAgentEvaluationStage }
 }
 
 export interface SearchEvent extends NativeAgentSearchEventInput { id: string; occurredAt: string }
@@ -42,6 +45,7 @@ const MAX_SEARCHES = 500
 const MAX_WORKFLOWS = 100
 const MAX_REVIEWS = 200
 const MAX_ATTEMPTS = 5_000
+const MAX_SOURCE_IDS = 10_000
 const MAX_COMMAND_KNOWLEDGE = 500
 const FAILURE_RESULTS = new Set<EngineerWorkflowResult>(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const clean = (value: unknown, max: number): string => typeof value === 'string'
@@ -97,12 +101,17 @@ export class NativeAgentStore {
           review.checks = checks
           review.stages = [...new Set(checks.map((check) => check.stage))]
           review.fingerprint = createHash('sha256').update(engineerWorkflowSignature(checks, review.result)).digest('hex')
-          if (checks.length < 2 && review.state === 'pending') review.state = 'dismissed'
+          if (!checks.length && review.state === 'pending') review.state = 'dismissed'
         }
       }
       for (const session of Object.values(database.sessions)) {
+        // Older builds could stop chat behind a fixed boot/profile/purpose
+        // questionnaire. Questions are now authored from evidence by the
+        // Agent in the ordinary conversation, so never revive those forms.
+        if (session.question?.kind !== 'agent') session.question = undefined
         if (session.status === 'queued' || session.status === 'running') {
           session.status = 'paused'
+          session.tools.filter((tool) => tool.state === 'running').forEach((tool) => { tool.state = 'failed'; tool.completedAt = now(); tool.summary = '앱 종료로 중단된 확인입니다.' })
           session.failure = '앱이 종료되어 대기 중이던 분석을 멈췄습니다. 재시도할 수 있습니다.'
           session.updatedAt = now()
         }
@@ -115,7 +124,7 @@ export class NativeAgentStore {
     const session: StoredNativeAgentSession = {
       id: this.id(), projectId: clean(projectId, 160), title: clean(title, 160) || '새 분석', backend,
       ...(clean(evaluationScopeId, 160) ? { evaluationScopeId: clean(evaluationScopeId, 160) } : {}),
-      status: 'idle', createdAt: stamp, updatedAt: stamp, messages: [], tools: []
+      revision: 0, status: 'idle', createdAt: stamp, updatedAt: stamp, messages: [], tools: []
     }
     if (!session.projectId) throw new Error('프로젝트를 선택해 주세요.')
     await this.store.update((database) => {
@@ -136,7 +145,7 @@ export class NativeAgentStore {
       .filter((session) => session.projectId === wanted && (!wantedScope || session.evaluationScopeId === wantedScope))
       .filter((session) => this.displayable(session))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(({ messages, tools, question: _question, evaluationIntent: _evaluationIntent, externalSessionId, lastRequest, ...summary }) => summary)
+      .map(({ messages, tools, question: _question, ruleProposal: _ruleProposal, evaluationIntent: _evaluationIntent, analysisViewProposal: _analysisViewProposal, evaluationProposal: _evaluationProposal, evaluationReportPending: _evaluationReportPending, externalSessionId, lastRequest, ...summary }) => summary)
   }
 
   async get(sessionId: string): Promise<StoredNativeAgentSession | null> {
@@ -156,9 +165,16 @@ export class NativeAgentStore {
       session.title = clean(session.title, 160) || '새 분석'
       session.failure = session.failure ? clean(session.failure, 500) : undefined
       session.evaluationIntent = session.evaluationIntent ? clean(session.evaluationIntent, 400) : undefined
+      session.evaluationReportPending = session.evaluationReportPending === true ? true : undefined
+      const ruleProposal = normalizeAgentRuleProposal(session.ruleProposal)
+      session.ruleProposal = ruleProposal && session.ruleProposal?.id ? { id: clean(session.ruleProposal.id, 160), ...ruleProposal } : undefined
       const proposal = normalizeAnalysisViewProposal(session.analysisViewProposal)
       session.analysisViewProposal = proposal && session.analysisViewProposal?.id
         ? { id: clean(session.analysisViewProposal.id, 160), ...proposal }
+        : undefined
+      const evaluationProposal = normalizeNativeEvaluationProposal(session.evaluationProposal)
+      session.evaluationProposal = evaluationProposal && session.evaluationProposal?.id
+        ? { id: clean(session.evaluationProposal.id, 160), ...evaluationProposal }
         : undefined
       session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
       session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
@@ -167,9 +183,13 @@ export class NativeAgentStore {
           id: clean(session.question.id, 160), prompt: clean(session.question.prompt, 500),
           choices: session.question.choices.map((choice) => clean(choice, 160)).filter(Boolean).slice(0, 8),
         }
-        if (session.question.kind === 'boot-profile') session.question = {
+        if (session.question.kind === 'agent') {
+          const question = normalizeAgentQuestion(session.question)
+          session.question = question ? { id: clean(session.question.id, 160), ...question } : undefined
+        }
+        else if (session.question.kind === 'boot-profile') session.question = {
           ...base, kind: 'boot-profile',
-          sourceIds: [...new Set(session.question.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))].slice(0, 100),
+          sourceIds: [...new Set(session.question.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))],
         }
         else if (session.question.kind === 'console-role') session.question = {
           ...base, kind: 'console-role', sourceId: clean(session.question.sourceId, 160),
@@ -183,6 +203,7 @@ export class NativeAgentStore {
         }
         else session.question = { ...base, kind: 'evaluation-purpose' }
       }
+      session.revision = (session.revision ?? 0) + 1
       session.updatedAt = now()
       session.lastMessage = [...session.messages].reverse().find((item) => item.role !== 'tool')?.content.slice(0, 160)
       result = structuredClone(session)
@@ -208,9 +229,11 @@ export class NativeAgentStore {
     const query = clean(input.query, 500)
     const evaluationScopeId = clean(input.evaluationScopeId, 160)
     if (!projectId || !query || !Array.isArray(input.sourceIds)) return
-    const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100)
+    const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))]
+    if (sourceIds.length > MAX_SOURCE_IDS) throw new Error(`AGENT_SOURCE_SCOPE_LIMIT:${sourceIds.length}:${MAX_SOURCE_IDS}`)
     const activeSourceId = clean(input.activeSourceId, 160)
-    const matchedSourceIds = [...new Set((input.matchedSourceIds ?? []).map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100)
+    const matchedSourceIds = [...new Set((input.matchedSourceIds ?? []).map((item) => clean(item, 160)).filter(Boolean))]
+    if (matchedSourceIds.length > MAX_SOURCE_IDS) throw new Error(`AGENT_SOURCE_SCOPE_LIMIT:${matchedSourceIds.length}:${MAX_SOURCE_IDS}`)
     const receivedAt = Date.now()
     const observedAt = Date.parse(input.observedAt ?? '')
     const hasObservedAt = Number.isFinite(observedAt) && observedAt >= receivedAt - 24 * 60 * 60 * 1_000 && observedAt <= receivedAt + 60_000
@@ -298,7 +321,7 @@ export class NativeAgentStore {
           const match = available.get(key)
           return match ? [match] : []
         }).map((check, index) => ({ ...check, order: index + 1 }))
-        candidate = checks.length >= 2 ? {
+        candidate = checks.length >= 1 ? {
           ...candidate,
           checks,
           stages: [...new Set(checks.map((check) => check.stage))],
@@ -379,7 +402,7 @@ export class NativeAgentStore {
         seen.add(key)
         return [{ ...stored, order: seen.size }]
       }).slice(0, 20)
-      if (checks.length < 2) throw new Error('기억할 검색을 두 개 이상 선택해 주세요.')
+      if (!checks.length) throw new Error('기억할 검색을 하나 이상 선택해 주세요.')
       const stages = [...new Set(checks.map((check) => check.stage))]
       const fingerprint = createHash('sha256').update(engineerWorkflowSignature(checks, review.result)).digest('hex')
       const workflows = database.workflows[projectId] ?? []
@@ -522,7 +545,8 @@ export class NativeAgentStore {
   }
 
   async confirmProfileBinding(input: { projectId: string; sourceIds: string[]; vendor: 'qualcomm' | 'mediatek'; profileId: string }): Promise<EngineerBootProfileBindingView> {
-    const projectId = clean(input.projectId, 160); const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100)
+    const projectId = clean(input.projectId, 160); const sourceIds = [...new Set(input.sourceIds.map((item) => clean(item, 160)).filter(Boolean))]
+    if (sourceIds.length > MAX_SOURCE_IDS) throw new Error(`AGENT_SOURCE_SCOPE_LIMIT:${sourceIds.length}:${MAX_SOURCE_IDS}`)
     const profileId = clean(input.profileId, 160)
     if (!projectId || !sourceIds.length || !profileId) throw new Error('SoC profile 확인 범위가 올바르지 않습니다.')
     let result: EngineerBootProfileBindingView | undefined
@@ -610,18 +634,21 @@ export class NativeAgentStore {
   }
 
   private message = (message: NativeAgentMessageView): NativeAgentMessageView => ({
-    id: clean(message.id, 160), role: message.role, content: clean(message.content, 12_000),
+    id: clean(message.id, 160), role: message.role, content: clean(message.content, 800_000),
     createdAt: clean(message.createdAt, 80),
+    ...(message.question?.kind === 'agent' && normalizeAgentQuestion(message.question) ? { question: { id: clean(message.question.id, 160), ...normalizeAgentQuestion(message.question)! } } : {}),
+    ...(message.questionId ? { questionId: clean(message.questionId, 160) } : {}),
     ...(message.toolTraceId ? { toolTraceId: clean(message.toolTraceId, 160) } : {}),
     ...(message.contextKind ? { contextKind: message.contextKind } : {}),
-    ...(message.evidenceSourceIds?.length ? { evidenceSourceIds: [...new Set(message.evidenceSourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100) } : {})
+    ...(message.evaluationStage ? { evaluationStage: message.evaluationStage } : {}),
+    ...(message.evidenceSourceIds?.length ? { evidenceSourceIds: [...new Set(message.evidenceSourceIds.map((item) => clean(item, 160)).filter(Boolean))] } : {})
   })
 
   private tool = (tool: NativeAgentToolTraceView): NativeAgentToolTraceView => ({
     id: clean(tool.id, 160), name: clean(tool.name, 100), label: clean(tool.label, 160), state: tool.state,
     startedAt: clean(tool.startedAt, 80), ...(tool.completedAt ? { completedAt: clean(tool.completedAt, 80) } : {}),
     ...(tool.summary ? { summary: clean(tool.summary, 1_000) } : {}),
-    ...(tool.evidenceSourceIds?.length ? { evidenceSourceIds: [...new Set(tool.evidenceSourceIds.map((item) => clean(item, 160)).filter(Boolean))].slice(0, 100) } : {})
+    ...(tool.evidenceSourceIds?.length ? { evidenceSourceIds: [...new Set(tool.evidenceSourceIds.map((item) => clean(item, 160)).filter(Boolean))] } : {})
   })
 
   private lines(values: readonly number[] | undefined): number[] {

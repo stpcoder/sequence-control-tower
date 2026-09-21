@@ -18,7 +18,7 @@ const primary = [
 export function Navigation({ active, onChange }: { active: AppPage; onChange: (page: AppPage) => void; onAgentOpen?: () => void }) {
   return (
     <aside className="navigation">
-      <div className="brand" aria-label="Sequence Control Tower">
+      <div className="brand" role="img" aria-label="Sequence Control Tower">
         <div className="brand-mark">
           <GitBranch size={18} strokeWidth={2.4} />
         </div>
