@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, isStandardCommandSignature, missingRequiredOpenCodeTools, NativeAgentService, openCodeToolPresentation, planLpddrTools, requiredOpenCodeTools } from './native-agent-service'
+import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceGeneralEngineeringClaims, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, isStandardCommandSignature, NativeAgentService, openCodeToolPresentation } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
 import type { NativeAgentSessionView } from '../shared/contracts'
 
-describe('planLpddrTools', () => {
+describe('Native Agent sessions and evidence', () => {
   it('presents OpenCode tool traces as product language', () => {
     expect(openCodeToolPresentation('sct_pass_fail_scan')).toEqual({ name: 'pass_fail_scan', label: 'Pass/Fail 판정' })
     expect(openCodeToolPresentation('sct_evaluation_relation_suggest')).toEqual({ name: 'evaluation_relation_suggest', label: '평가 관계 제안' })
@@ -40,23 +40,28 @@ describe('planLpddrTools', () => {
       'folder-a',
     )
     expect(content).toContain('Die 03에 공통된 미확인 요인')
-    expect(content).toContain('SKEW FFS 평가 corner 조건')
+    expect(content).toContain('Skew FFS 평가 corner 조건')
     expect(content).toContain('Die 04에 공통된 미확인 요인')
     expect(content).toContain('위치 조건과의 연관성')
-    expect(content).toContain('고온 연관 가설을 지지할 수 있습니다')
+    expect(content).toContain('고온에서 불량이 더 잘 재현되는 경향을 지지할 수 있습니다')
     expect(content).toContain('Die 04에 공통된 미확인 요인 가설을 지지할 수 있습니다')
     expect(content).not.toContain('공정 편차')
     expect(content).not.toContain('위치의 취약성')
+  })
+
+  it('uses reproducibility and common-signature language instead of causal or perfect-match claims', () => {
+    const content = enforceGeneralEngineeringClaims(
+      '고온 가속성 불량임이 확인되었습니다. 과거 사례와 100% 일치하는 흐름입니다.',
+    )
+    expect(content).toContain('고온에서 불량이 더 잘 재현되는 경향을 보입니다')
+    expect(content).toContain('과거 사례와 유사한 평가 흐름입니다')
+    expect(content).not.toMatch(/고온\s*(?:기인|가속성)|100%\s*일치/)
   })
 
   it('removes unsupported project-history numbers unless a history tool actually ran', () => {
     const answer = '- 현재 폴더는 9600MHz 단일 조건입니다. 과거 누적 데이터에서는 8533MHz 2/2, 9600MHz 4/6 FAIL입니다.\n- 다음 split 평가가 필요합니다.'
     expect(enforceEvidenceBoundHistory(answer, false)).toBe('- 현재 폴더는 9600MHz 단일 조건입니다.\n- 다음 split 평가가 필요합니다.')
     expect(enforceEvidenceBoundHistory(answer, true)).toContain('4/6 FAIL')
-  })
-
-  it('routes a standalone frequency or VDD comparison to the deterministic trend tool', () => {
-    expect(planLpddrTools('9600MHz와 8533MHz, VDD별 결과를 비교해줘').map((item) => item.name)).toContain('failure_trends_get')
   })
 
   it('does not interrupt the engineer for standard test and condition commands', () => {
@@ -72,34 +77,6 @@ describe('planLpddrTools', () => {
     const confirmed = [{ name: 'engineer_workflow_memory_get', label: '', summary: '', data: { confirmed: [{ id: 'w1' }] }, evidenceSourceIds: [] }] as never
     expect(hasConfirmedWorkflowEvidence(confirmed)).toBe(true)
     expect(enforceWorkflowProvenance('엔지니어가 확정한 순서 POST_PBL → LK → @PASS', true)).toContain('엔지니어가 확정한 순서')
-  })
-
-  it('routes an evaluation-context question to bounded evidence tools', () => {
-    const names = planLpddrTools('새 로그의 온도와 VDD, DQ별 불량률을 보고 과거 LPDDR5 유사 사례와 다음 평가를 추천해줘').map((item) => item.name)
-    expect(names).toEqual(expect.arrayContaining(['project_context_get', 'project_history_get', 'filename_dimensions_scan', 'pass_fail_scan', 'engineer_workflow_apply', 'failure_trends_get', 'similar_case_search']))
-    expect(names.length).toBeLessThanOrEqual(8)
-  })
-
-  it('loads confirmed engineer procedures when evaluation purpose or search behavior matters', () => {
-    const names = planLpddrTools('이 로그는 어떤 평가이고 예전에 Ctrl-F로 확인한 순서를 어떻게 적용해야 해?').map((item) => item.name)
-    expect(names).toContain('engineer_workflow_memory_get')
-    expect(names.length).toBeLessThanOrEqual(8)
-  })
-
-  it('requires exact workflow evidence before OpenCode compares or reuses another folder procedure', () => {
-    expect(requiredOpenCodeTools('다른 평가 폴더에서 확정한 Ctrl-F 분석 절차를 현재 폴더에 호환 적용할 수 있어?'))
-      .toEqual(['engineer_workflow_memory_get', 'engineer_workflow_apply'])
-    expect(missingRequiredOpenCodeTools(
-      ['engineer_workflow_memory_get', 'engineer_workflow_apply'],
-      ['sct_project_history_get', 'sct_engineer_workflow_memory_get'],
-    )).toEqual(['engineer_workflow_apply'])
-  })
-
-  it('requires project history and the bounded relation engine for branch questions', () => {
-    expect(requiredOpenCodeTools('이 재현 평가를 기존 불량 브랜치의 RT로 연결해도 돼?'))
-      .toEqual(['project_history_get', 'evaluation_relation_suggest'])
-    expect(planLpddrTools('이 재현 평가를 기존 불량 브랜치의 RT로 연결해도 돼?').map((item) => item.name))
-      .toEqual(expect.arrayContaining(['project_history_get', 'evaluation_relation_suggest']))
   })
 
   it('binds workflow learning to an exact project source and parses only filename dimensions', async () => {
@@ -147,7 +124,7 @@ describe('planLpddrTools', () => {
     await expect(service.create('p', undefined, 'folder-a', ['s2'])).rejects.toThrow('평가 폴더 로그 범위')
   })
 
-  it('bounds long-log Agent initialization to 32 local source references', async () => {
+  it('keeps the complete evaluation folder in the local Agent tool scope', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-bounded-sources-')))
     const artifacts = Array.from({ length: 48 }, (_, index) => ({
       sourceId: `s-${index}`, rootId: 'folder-a', artifactId: `a-${index}`, relativePath: `${index}.log`,
@@ -165,8 +142,8 @@ describe('planLpddrTools', () => {
     } as never)
     await service.initialize()
     await service.create('p', undefined, 'folder-a', artifacts.map((item) => item.sourceId))
-    expect(execute).toHaveBeenCalled()
-    expect(execute.mock.calls.every((call) => call[2].length === 32)).toBe(true)
+    expect(execute).not.toHaveBeenCalled()
+    expect(execute.mock.calls.every((call) => call[2].length === 48)).toBe(true)
   })
 
   it('keeps menu context in one folder session and returns a typed, uncommitted Results Summary proposal', async () => {
@@ -200,19 +177,81 @@ describe('planLpddrTools', () => {
       })
     })
     const firstIdle = waitForIdle()
-    await service.send(session.id, '[SCT_ANALYSIS_VIEW_CONTEXT]\nDQ와 BL 집중을 보여줘', ['s1'], 'analysis_view')
+    await service.send(session.id, '[SCT_ANALYSIS_VIEW_CONTEXT]\nDQ와 BL 집중을 보여줘', ['s1'], 'analysis_view', 'trends')
     const proposed = await firstIdle
     expect(proposed.messages.find((message) => message.role === 'user' && message.content.includes('DQ와 BL'))).toMatchObject({ contextKind: 'analysis_view' })
     expect(proposed.messages.at(-1)?.content).toBe('DQ9 집중을 비교했습니다.')
     expect(proposed.analysisViewProposal).toMatchObject({ dataBasis: 'failure_address', rowAxes: ['dq'], columnAxes: ['bl'], aggregation: 'fail_event_count', visualization: 'heatmap' })
 
     const secondIdle = waitForIdle()
-    await service.send(session.id, '선택한 PASS/FAIL 결과를 비교해줘', ['s1'], 'results')
+    await service.send(session.id, '선택한 PASS/FAIL 결과를 비교해줘', ['s1'], 'results', 'results')
     const continued = await secondIdle
     expect(continued.id).toBe(session.id)
     expect(continued.lastContextKind).toBe('results')
+    expect(continued.lastEvaluationStage).toBe('results')
     expect(continued.messages.filter((message) => message.role === 'user').map((message) => message.contextKind)).toEqual(['analysis_view', 'results'])
-    expect(continued.analysisViewProposal).toBeUndefined()
+    expect(continued.messages.filter((message) => message.role === 'user').map((message) => message.evaluationStage)).toEqual(['trends', 'results'])
+    expect(continued.analysisViewProposal?.id).toBe(proposed.analysisViewProposal?.id)
+  })
+
+  it('keeps the OpenCode evaluation summary in the same folder conversation as a typed proposal', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-evaluation-proposal-')))
+    const result = (name: string, sourceIds: string[]) => ({ name, label: name, summary: name, data: {}, evidenceSourceIds: sourceIds })
+    const service = new NativeAgentService({
+      store,
+      tools: { execute: vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => result(call.name, sourceIds)) },
+      projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM8975_SS.log' }], evaluationNodes: [] })) },
+      artifacts: { list: vi.fn(async () => []) },
+      llm: { complete: vi.fn(async () => ({ content: `평가 목적과 경향을 정리했습니다.\n<sct-evaluation-proposal>{"outcome":"TEST_FAIL","purpose":"characterization","dimensions":{"skew":"SS","dq":9},"rationale":"DQ9 반복","draft":{"purpose":"DQ9 불량 경향 확인","changedConditions":["온도"],"fixedConditions":["VDD"],"interpretation":"고온에서 재현 가능성이 높음","findings":["DQ9 반복"],"counterEvidence":[],"caveats":[],"trends":"DQ9 집중","nextPlan":"같은 Sample로 온도만 비교","levels":["Hot","Room"],"heldConditions":["VDD"],"samples":["S1"],"successCriteria":["동일 signature 재현"]},"evidenceSourceIds":["s1"]}</sct-evaluation-proposal>` })) },
+      opencode: { available: vi.fn(async () => false) },
+    } as never)
+    await service.initialize()
+    const created = await service.create('p', undefined, 'folder-a', ['s1'])
+    const idle = new Promise<NativeAgentSessionView>((resolve) => {
+      const unsubscribe = service.onUpdate((next) => {
+        if (next.id === created.id && next.status === 'idle' && next.evaluationProposal) { unsubscribe(); resolve(next) }
+      })
+    })
+    await service.send(created.id, '다섯 단계로 정리해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]', ['s1'], 'evaluation_history', 'interpretation')
+    const completed = await idle
+    expect(completed.messages.at(-1)?.content).toBe('평가 목적과 경향을 정리했습니다.')
+    expect(completed.evaluationProposal).toMatchObject({
+      outcome: 'TEST_FAIL', purpose: 'characterization', dimensions: { skew: 'SS', dq: 9 },
+      draft: { purpose: 'DQ9 불량 경향 확인' }, evidenceSourceIds: ['s1'],
+    })
+  })
+
+  it('keeps one evidence-specific clarification inside the same evaluation report turn', async () => {
+    const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-evaluation-followup-')))
+    const result = (name: string, sourceIds: string[]) => ({ name, label: name, summary: name, data: {}, evidenceSourceIds: sourceIds })
+    const complete = vi.fn()
+      .mockResolvedValueOnce({ content: '파일명에는 85°C와 105°C가 함께 있습니다. 이번 평가에서 의도적으로 바꾼 조건이 온도인가요?' })
+      .mockResolvedValueOnce({ content: `온도 split 평가로 정리했습니다.\n<sct-evaluation-proposal>{"outcome":"UNKNOWN","purpose":"characterization","dimensions":{"dq":9},"rationale":"온도 split","draft":{"purpose":"온도별 재현 경향 확인","changedConditions":["온도"],"fixedConditions":["VDD"],"interpretation":"고온에서 불량이 더 잘 재현되는 경향이 있습니다.","findings":["DQ9 반복"],"counterEvidence":[],"caveats":[],"trends":"DQ9 반복","nextPlan":"같은 Sample과 VDD로 재평가","levels":["85°C","105°C"],"heldConditions":["VDD"],"samples":["S1"],"successCriteria":["동일 signature 비교"]},"evidenceSourceIds":["s1"]}</sct-evaluation-proposal>` })
+    const service = new NativeAgentService({
+      store,
+      tools: { execute: vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => result(call.name, sourceIds)) },
+      projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM8975_SS.log' }], evaluationNodes: [] })) },
+      artifacts: { list: vi.fn(async () => []) }, llm: { complete }, opencode: { available: vi.fn(async () => false) },
+    } as never)
+    await service.initialize()
+    const created = await service.create('p', undefined, 'folder-a', ['s1'])
+    const waitForIdle = () => new Promise<NativeAgentSessionView>((resolve) => {
+      const unsubscribe = service.onUpdate((next) => {
+        if (next.id === created.id && next.status === 'idle') { unsubscribe(); resolve(next) }
+      })
+    })
+    let idle = waitForIdle()
+    await service.send(created.id, '다섯 단계로 정리해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]', ['s1'], 'evaluation_history', 'interpretation')
+    const questioned = await idle
+    expect(questioned.evaluationReportPending).toBe(true)
+    expect(questioned.messages.find((message) => message.role === 'user')?.content).not.toContain('SCT_EVALUATION')
+
+    idle = waitForIdle()
+    await service.send(created.id, '네, 온도만 바꿨습니다.', ['s1'], 'evaluation_history', 'interpretation')
+    const completed = await idle
+    expect(completed.evaluationReportPending).toBeUndefined()
+    expect(completed.evaluationProposal?.draft.changedConditions).toEqual(['온도'])
+    expect(complete.mock.calls[1][0]).toContain('[SCT_EVALUATION_REPORT_CONTEXT]')
   })
 
   it('reuses a confirmed folder purpose without asking the engineer again', async () => {
@@ -234,7 +273,7 @@ describe('planLpddrTools', () => {
     const created = await service.create('p', undefined, 'folder-a', ['s1'])
     expect(created.evaluationIntent).toBe('불량 검출 강화')
     expect(created.question).toBeUndefined()
-    expect(created.messages.at(-1)?.content).toContain('저장된 평가 목적: “불량 검출 강화”')
+    expect(created.messages).toEqual([])
   })
 
   it('reuses confirmed knowledge only when both project scopes exist', async () => {
@@ -249,7 +288,7 @@ describe('planLpddrTools', () => {
     await expect(service.reuseConfirmedKnowledge({ sourceProjectId: 'source', targetProjectId: 'missing' })).rejects.toThrow('프로젝트')
   })
 
-  it('asks once for an unknown command purpose and persists the engineer answer', async () => {
+  it('does not interrupt session creation for an unknown command purpose', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-command-question-')))
     await store.initialize()
     const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
@@ -262,20 +301,14 @@ describe('planLpddrTools', () => {
       artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
     } as never)
     const created = await service.create('p')
-    expect(created.question).toMatchObject({ kind: 'command-purpose', command: 'vendor:tskhynix_eye_sweep' })
+    expect(created.question).toBeUndefined()
     const initialAnswer = created.messages.at(-1)?.content ?? ''
-    expect(initialAnswer).toContain('아래 한 가지만 확인해 주세요')
-    expect(initialAnswer).not.toContain('어떤 목적의 평가인가요')
-    const answered = await service.send(created.id, '불량 검출용 Screening')
-    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
-    expect(answered.messages.at(-1)?.content).toContain('평가 목적만 선택')
-    const purposed = await service.send(answered.id, '불량 검출 강화')
-    expect(purposed.question).toBeUndefined()
-    expect(purposed.evaluationIntent).toBe('불량 검출 강화')
-    expect(await store.commandKnowledge('p')).toEqual([expect.objectContaining({ purpose: '불량 검출용 Screening', socModel: 'SM-8975' })])
+    expect(initialAnswer).toBe('')
+    expect(initialAnswer).not.toContain('어떤 목적으로 사용했나요')
+    expect(await store.commandKnowledge('p')).toEqual([])
   })
 
-  it('asks one profile question when the filename has no known SoC token', async () => {
+  it('keeps an unknown SoC profile unconfirmed without blocking session creation', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-profile-question-')))
     await store.initialize()
     const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
@@ -288,13 +321,11 @@ describe('planLpddrTools', () => {
       artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
     } as never)
     const created = await service.create('p')
-    expect(created.question).toMatchObject({ kind: 'boot-profile', sourceIds: ['s1'] })
-    const answered = await service.send(created.id, 'MediaTek · Post-PBL/LK')
-    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
-    expect(await store.profileBindings('p')).toEqual([expect.objectContaining({ vendor: 'mediatek', sourceIds: ['s1'] })])
+    expect(created.question).toBeUndefined()
+    expect(await store.profileBindings('p')).toEqual([])
   })
 
-  it('continues to the evaluation purpose after leaving an unknown boot profile unconfirmed', async () => {
+  it('does not add a purpose survey after an unknown boot profile', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-profile-skip-')))
     await store.initialize()
     const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
@@ -307,13 +338,12 @@ describe('planLpddrTools', () => {
       artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
     } as never)
     const created = await service.create('p')
-    const answered = await service.send(created.id, '미확인으로 유지')
-    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
-    expect(answered.messages.at(-1)?.content).toContain('평가 목적만 선택')
+    expect(created.question).toBeUndefined()
+    expect(created.messages).toEqual([])
     expect(await store.profileBindings('p')).toEqual([])
   })
 
-  it('asks for an ambiguous console prompt once and persists the project decision', async () => {
+  it('does not block session creation for an ambiguous console prompt', async () => {
     const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-console-question-')))
     await store.initialize()
     const result = (name: string, data: unknown = {}) => ({ name, label: name, summary: name, data, evidenceSourceIds: ['s1'] })
@@ -332,10 +362,8 @@ describe('planLpddrTools', () => {
       artifacts: { list: vi.fn(async () => []) }, llm: { complete: vi.fn() }, opencode: { available: vi.fn(async () => false) },
     } as never)
     const created = await service.create('p')
-    expect(created.question).toMatchObject({ kind: 'console-role', command: 'sleep 20' })
-    const answered = await service.send(created.id, '입력 명령 · 형식 기억')
-    expect(answered.question).toMatchObject({ kind: 'evaluation-purpose' })
-    expect(await store.consolePromptRules('p')).toEqual([expect.objectContaining({ promptSignature: 'bare-root-hash', role: 'input' })])
+    expect(created.question).toBeUndefined()
+    expect(await store.consolePromptRules('p')).toEqual([])
   })
 
   it('publishes bounded OpenCode tool progress before the slow final answer and avoids duplicate traces', async () => {
@@ -365,15 +393,16 @@ describe('planLpddrTools', () => {
     const updates: Array<{ status: string; tools: Array<{ name: string; summary?: string }> }> = []
     service.onUpdate((session) => updates.push({ status: session.status, tools: session.tools }))
     const created = await service.create('p', undefined, 'folder-a', ['s1'])
-    const purposed = await service.send(created.id, '부팅·Training 확인')
-    expect(purposed.evaluationIntent).toBe('부팅·Training 확인')
-    await service.send(created.id, 'FAIL 근거를 확인해줘', ['s1'])
+    await service.send(created.id, 'FAIL 근거를 확인해줘', ['s1'], 'results', 'results')
     await vi.waitFor(() => expect(updates.some((update) => update.status === 'running'
       && update.tools.some((tool) => tool.name === 'pass_fail_scan' && tool.summary === 'TEST_FAIL 2건'))).toBe(true))
     releaseAnswer()
     await vi.waitFor(async () => expect((await service.get(created.id))?.status).toBe('idle'))
     const completed = await service.get(created.id)
     expect(completed?.tools.filter((tool) => tool.name === 'pass_fail_scan' && tool.summary === 'TEST_FAIL 2건')).toHaveLength(1)
-    expect(opencodeSend).toHaveBeenCalledWith(expect.objectContaining({ requiredToolNames: ['pass_fail_scan'] }))
+    expect(opencodeSend).toHaveBeenCalledWith(expect.objectContaining({
+      requiredToolNames: [],
+      content: expect.stringContaining('현재 작업 단계: 평가 결과'),
+    }))
   })
 })

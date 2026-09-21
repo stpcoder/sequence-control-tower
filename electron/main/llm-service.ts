@@ -558,7 +558,13 @@ class SlidingWindowLimiter {
   }
 }
 
+export interface LlmToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
+export interface LlmChatMessage { role: 'system' | 'user' | 'assistant' | 'tool'; content: string | null; tool_calls?: LlmToolCall[]; tool_call_id?: string }
+export interface LlmToolDefinition { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }
+export interface LlmToolRequest { messages: LlmChatMessage[]; tools: LlmToolDefinition[] }
+
 interface ChatCompletionMessage {
+  tool_calls?: unknown
   content?: unknown
   reasoning?: unknown
   reasoning_content?: unknown
@@ -601,8 +607,9 @@ export class OpenAiCompatibleClient {
   async complete(
     prompt: string,
     signal: AbortSignal | undefined,
-    onStage: (stage: string) => void
-  ): Promise<{ content: string; model: string }> {
+    onStage: (stage: string) => void,
+    toolRequest?: LlmToolRequest
+  ): Promise<{ content: string; model: string; toolCalls?: LlmToolCall[] }> {
     const config = await this.configService.effective()
     if (!config.baseUrl || !config.model) throw new Error('LLM_UNAVAILABLE')
     const gemini3 = isGemini3Model(config.model)
@@ -611,7 +618,7 @@ export class OpenAiCompatibleClient {
       : LLM_COMPLETION_TOKEN_BUDGET
     // UTF-8 bytes / 3 is intentionally conservative for Korean while still
     // remaining close enough for English-heavy structured JSON evidence.
-    const estimatedTokens = Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3) + completionTokenBudget
+    const estimatedTokens = Math.ceil(Buffer.byteLength(toolRequest ? JSON.stringify(toolRequest) : prompt, 'utf8') / 3) + completionTokenBudget
     const endpoint = config.baseUrl.endsWith('/chat/completions')
       ? config.baseUrl
       : `${config.baseUrl}/chat/completions`
@@ -649,7 +656,7 @@ export class OpenAiCompatibleClient {
           headers,
           body: JSON.stringify({
             model: config.model,
-            messages: [
+            messages: toolRequest?.messages ?? [
               {
                 role: 'system',
                 content:
@@ -657,6 +664,7 @@ export class OpenAiCompatibleClient {
               },
               { role: 'user', content: prompt }
             ],
+            ...(toolRequest ? { tools: toolRequest.tools, tool_choice: 'auto', parallel_tool_calls: false } : {}),
             ...(gemini3 ? { reasoning_effort: 'low' } : { temperature: 0.1 }),
             ...(retryWithoutThinking ? {
               include_reasoning: false,
@@ -694,7 +702,19 @@ export class OpenAiCompatibleClient {
         }
         const message = parsed.choices?.[0]?.message
         const content = chatMessageText(message?.content)
-        if (!content) {
+        const rawCalls = message?.tool_calls
+        const toolCalls: LlmToolCall[] = []
+        if (toolRequest && Array.isArray(rawCalls) && rawCalls.length) {
+          if (rawCalls.length > 8) throw new Error('LLM_INVALID_TOOL_CALL')
+          for (const call of rawCalls) {
+            if (!call || call.type !== 'function' || typeof call.id !== 'string' || !call.id || call.id.length > 160
+              || typeof call.function?.name !== 'string' || call.function.name.length > 100
+              || typeof call.function?.arguments !== 'string' || call.function.arguments.length > 32_000) throw new Error('LLM_INVALID_TOOL_CALL')
+            if (toolCalls.some((item) => item.id === call.id)) throw new Error('LLM_INVALID_TOOL_CALL')
+            toolCalls.push({ id: call.id, type: 'function', function: { name: call.function.name, arguments: call.function.arguments } })
+          }
+        }
+        if (!content && !toolCalls.length) {
           if (hasReasoning(message)) {
             console.warn('[llm-service] reasoning-only response', {
               model: config.model,
@@ -707,7 +727,7 @@ export class OpenAiCompatibleClient {
           }
           throw new Error('LLM_EMPTY_RESPONSE')
         }
-        return { content, model: config.model }
+        return { content, model: config.model, ...(toolCalls.length ? { toolCalls } : {}) }
       } catch (error) {
         if (signal?.aborted) throw abortError()
         const original = error instanceof Error ? error : undefined

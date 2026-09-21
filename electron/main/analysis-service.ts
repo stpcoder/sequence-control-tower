@@ -366,21 +366,9 @@ export class AnalysisService {
         })
       }
     }
-    // Do not turn intake into another mandatory form. Ask for purpose only
-    // when neither lineage/diff nor a higher-value model question can fill the
-    // gap. A clear parent + meaningful changes can be reviewed without a
-    // question on every upload.
-    if (
-      !input.userComment &&
-      questions.length === 0 &&
-      (!input.parentArtifactId || changes.length === 0)
-    ) {
-      questions.push({
-        id: 'evaluation-purpose',
-        question: '이 Sequence로 확인하려던 핵심 평가 목적은 무엇인가요?',
-        why: '명령과 조건은 추출했지만 업로드된 파일만으로는 평가 의도를 확정할 수 없습니다.'
-      })
-    }
+    // Missing purpose is not a reason to turn intake into a fixed form. The
+    // provider may author a contextual question from observed evidence; when
+    // it does not, keep purpose unresolved and let the engineer continue.
     questions = questions.slice(0, 2)
 
     const result: AnalysisResult = {

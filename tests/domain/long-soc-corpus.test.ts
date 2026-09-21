@@ -29,11 +29,11 @@ describe('long tangled SoC corpus', () => {
     }
   })
 
-  it('models firmware interaction and Android boot as ordered stages instead of repeating Training for the whole file', async () => {
+  it.each(['\n', '\r\n'])('models ordered firmware and Android boot stages with %j line endings', async (lineEnding) => {
     const manifest = JSON.parse(await readFile(join(corpusRoot, 'manifest.json'), 'utf8')) as CorpusManifest
     for (const scenario of manifest.scenarios) {
       const text = await readFile(join(corpusRoot, scenario.file), 'utf8')
-      const lines = text.trimEnd().split('\n')
+      const lines = text.replace(/\r?\n/g, lineEnding).trimEnd().split(/\r?\n/)
       const trainingRows = lines.filter((line) => line.startsWith('DDR_TRAIN ')).length
       expect(lines[3]).toContain('B - 000000 - Power key pressed')
 

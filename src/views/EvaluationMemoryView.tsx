@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Download, FileText, Folder, Pencil, Sparkles, X } from 'lucide-react'
 import type { AssessmentOrigin, EvaluationDimensions, EvaluationMemory, EvaluationNode, EvaluationPurpose, EvaluationRelationKind, EvaluationStatus, EvidenceRecord, FailureHypothesis, ProductProject } from '../domain/evaluation-memory'
 import { flattenEvaluationMemory, inferEvaluationTrends } from '../domain/evaluation-memory'
+import { buildEvaluationResultSection, createEvaluationReportDraft, evaluationReportInterpretation, type EvaluationReport } from '../domain/evaluation-report'
 import { evaluationEntryLabel, evaluationRelationLabel, relationForEvaluationPurpose } from '../domain/evaluation-relation'
 import './evaluation-memory-view.css'
 
@@ -68,12 +69,12 @@ const purposeLabel: Record<EvaluationPurpose, string> = {
 }
 const statusLabel: Record<EvaluationStatus, string> = { pass: 'PASS', fail: 'FAIL', inconclusive: '미정', running: '진행 중' }
 const dimensionFields: Array<[keyof EvaluationDimensions, string, 'text' | 'number']> = [
-  ['skew', 'SKEW', 'text'], ['lot', 'Lot', 'text'], ['sample', '자재 (Sample)', 'text'], ['die', 'Die', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['equipmentChannel', '실장기 채널', 'text'], ['eccMode', 'ECC', 'text'], ['customCondition', '사용자 조건', 'text'], ['evaluationStep', '평가 Step', 'text'], ['gridId', 'Grid', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['subChannel', 'Sub Channel', 'text'], ['chipSelect', 'CS', 'text'], ['rank', 'Rank', 'text'], ['bankGroup', 'Bank Group', 'text'], ['bank', 'Bank', 'text'], ['row', 'Row', 'text'], ['column', 'Column', 'text'], ['writeData', 'WR', 'text'], ['readData', 'RD', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', '주파수 (MHz)', 'number'], ['temperatureC', '°C', 'number'], ['temperatureCorner', '온도 조건', 'text'], ['vdd', 'VDD (V)', 'number'], ['vddCorner', 'VDD 조건', 'text'], ['conditionCorner', '4-Corner', 'text'], ['timingSkewPs', 'Timing SKEW (ps)', 'number'], ['testMode', 'Mode', 'text'],
+  ['skew', 'Skew', 'text'], ['lot', 'Lot', 'text'], ['sample', 'Sample', 'text'], ['die', 'Die', 'text'], ['socModel', 'SoC', 'text'], ['bootProfileId', 'Boot profile', 'text'], ['equipmentChannel', '실장기 채널', 'text'], ['eccMode', 'ECC', 'text'], ['customCondition', '평가 제목', 'text'], ['evaluationStep', '평가 Step', 'text'], ['gridId', 'Grid', 'text'], ['bl', 'BL', 'text'], ['dq', 'DQ', 'text'], ['channel', 'Channel', 'text'], ['subChannel', 'Sub Channel', 'text'], ['chipSelect', 'CS', 'text'], ['rank', 'Rank', 'text'], ['bankGroup', 'Bank Group', 'text'], ['bank', 'Bank', 'text'], ['row', 'Row', 'text'], ['column', 'Column', 'text'], ['writeData', 'WR', 'text'], ['readData', 'RD', 'text'], ['pattern', 'Pattern', 'text'], ['frequencyMHz', '주파수 (MHz)', 'number'], ['temperatureC', '°C', 'number'], ['temperatureCorner', '온도 조건', 'text'], ['vdd', 'VDD (V)', 'number'], ['vddCorner', 'VDD 조건', 'text'], ['conditionCorner', '4-Corner', 'text'], ['timingSkewPs', 'Timing Skew (ps)', 'number'], ['testMode', 'Mode', 'text'],
 ]
 
 const emptyDimensions = (): EvaluationDimensions => ({})
 const id = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`}`
-const trendDimensionLabel = (dimension: string) => ({ skew: 'SKEW', timingSkewPs: 'Timing SKEW', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner', bl: 'BL', dq: 'DQ', frequencyMHz: '주파수', socModel: 'SoC', bootProfileId: 'Boot profile', equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '사용자 조건', evaluationStep: '평가 Step', gridId: 'Grid', channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bank: 'Bank', bankGroup: 'Bank Group', row: 'Row', column: 'Column', writeData: 'WR', readData: 'RD', pattern: 'Pattern', temperatureC: '온도', temperatureCorner: '온도 조건', die: 'Die', sample: '자재 (Sample)', lot: 'Lot', material: '자재 (Sample)', testMode: 'Mode' }[dimension] ?? dimension)
+const trendDimensionLabel = (dimension: string) => ({ skew: 'Skew', timingSkewPs: 'Timing Skew', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner', bl: 'BL', dq: 'DQ', frequencyMHz: '주파수', socModel: 'SoC', bootProfileId: 'Boot profile', equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '평가 제목', evaluationStep: '평가 Step', gridId: 'Grid', channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bank: 'Bank', bankGroup: 'Bank Group', row: 'Row', column: 'Column', writeData: 'WR', readData: 'RD', pattern: 'Pattern', temperatureC: '온도', temperatureCorner: '온도 조건', die: 'Die', sample: 'Sample', lot: 'Lot', material: 'Sample', testMode: 'Mode' }[dimension] ?? dimension)
 
 export function evaluationLogResultLabel(result?: string): string {
   const value = result?.trim()
@@ -234,7 +235,7 @@ export function evaluationBranchSummary(branch: EvaluationFolderBranch): string 
 function csvCell(value: unknown) { return `"${String(value ?? '').replaceAll('"', '""')}"` }
 export function evaluationMemoryCsv(memory: EvaluationMemory): string {
   const evidenceById = new Map(memory.evidence.map((record) => [record.id, record]))
-  const header = ['projectId', 'projectName', 'product', 'projectSkew', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'evaluationScopeId', 'nodeName', 'nodePurpose', 'nodeStatus', 'interpretation', 'authorship', 'reviewState', 'sequenceSignature', 'attemptNo', 'retestOf', 'relation', 'relationConfidence', 'relationReason', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'skew', 'lot', 'material', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep', 'gridId', 'bl', 'dq', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'pattern', 'frequencyMHz', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner', 'conditionCorner', 'timingSkewPs', 'testMode']
+  const header = ['projectId', 'projectName', 'product', 'projectSkew', 'customer', 'targetDevice', 'densityGb', 'nominalVoltage', 'program', 'phase', 'hypothesisId', 'hypothesisTitle', 'hypothesisOrigin', 'nodeId', 'parentNodeId', 'branchId', 'evaluationScopeId', 'nodeName', 'nodePurpose', 'nodeStatus', 'interpretation', 'reportPurpose', 'reportResults', 'reportInterpretation', 'reportTrends', 'reportNextPlan', 'authorship', 'reviewState', 'sequenceSignature', 'attemptNo', 'retestOf', 'relation', 'relationConfidence', 'relationReason', 'evidenceId', 'occurredAt', 'status', 'result', 'logRef', 'sourceIds', 'note', 'evidenceOrigin', 'skew', 'lot', 'material', 'die', 'sample', 'socVendor', 'socModel', 'bootProfileId', 'equipmentChannel', 'eccMode', 'customCondition', 'evaluationStep', 'gridId', 'bl', 'dq', 'channel', 'subChannel', 'chipSelect', 'rank', 'bankGroup', 'bank', 'row', 'column', 'writeData', 'readData', 'pattern', 'frequencyMHz', 'temperatureC', 'temperatureCorner', 'vdd', 'vddCorner', 'conditionCorner', 'timingSkewPs', 'testMode']
   const rows = flattenEvaluationMemory(memory).map((row) => header.map((key) => csvCell(key === 'sourceIds' ? evidenceById.get(row.evidenceId)?.sourceIds?.join('|') ?? '' : row[key as keyof typeof row])).join(','))
   return [header.join(','), ...rows].join('\n')
 }
@@ -243,7 +244,7 @@ export function buildEvaluationContextMarkdown(memory: EvaluationMemory): string
   const trends = inferEvaluationTrends(memory).slice(0, 5)
   const nodeById = new Map(memory.nodes.map((node) => [node.id, node]))
   const failureEvidence = memory.evidence.filter((record) => record.status === 'fail')
-  const projectContext = [memory.project.product && `Product: ${memory.project.product}`, memory.project.skew && `SKEW: ${memory.project.skew}`, memory.project.customer && `Customer: ${memory.project.customer}`, memory.project.targetDevice && `Target device: ${memory.project.targetDevice}`, memory.project.densityGb !== undefined && `Density: ${memory.project.densityGb}Gb`, memory.project.nominalVoltage !== undefined && `Nominal voltage: ${memory.project.nominalVoltage}V`, memory.project.program && `Program: ${memory.project.program}`, memory.project.phase && `Phase: ${memory.project.phase}`].filter(Boolean)
+  const projectContext = [memory.project.product && `Product: ${memory.project.product}`, memory.project.skew && `Skew: ${memory.project.skew}`, memory.project.customer && `Customer: ${memory.project.customer}`, memory.project.targetDevice && `Target device: ${memory.project.targetDevice}`, memory.project.densityGb !== undefined && `Density: ${memory.project.densityGb}Gb`, memory.project.nominalVoltage !== undefined && `Nominal voltage: ${memory.project.nominalVoltage}V`, memory.project.program && `Program: ${memory.project.program}`, memory.project.phase && `Phase: ${memory.project.phase}`].filter(Boolean)
   const lines = [`# ${memory.project.name} evaluation context`, `- ${projectContext.join(' · ') || 'Project context: —'}`, `- ${memory.nodes.length} evaluations · ${memory.evidence.length} evidence records · ${failureEvidence.length} failures`, '', '## Dominant failure signals']
   lines.push(...(trends.length ? trends.map((trend) => `- ${trend.dimension}=${trend.value}: ${trend.failureCount}/${trend.evidenceCount} fail (${Math.round(trend.failureRate * 100)}%), ${trend.origin}`) : ['- No repeatable failure signal yet.']))
   lines.push('', '## Failure issues')
@@ -302,6 +303,46 @@ function folderInterpretation(group: EvaluationFolderGroup, trends: ReturnType<t
   return `${group.evidence.length}개 로그 중 ${failures}개가 실패했습니다. ${trends.slice(0, 2).map(trendInterpretation).join(', ')} 조건을 우선 확인해야 합니다.`
 }
 
+function reportForFolder(group: EvaluationFolderGroup, node?: EvaluationNode): EvaluationReport {
+  const resultSources = group.logs.map((log) => ({ id: log.id, name: log.name, result: log.result }))
+  const base = node?.report ?? createEvaluationReportDraft({
+    title: group.label,
+    purpose: node?.purpose,
+    purposeText: node?.name,
+    interpretation: node?.interpretation,
+    sources: resultSources,
+  })
+  return {
+    ...base,
+    purpose: { ...base.purpose, category: base.purpose.category ?? node?.purpose },
+    results: buildEvaluationResultSection(resultSources),
+  }
+}
+
+function confirmedReport(report: EvaluationReport, previous?: EvaluationReport): EvaluationReport {
+  const stamp = new Date().toISOString()
+  const confirm = <T extends { state: string }>(section: T): T => ({ ...section, state: section.state === 'computed' ? 'computed' : 'engineer-confirmed' } as T)
+  return {
+    ...report,
+    revision: (previous?.revision ?? 0) + 1,
+    createdAt: previous?.createdAt ?? report.createdAt,
+    updatedAt: stamp,
+    purpose: confirm(report.purpose),
+    results: { ...report.results, state: 'computed' },
+    interpretation: confirm(report.interpretation),
+    trends: confirm(report.trends),
+    nextPlan: confirm(report.nextPlan),
+  }
+}
+
+function statusForReport(report: EvaluationReport): EvaluationStatus {
+  const failCount = ['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT']
+    .reduce((sum, outcome) => sum + (report.results.byOutcome[outcome as keyof typeof report.results.byOutcome] ?? 0), 0)
+  if (failCount > 0) return 'fail'
+  if (report.results.definitive > 0 && report.results.byOutcome.PASS === report.results.definitive) return 'pass'
+  return 'inconclusive'
+}
+
 export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLog, onSelectLog, onAnalyzeEvaluation, selectedEvaluationScopeId, onNotify }: EvaluationMemoryViewProps) {
   const groups = useMemo(() => groupEvaluationFolders(memory, availableLogs), [availableLogs, memory])
   const flow = useMemo(() => evaluationFolderFlow(memory, groups), [groups, memory])
@@ -319,6 +360,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
   const proactivelyOpened = useRef(new Set<string>())
   const lastExternalScope = useRef(selectedEvaluationScopeId)
   const [review, setReview] = useState({ purpose: 'characterization' as EvaluationPurpose, status: 'inconclusive' as EvaluationStatus, parentId: '', relation: 'condition-comparison' as EvaluationRelationKind, interpretation: '' })
+  const [reportDraft, setReportDraft] = useState<EvaluationReport | null>(null)
 
   useEffect(() => { setProjectDraft(memory.project) }, [memory.project])
   useEffect(() => { proactivelyOpened.current.clear(); setSelectedGroupId(undefined); lastExternalScope.current = selectedEvaluationScopeId }, [memory.project.id])
@@ -331,8 +373,9 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
   useEffect(() => {
     const externalParent = latestNode?.parentId && !selectedGroup?.nodes.some((node) => node.id === latestNode.parentId) ? latestNode.parentId : ''
     setReview({ purpose: latestNode?.purpose ?? 'characterization', status: latestNode?.status ?? 'inconclusive', parentId: externalParent, relation: latestNode?.relation ?? relationForEvaluationPurpose(latestNode?.purpose), interpretation: latestNode?.interpretation ?? '' })
+    setReportDraft(selectedGroup ? reportForFolder(selectedGroup, latestNode) : null)
     setManualOpen(false)
-  }, [latestNode?.id, selectedGroup?.id])
+  }, [latestNode?.id, selectedGroup?.id, selectedGroup?.logs])
   useEffect(() => {
     if (!selectedGroupId) return undefined
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedGroupId(undefined) }
@@ -354,8 +397,12 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
   const updateProjectDraft = (key: 'product' | 'skew' | 'customer' | 'targetDevice' | 'densityGb' | 'nominalVoltage', raw: string) => setProjectDraft((current) => ({ ...current, [key]: raw === '' ? undefined : key === 'densityGb' || key === 'nominalVoltage' ? Number(raw) : raw }))
 
   const saveReview = async () => {
-    if (!selectedGroup) return
-    if (!review.interpretation.trim()) return onNotify('평가 해설을 입력하세요.')
+    if (!selectedGroup || !reportDraft) return
+    if (!reportDraft.purpose.text.trim()) return onNotify('평가 목적을 입력하세요.')
+    const report = confirmedReport(reportDraft, latestNode?.report)
+    const purpose = report.purpose.category ?? review.purpose
+    const status = statusForReport(report)
+    const interpretation = evaluationReportInterpretation(report)
     const parent = review.parentId ? memory.nodes.find((node) => node.id === review.parentId) : undefined
     const targetHypothesisId = parent?.hypothesisId ?? latestNode?.hypothesisId ?? id('hyp')
     const targetHypothesis = memory.hypotheses.find((hypothesis) => hypothesis.id === targetHypothesisId)
@@ -372,7 +419,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
           : hypothesis)
       const nextTarget: FailureHypothesis = targetHypothesis
         ? { ...targetHypothesis, evaluationNodeIds: [...new Set([...(targetHypothesis.evaluationNodeIds ?? []), ...nodeIds])] }
-        : { id: targetHypothesisId, projectId: memory.project.id, title: selectedGroup.label, description: review.interpretation.trim(), origin: 'engineer-confirmed', evaluationNodeIds: [...new Set(nodeIds)] }
+        : { id: targetHypothesisId, projectId: memory.project.id, title: selectedGroup.label, description: interpretation, origin: 'engineer-confirmed', evaluationNodeIds: [...new Set(nodeIds)] }
       return [...cleaned.filter((hypothesis) => hypothesis.id !== targetHypothesisId), nextTarget]
     }
     let next: EvaluationMemory
@@ -382,20 +429,20 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
         hypotheses: updateHypotheses([nodeId]),
         nodes: memory.nodes.map((node) => node.id === latestNode.id ? {
           ...node, hypothesisId: targetHypothesisId, evaluationScopeId: selectedGroup.id.startsWith('legacy:') ? node.evaluationScopeId : selectedGroup.id,
-          purpose: review.purpose, status: review.status, parentId: parent?.id, branchId, relation,
+          purpose, status, parentId: parent?.id, branchId, relation,
           relationConfidence: 1, relationReason: parent ? '엔지니어가 이전 평가와의 관계를 직접 확인했습니다.' : '엔지니어가 새 불량 이슈의 시작으로 확인했습니다.',
           ...(relation === 'retest' && parent ? { retestOf: parent.id } : { retestOf: undefined }),
-          interpretation: review.interpretation.trim(), authorship: node.authorship ?? 'engineer', reviewState: 'confirmed',
+          interpretation, report, authorship: node.authorship ?? 'engineer', reviewState: 'confirmed',
         } : node),
       }
     } else {
       const node: EvaluationNode = {
         id: nodeId, projectId: memory.project.id, hypothesisId: targetHypothesisId,
         evaluationScopeId: selectedGroup.id === 'unscoped' ? undefined : selectedGroup.id, name: selectedGroup.label,
-        purpose: review.purpose, status: review.status, parentId: parent?.id, branchId, relation,
+        purpose, status, parentId: parent?.id, branchId, relation,
         relationConfidence: 1, relationReason: parent ? '엔지니어가 이전 평가와의 관계를 직접 확인했습니다.' : '엔지니어가 새 불량 이슈의 시작으로 확인했습니다.',
         ...(relation === 'retest' && parent ? { retestOf: parent.id } : {}),
-        dimensions: {}, interpretation: review.interpretation.trim(), authorship: 'engineer', reviewState: 'confirmed',
+        dimensions: {}, interpretation, report, authorship: 'engineer', reviewState: 'confirmed',
       }
       const evidence: EvidenceRecord[] = selectedGroup.logs.map((log) => ({ id: id('evidence'), projectId: memory.project.id, evaluationNodeId: nodeId, status: logStatus(log.result), result: log.result, sourceIds: [log.id], origin: 'engineer-confirmed' }))
       next = { ...memory, hypotheses: updateHypotheses([...(parent && !parent.hypothesisId ? [parent.id] : []), nodeId]), nodes: [...memory.nodes.map((item) => parent && item.id === parent.id && !item.hypothesisId ? { ...item, hypothesisId: targetHypothesisId, branchId: item.branchId ?? `issue:${targetHypothesisId}:main`, relation: item.relation ?? 'baseline' as const } : item), node], evidence: [...memory.evidence, ...evidence] }
@@ -404,7 +451,7 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
   }
   return <div className={`data-view evaluation-memory-view ${selectedGroup ? 'is-detail-open' : 'is-overview'}`}>
     <header className="data-view-header evaluation-memory-view__header"><div><h1>평가 이력</h1></div><div className="data-actions evaluation-memory-view__actions"><button onClick={() => downloadCsv(evaluationMemoryCsv(memory))}><Download size={16} />CSV</button></div></header>
-    <details className="evaluation-memory-view__project-context"><summary>프로젝트 조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>SKEW<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void save(withProjectConditions(memory, projectDraft))}>저장</button></div></details>
+    <details className="evaluation-memory-view__project-context"><summary>프로젝트 조건</summary><div><label>제품<input value={projectDraft.product ?? ''} onChange={(event) => updateProjectDraft('product', event.target.value)} /></label><label>Skew<input value={projectDraft.skew ?? ''} onChange={(event) => updateProjectDraft('skew', event.target.value)} /></label><label>고객<input value={projectDraft.customer ?? ''} onChange={(event) => updateProjectDraft('customer', event.target.value)} /></label><label>대상 장치<input value={projectDraft.targetDevice ?? ''} onChange={(event) => updateProjectDraft('targetDevice', event.target.value)} /></label><label>밀도 (Gb)<input type="number" value={projectDraft.densityGb ?? ''} onChange={(event) => updateProjectDraft('densityGb', event.target.value)} /></label><label>정격 전압 (V)<input type="number" value={projectDraft.nominalVoltage ?? ''} onChange={(event) => updateProjectDraft('nominalVoltage', event.target.value)} /></label><button type="button" disabled={saving} onClick={() => void save(withProjectConditions(memory, projectDraft))}>저장</button></div></details>
     <section className="evaluation-memory-view__flow" aria-label="불량 이슈별 평가 이력">
       <header><strong>불량 이슈별 평가 이력</strong><span>{new Set(branches.filter((branch) => branch.kind === 'issue').map((branch) => branch.hypothesisId)).size}개 이슈{branches.some((branch) => branch.kind === 'queue') ? ' · 분류 대기 있음' : ''}</span></header>
       <div className="evaluation-memory-view__flow-branches">{branches.length ? branches.map((branch) => {
@@ -448,21 +495,22 @@ export function EvaluationMemoryView({ memory, availableLogs, onChange, onOpenLo
       </main>
 
       <aside className="evaluation-memory-view__review">
-        <header><div><strong>평가 정리</strong><span>{selectedGroup?.label ?? '평가를 선택하세요'}</span></div></header>
-        <>
-          <div className="evaluation-memory-view__review-actions">
-            <button className="evaluation-memory-view__agent" disabled={!onAnalyzeEvaluation || !selectedGroup.logs.length} onClick={() => onAnalyzeEvaluation?.(evaluationAnalysisRequest(selectedGroup, latestNode))}><Sparkles size={14} />{latestNode ? '다시 분석' : '현재 평가 분석'}</button>
-            <button className="evaluation-memory-view__edit" type="button" aria-expanded={manualOpen} onClick={() => setManualOpen((value) => !value)}><Pencil size={14} />직접 수정</button>
-          </div>
-          {manualOpen ? <div className="evaluation-memory-view__manual">
-            <label><span>평가 목적</span><select value={review.purpose} onChange={(event) => setReview({ ...review, purpose: event.target.value as EvaluationPurpose })}>{Object.entries(purposeLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>최종 결과</span><select value={review.status} onChange={(event) => setReview({ ...review, status: event.target.value as EvaluationStatus })}><option value="inconclusive">미정</option><option value="pass">PASS</option><option value="fail">FAIL</option><option value="running">진행 중</option></select></label>
-            <label><span>연결할 이전 평가</span><select value={review.parentId} onChange={(event) => setReview({ ...review, parentId: event.target.value })}><option value="">연결하지 않음</option>{previousEvaluationOptions.map((item) => <option key={item.group.id} value={item.node!.id}>{item.group.label}</option>)}</select></label>
-            {review.parentId ? <label><span>이전 평가와 관계</span><select value={review.relation} onChange={(event) => setReview({ ...review, relation: event.target.value as EvaluationRelationKind })}><option value="retest">동일 조건 RT</option><option value="condition-comparison">가속·조건 비교</option><option value="improvement">개선 조건</option><option value="verification">안정성 검증</option><option value="side-effect">Side effect 확인</option></select></label> : null}
-            <label className="evaluation-memory-view__narrative"><span>평가 해석</span><textarea value={review.interpretation} onChange={(event) => setReview({ ...review, interpretation: event.target.value })} placeholder="실패가 집중된 조건, 비교 결과, 다음 확인 항목" /></label>
-            <button className="evaluation-memory-view__save is-primary" disabled={saving} onClick={() => void saveReview()}><Check size={14} />{saving ? '저장 중…' : '평가 저장'}</button>
-          </div> : null}
-        </>
+        <header><div><strong>평가 정리</strong><span>{selectedGroup.label}</span></div></header>
+        <div className="evaluation-memory-view__review-actions">
+          <button className="evaluation-memory-view__agent" disabled={!onAnalyzeEvaluation || !selectedGroup.logs.length} onClick={() => onAnalyzeEvaluation?.(evaluationAnalysisRequest(selectedGroup, latestNode))}><Sparkles size={14} />Agent로 정리</button>
+          <button className="evaluation-memory-view__edit" type="button" aria-expanded={manualOpen} onClick={() => setManualOpen((value) => !value)}><Pencil size={14} />{manualOpen ? '편집 닫기' : '직접 수정'}</button>
+        </div>
+        {reportDraft ? <ol className={`evaluation-memory-view__report ${manualOpen ? 'is-editing' : ''}`}>
+          <li><span>1</span><div><strong>평가 목적</strong>{manualOpen ? <><select aria-label="평가 목적 분류" value={reportDraft.purpose.category ?? review.purpose} onChange={(event) => { const purpose = event.target.value as EvaluationPurpose; setReview({ ...review, purpose }); setReportDraft((current) => current ? { ...current, purpose: { ...current.purpose, category: purpose } } : current) }}>{Object.entries(purposeLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><textarea value={reportDraft.purpose.text} onChange={(event) => setReportDraft((current) => current ? { ...current, purpose: { ...current.purpose, text: event.target.value } } : current)} /></> : <p>{reportDraft.purpose.text}</p>}</div></li>
+          <li><span>2</span><div><strong>평가 결과</strong><p>{reportDraft.results.summary}</p>{reportDraft.results.unknown ? <small>{reportDraft.results.unknown}개 로그 확인 필요</small> : null}</div></li>
+          <li><span>3</span><div><strong>결과 해석</strong>{manualOpen ? <textarea value={reportDraft.interpretation.text} onChange={(event) => setReportDraft((current) => current ? { ...current, interpretation: { ...current.interpretation, text: event.target.value } } : current)} /> : <p>{reportDraft.interpretation.text}</p>}</div></li>
+          <li><span>4</span><div><strong>불량 경향</strong>{manualOpen ? <textarea value={reportDraft.trends.text} onChange={(event) => setReportDraft((current) => current ? { ...current, trends: { ...current.trends, text: event.target.value } } : current)} /> : <p>{reportDraft.trends.text}</p>}</div></li>
+          <li><span>5</span><div><strong>다음 평가</strong>{manualOpen ? <textarea value={reportDraft.nextPlan.text} onChange={(event) => setReportDraft((current) => current ? { ...current, nextPlan: { ...current.nextPlan, text: event.target.value } } : current)} /> : <p>{reportDraft.nextPlan.text}</p>}</div></li>
+        </ol> : null}
+        {manualOpen ? <div className="evaluation-memory-view__manual">
+          <details><summary>이력 연결</summary><div><label><span>이전 평가</span><select value={review.parentId} onChange={(event) => setReview({ ...review, parentId: event.target.value })}><option value="">연결하지 않음</option>{previousEvaluationOptions.map((item) => <option key={item.group.id} value={item.node!.id}>{item.group.label}</option>)}</select></label>{review.parentId ? <label><span>관계</span><select value={review.relation} onChange={(event) => setReview({ ...review, relation: event.target.value as EvaluationRelationKind })}><option value="retest">동일 조건 RT</option><option value="condition-comparison">조건 비교</option><option value="improvement">개선 조건</option><option value="verification">안정성 검증</option><option value="side-effect">Side effect</option></select></label> : null}</div></details>
+          <button className="evaluation-memory-view__save is-primary" disabled={saving} onClick={() => void saveReview()}><Check size={14} />{saving ? '저장 중…' : '평가 이력에 저장'}</button>
+        </div> : null}
       </aside>
     </div> : null}
   </div>

@@ -5,7 +5,8 @@ import type {
   ProjectArchiveExportPresetInput, ProjectArchiveInput, ProjectArtifactSourceRef, ProjectConnectArtifactsInput,
   ProjectCreateInput, ProjectEquipmentProfile, ProjectExportPreset, ProjectFolderRef, ProjectFolderStatus,
   ProjectSaveExportPresetInput, ProjectSaveInput, ProjectSnapshot, ProjectTemplatePin, ProjectLpddrDevelopmentContext,
-  ProjectFailureHypothesis, ProjectEvaluationNode, ProjectEvidenceRecord, ProjectEvaluationDimensions
+  ProjectFailureHypothesis, ProjectEvaluationNode, ProjectEvidenceRecord, ProjectEvaluationDimensions, ProjectEvaluationReport,
+  ProjectEvaluationReportConfidence, ProjectEvaluationReportSectionState
 } from '../shared/contracts'
 import type { JsonValue } from '../shared/contracts'
 import { AtomicJsonStore } from './json-store'
@@ -96,6 +97,123 @@ const relationConfidence = (value: unknown): number => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new Error('relationConfidence가 올바르지 않습니다.')
   return parsed
+}
+
+const reportText = (value: unknown, name: string, max = 4_000): string => {
+  if (typeof value !== 'string') throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  const result = value.trim()
+  if (!result || result.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(result)) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return result
+}
+const reportTexts = (value: unknown, name: string, maxItems = 40, maxText = 400): string[] => {
+  if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return value.map((item) => reportText(item, name, maxText))
+}
+const reportConfidence = (value: unknown): ProjectEvaluationReportConfidence => {
+  if (value === 'high' || value === 'medium' || value === 'low') return value
+  throw new Error('evaluation report confidence가 올바르지 않습니다.')
+}
+const reportSectionState = (value: unknown): ProjectEvaluationReportSectionState => {
+  if (value === 'computed' || value === 'agent-proposed' || value === 'engineer-confirmed') return value
+  throw new Error('evaluation report section state가 올바르지 않습니다.')
+}
+const reportCount = (value: unknown, name: string): number => {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 1_000_000) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  return value as number
+}
+const reportPurpose = (value: unknown): ProjectEvaluationNode['purpose'] => {
+  if (['screening', 'improvement', 'reproduction', 'characterization', 'verification', 'stage-verification'].includes(String(value))) return value as ProjectEvaluationNode['purpose']
+  throw new Error('evaluation report purpose가 올바르지 않습니다.')
+}
+const reportEvidenceIds = (value: unknown, name: string): string[] => reportTexts(value, name, 5_000, 160)
+const reportBase = (value: unknown, name: string) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name}이(가) 올바르지 않습니다.`)
+  const source = value as Record<string, unknown>
+  return {
+    source,
+    base: {
+      text: reportText(source.text, `${name} text`),
+      confidence: reportConfidence(source.confidence),
+      evidenceSourceIds: reportEvidenceIds(source.evidenceSourceIds, `${name} evidenceSourceIds`),
+      state: reportSectionState(source.state),
+    },
+  }
+}
+const evaluationReport = (value: unknown): ProjectEvaluationReport => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('evaluation report가 올바르지 않습니다.')
+  const source = value as Record<string, unknown>
+  const purpose = reportBase(source.purpose, 'evaluation report purpose')
+  const results = source.results as Record<string, unknown>
+  const interpretation = reportBase(source.interpretation, 'evaluation report interpretation')
+  const trends = reportBase(source.trends, 'evaluation report trends')
+  const nextPlan = reportBase(source.nextPlan, 'evaluation report next plan')
+  if (!results || typeof results !== 'object' || Array.isArray(results)) throw new Error('evaluation report results가 올바르지 않습니다.')
+  const resultCounts = results.byOutcome as Record<string, unknown>
+  if (!resultCounts || typeof resultCounts !== 'object' || Array.isArray(resultCounts)) throw new Error('evaluation report result counts가 올바르지 않습니다.')
+  const allowedOutcomes = new Set(['PASS', 'DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT', 'INCOMPLETE', 'UNKNOWN', 'EXCLUDED'])
+  const byOutcome = Object.fromEntries(Object.entries(resultCounts).map(([key, count]) => {
+    if (!allowedOutcomes.has(key)) throw new Error('evaluation report outcome이 올바르지 않습니다.')
+    return [key, reportCount(count, `evaluation report ${key}`)]
+  })) as ProjectEvaluationReport['results']['byOutcome']
+  const findings = Array.isArray(trends.source.findings) ? trends.source.findings.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('evaluation trend finding이 올바르지 않습니다.')
+    const finding = item as Record<string, unknown>
+    const failureRate = finding.failureRate === undefined ? undefined : Number(finding.failureRate)
+    if (failureRate !== undefined && (!Number.isFinite(failureRate) || failureRate < 0 || failureRate > 1)) throw new Error('evaluation trend failureRate가 올바르지 않습니다.')
+    return {
+      dimension: reportText(finding.dimension, 'evaluation trend dimension', 120),
+      value: reportText(finding.value, 'evaluation trend value', 240),
+      statement: reportText(finding.statement, 'evaluation trend statement', 800),
+      ...(finding.failures === undefined ? {} : { failures: reportCount(finding.failures, 'evaluation trend failures') }),
+      ...(finding.total === undefined ? {} : { total: reportCount(finding.total, 'evaluation trend total') }),
+      ...(failureRate === undefined ? {} : { failureRate }),
+      confidence: reportConfidence(finding.confidence),
+      evidenceSourceIds: reportEvidenceIds(finding.evidenceSourceIds, 'evaluation trend evidenceSourceIds'),
+    }
+  }) : (() => { throw new Error('evaluation trend findings가 올바르지 않습니다.') })()
+  const repeats = nextPlan.source.repeats === undefined ? undefined : optionalPositiveInteger(nextPlan.source.repeats, 'evaluation report repeats')
+  return {
+    schemaVersion: 1,
+    revision: optionalPositiveInteger(source.revision, 'evaluation report revision') ?? 1,
+    createdAt: reportText(source.createdAt, 'evaluation report createdAt', 80),
+    updatedAt: reportText(source.updatedAt, 'evaluation report updatedAt', 80),
+    purpose: {
+      ...purpose.base,
+      ...(purpose.source.category === undefined ? {} : { category: reportPurpose(purpose.source.category) }),
+      ...(purpose.source.baselineNodeId === undefined ? {} : { baselineNodeId: id(purpose.source.baselineNodeId, 'evaluation report baselineNodeId') }),
+      changedConditions: reportTexts(purpose.source.changedConditions, 'evaluation report changedConditions'),
+      fixedConditions: reportTexts(purpose.source.fixedConditions, 'evaluation report fixedConditions'),
+    },
+    results: {
+      summary: reportText(results.summary, 'evaluation report result summary'),
+      total: reportCount(results.total, 'evaluation report total'),
+      definitive: reportCount(results.definitive, 'evaluation report definitive'),
+      byOutcome,
+      unknown: reportCount(results.unknown, 'evaluation report unknown'),
+      excluded: reportCount(results.excluded, 'evaluation report excluded'),
+      coverage: results.coverage === 'complete' ? 'complete' : results.coverage === 'partial' ? 'partial' : (() => { throw new Error('evaluation report coverage가 올바르지 않습니다.') })(),
+      evidenceSourceIds: reportEvidenceIds(results.evidenceSourceIds, 'evaluation report result evidenceSourceIds'),
+      state: 'computed',
+    },
+    interpretation: {
+      ...interpretation.base,
+      findings: reportTexts(interpretation.source.findings, 'evaluation report findings'),
+      counterEvidence: reportTexts(interpretation.source.counterEvidence, 'evaluation report counterEvidence'),
+      caveats: reportTexts(interpretation.source.caveats, 'evaluation report caveats'),
+    },
+    trends: { ...trends.base, findings },
+    nextPlan: {
+      ...nextPlan.base,
+      ...(nextPlan.source.objective === undefined ? {} : { objective: reportText(nextPlan.source.objective, 'evaluation report objective', 800) }),
+      ...(nextPlan.source.changedVariable === undefined ? {} : { changedVariable: reportText(nextPlan.source.changedVariable, 'evaluation report changedVariable', 160) }),
+      levels: reportTexts(nextPlan.source.levels, 'evaluation report levels'),
+      heldConditions: reportTexts(nextPlan.source.heldConditions, 'evaluation report heldConditions'),
+      samples: reportTexts(nextPlan.source.samples, 'evaluation report samples'),
+      ...(repeats === undefined ? {} : { repeats }),
+      successCriteria: reportTexts(nextPlan.source.successCriteria, 'evaluation report successCriteria'),
+      historyNodeIds: reportEvidenceIds(nextPlan.source.historyNodeIds, 'evaluation report historyNodeIds'),
+    },
+  }
 }
 
 export class ProjectStore {
@@ -289,9 +407,9 @@ export class ProjectStore {
   private memory(hypothesesValue: unknown, nodesValue: unknown, evidenceValue: unknown, artifacts: ProjectArtifactSourceRef[]): { hypotheses: ProjectFailureHypothesis[]; nodes: ProjectEvaluationNode[]; evidence: ProjectEvidenceRecord[] } {
     if (!Array.isArray(hypothesesValue) || !Array.isArray(nodesValue) || !Array.isArray(evidenceValue) || hypothesesValue.length > 200 || nodesValue.length > 1_000 || evidenceValue.length > 5_000) throw new Error('평가 메모리 크기가 올바르지 않습니다.')
     const hypotheses = hypothesesValue.map((value): ProjectFailureHypothesis => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('failure hypothesis가 올바르지 않습니다.'); return { id: id(v.id, 'hypothesisId'), title: text(v.title, 'hypothesis title', 240), ...(v.description === undefined ? {} : { description: text(v.description, 'hypothesis description', 2_000) }), origin: origin(v.origin, 'hypothesis origin'), ...(v.evaluationNodeIds === undefined ? {} : { evaluationNodeIds: this.ids(v.evaluationNodeIds, 'evaluationNodeIds', 1_000) }) } })
-    const nodes = nodesValue.map((value): ProjectEvaluationNode => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evaluation node가 올바르지 않습니다.'); const purpose = v.purpose === undefined ? undefined : String(v.purpose); if (purpose !== undefined && !['screening', 'improvement', 'reproduction', 'characterization', 'verification', 'stage-verification'].includes(purpose)) throw new Error('evaluation purpose가 올바르지 않습니다.'); return { id: id(v.id, 'nodeId'), ...(v.hypothesisId === undefined ? {} : { hypothesisId: id(v.hypothesisId, 'hypothesisId') }), ...(v.parentId === undefined ? {} : { parentId: id(v.parentId, 'parentId') }), ...(v.branchId === undefined ? {} : { branchId: id(v.branchId, 'branchId') }), ...(v.evaluationScopeId === undefined ? {} : { evaluationScopeId: id(v.evaluationScopeId, 'evaluationScopeId') }), name: text(v.name, 'node name', 240), ...(purpose === undefined ? {} : { purpose: purpose as ProjectEvaluationNode['purpose'] }), dimensions: this.dimensions(v.dimensions), ...(v.status === undefined ? {} : { status: status(v.status, 'node status') }), ...(v.interpretation === undefined ? {} : { interpretation: text(v.interpretation, 'evaluation interpretation', 4_000) }), ...(v.authorship === undefined ? {} : { authorship: authorship(v.authorship) }), ...(v.reviewState === undefined ? {} : { reviewState: reviewState(v.reviewState) }), ...(v.sequenceSignature === undefined ? {} : { sequenceSignature: text(v.sequenceSignature, 'sequenceSignature', 200) }), ...(v.attemptNo === undefined ? {} : { attemptNo: optionalPositiveInteger(v.attemptNo, 'attemptNo') }), ...(v.retestOf === undefined ? {} : { retestOf: id(v.retestOf, 'retestOf') }), ...(v.relation === undefined ? {} : { relation: evaluationRelation(v.relation) }), ...(v.relationConfidence === undefined ? {} : { relationConfidence: relationConfidence(v.relationConfidence) }), ...(v.relationReason === undefined ? {} : { relationReason: text(v.relationReason, 'relationReason', 800) }) } })
+    const nodes = nodesValue.map((value): ProjectEvaluationNode => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evaluation node가 올바르지 않습니다.'); const purpose = v.purpose === undefined ? undefined : String(v.purpose); if (purpose !== undefined && !['screening', 'improvement', 'reproduction', 'characterization', 'verification', 'stage-verification'].includes(purpose)) throw new Error('evaluation purpose가 올바르지 않습니다.'); return { id: id(v.id, 'nodeId'), ...(v.hypothesisId === undefined ? {} : { hypothesisId: id(v.hypothesisId, 'hypothesisId') }), ...(v.parentId === undefined ? {} : { parentId: id(v.parentId, 'parentId') }), ...(v.branchId === undefined ? {} : { branchId: id(v.branchId, 'branchId') }), ...(v.evaluationScopeId === undefined ? {} : { evaluationScopeId: id(v.evaluationScopeId, 'evaluationScopeId') }), name: text(v.name, 'node name', 240), ...(purpose === undefined ? {} : { purpose: purpose as ProjectEvaluationNode['purpose'] }), dimensions: this.dimensions(v.dimensions), ...(v.status === undefined ? {} : { status: status(v.status, 'node status') }), ...(v.interpretation === undefined ? {} : { interpretation: text(v.interpretation, 'evaluation interpretation', 4_000) }), ...(v.report === undefined ? {} : { report: evaluationReport(v.report) }), ...(v.authorship === undefined ? {} : { authorship: authorship(v.authorship) }), ...(v.reviewState === undefined ? {} : { reviewState: reviewState(v.reviewState) }), ...(v.sequenceSignature === undefined ? {} : { sequenceSignature: text(v.sequenceSignature, 'sequenceSignature', 200) }), ...(v.attemptNo === undefined ? {} : { attemptNo: optionalPositiveInteger(v.attemptNo, 'attemptNo') }), ...(v.retestOf === undefined ? {} : { retestOf: id(v.retestOf, 'retestOf') }), ...(v.relation === undefined ? {} : { relation: evaluationRelation(v.relation) }), ...(v.relationConfidence === undefined ? {} : { relationConfidence: relationConfidence(v.relationConfidence) }), ...(v.relationReason === undefined ? {} : { relationReason: text(v.relationReason, 'relationReason', 800) }) } })
     const nodeIds = new Set(nodes.map((node) => node.id)); const hypothesisIds = new Set(hypotheses.map((hypothesis) => hypothesis.id)); const sourceIds = new Set(artifacts.map((artifact) => artifact.sourceId)); this.unique(hypothesisIds, hypotheses.length, 'hypothesisId'); this.unique(nodeIds, nodes.length, 'nodeId')
-    if (nodes.some((node) => (node.parentId && !nodeIds.has(node.parentId)) || (node.retestOf && (node.retestOf === node.id || !nodeIds.has(node.retestOf))) || (node.hypothesisId && !hypothesisIds.has(node.hypothesisId)))) throw new Error('evaluation node 참조가 올바르지 않습니다.')
+    if (nodes.some((node) => (node.parentId && !nodeIds.has(node.parentId)) || (node.retestOf && (node.retestOf === node.id || !nodeIds.has(node.retestOf))) || (node.hypothesisId && !hypothesisIds.has(node.hypothesisId)) || (node.report?.purpose.baselineNodeId && !nodeIds.has(node.report.purpose.baselineNodeId)) || node.report?.nextPlan.historyNodeIds.some((nodeId) => !nodeIds.has(nodeId)) || [node.report?.purpose, node.report?.results, node.report?.interpretation, node.report?.trends, node.report?.nextPlan].flatMap((section) => section?.evidenceSourceIds ?? []).some((sourceId) => !sourceIds.has(sourceId)) || node.report?.trends.findings.some((finding) => finding.evidenceSourceIds.some((sourceId) => !sourceIds.has(sourceId))))) throw new Error('evaluation node 참조가 올바르지 않습니다.')
     if (hypotheses.some((hypothesis) => hypothesis.evaluationNodeIds?.some((nodeId) => !nodeIds.has(nodeId)))) throw new Error('failure hypothesis 참조가 올바르지 않습니다.')
     const evidence = evidenceValue.map((value): ProjectEvidenceRecord => { const v = value as Record<string, unknown>; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('evidence record가 올바르지 않습니다.'); const record = { id: id(v.id, 'evidenceId'), evaluationNodeId: id(v.evaluationNodeId, 'evaluationNodeId'), status: status(v.status, 'evidence status'), sourceIds: this.ids(v.sourceIds, 'sourceIds', 200), ...(v.occurredAt === undefined ? {} : { occurredAt: text(v.occurredAt, 'occurredAt', 80) }), ...(v.result === undefined ? {} : { result: text(v.result, 'result', 2_000) }), ...(v.dimensions === undefined ? {} : { dimensions: this.dimensions(v.dimensions) }), ...(v.note === undefined ? {} : { note: text(v.note, 'note', 4_000) }), ...(v.origin === undefined ? {} : { origin: origin(v.origin, 'evidence origin') }) }; if (!nodeIds.has(record.evaluationNodeId) || record.sourceIds.some((sourceId) => !sourceIds.has(sourceId))) throw new Error('evidence record 참조가 올바르지 않습니다.'); return record })
     this.unique(new Set(evidence.map((record) => record.id)), evidence.length, 'evidenceId')

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
@@ -10,7 +10,7 @@ describe('NativeAgentStore', () => {
     const store = new NativeAgentStore(root, (() => { let count = 0; return () => `id-${++count}` })())
     await store.initialize()
     const created = await store.create('project-a', 'VPERI 분석', 'internal')
-    await store.appendMessage(created.id, { role: 'user', content: 'DQ9 경향을 확인해줘' })
+    await store.appendMessage(created.id, { role: 'user', content: 'DQ9 경향을 확인해줘', evaluationStage: 'trends' })
     await store.update(created.id, (session) => {
       session.status = 'running'
       session.lastRequest = { content: 'DQ9 경향을 확인해줘', sourceIds: ['source-a'] }
@@ -22,6 +22,7 @@ describe('NativeAgentStore', () => {
     const session = await reopened.get(created.id)
     expect(session).toMatchObject({ status: 'paused', backend: 'internal' })
     expect(session?.messages.at(-1)?.content).toBe('DQ9 경향을 확인해줘')
+    expect(session?.messages.at(-1)?.evaluationStage).toBe('trends')
     expect(session?.tools[0].summary).toContain('DQ9')
   })
 
@@ -34,6 +35,27 @@ describe('NativeAgentStore', () => {
     await store.appendMessage(created.id, { role: 'user', content: ',         .' })
     expect(await store.list('project-a')).toEqual([])
     expect(await store.get(created.id)).toBeNull()
+  })
+
+  it('retains more than 100 conversations, 500 messages and 300 evidence traces after restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-retention-'))
+    try {
+      const store = new NativeAgentStore(root)
+      const first = await store.create('p', '첫 대화', 'internal')
+      await store.update(first.id, (session) => {
+        session.messages = Array.from({ length: 502 }, (_, index) => ({ id: `m-${index}`, role: index % 2 ? 'assistant' : 'user', content: `메시지 ${index}`, createdAt: new Date(index).toISOString() }))
+        session.tools = Array.from({ length: 302 }, (_, index) => ({ id: `t-${index}`, name: 'log_read_window', label: '근거', state: 'completed', summary: `근거 ${index}`, startedAt: new Date(index).toISOString() }))
+      })
+      for (let index = 0; index < 100; index++) await store.create('p', `후속 ${index}`, 'internal')
+      const reopened = new NativeAgentStore(root)
+      await reopened.initialize()
+      expect(await reopened.list('p')).toHaveLength(101)
+      const restored = await reopened.get(first.id)
+      expect(restored?.messages).toHaveLength(502)
+      expect(restored?.messages[0].content).toBe('메시지 0')
+      expect(restored?.tools).toHaveLength(302)
+      expect(restored?.tools[0].summary).toBe('근거 0')
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('deduplicates rapid identical Ctrl-F observations', async () => {
@@ -60,7 +82,8 @@ describe('NativeAgentStore', () => {
     await search('late old marker', new Date(Date.parse(first.review.createdAt) - 500).toISOString())
     await search('new marker', new Date(Date.parse(first.review.createdAt) + 2_000).toISOString())
     const next = await store.completeEvaluation({ projectId: 'p', sourceId: 's', result: 'PASS' })
-    expect(next.kind).toBe('ignored')
+    expect(next.kind).toBe('review')
+    if (next.kind === 'review') expect(next.review.checks.map((check) => check.query)).toEqual(['new marker'])
   })
 
   it('returns search history by engineer action time even when IPC writes arrive out of order', async () => {

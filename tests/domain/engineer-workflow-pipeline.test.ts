@@ -298,13 +298,17 @@ afterEach(async () => {
 });
 
 describe("Luna engineer workflow pipeline", () => {
-  it("imports, inspects, classifies, compares, exports, and reopens the 48-file corpus locally", async () => {
+  it("imports the 48-file corpus and replays a public synthetic 20-day workload locally", async () => {
     const root = await mkdtemp(join(tmpdir(), "luna-engineer-workflow-pipeline-"));
     temporaryRoots.push(root);
 
-    const manifest = JSON.parse(await readFile(join(corpusRoot, "manifest.json"), "utf8")) as CorpusManifest;
-    expect(manifest.fixtureCount).toBe(48);
-    expect(manifest.axes).toEqual(axes);
+      const manifest = JSON.parse(await readFile(join(corpusRoot, "manifest.json"), "utf8")) as CorpusManifest;
+      expect(manifest.fixtureCount).toBe(48);
+      expect(manifest.axes).toEqual(axes);
+      const corpusLineCount = (await Promise.all(manifest.fixtures.map(async (fixture) => (
+        (await readFile(join(corpusRoot, fixture.relativePath), "utf8")).trimEnd().split("\n").length
+      )))).reduce((sum, lines) => sum + lines, 0);
+      expect(corpusLineCount).toBe(172_800);
 
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
@@ -427,7 +431,13 @@ describe("Luna engineer workflow pipeline", () => {
 
       const evidencePlan = buildRecipeEvidencePlan(rules);
       expect(JSON.stringify(evidencePlan)).not.toMatch(/EXPECTED_RESULT|PAIR_TRANSITION|FAILURE_POINT|SYNTHETIC_METADATA/);
-      const inspected = await artifacts.inspectEvidence({ sources, specs: evidencePlan.specs });
+      const monthReplayStartedAt = performance.now();
+      const monthlyInspections = [] as Awaited<ReturnType<ArtifactService["inspectEvidence"]>>[];
+      for (let batch = 0; batch < 10; batch += 1) {
+        monthlyInspections.push(await artifacts.inspectEvidence({ sources, specs: evidencePlan.specs }));
+      }
+      const monthReplayMs = performance.now() - monthReplayStartedAt;
+      const inspected = monthlyInspections[0];
 
       expect(inspected.sources).toHaveLength(48);
       expect(JSON.stringify(inspected)).not.toContain(root);
@@ -466,6 +476,37 @@ describe("Luna engineer workflow pipeline", () => {
       }
       expect(new Set(evaluations.map(({ evaluation }) => evaluation.result))).toEqual(new Set(resultLabels));
       expect(Object.keys(countBy(evaluations.map(({ evaluation }) => evaluation.result)))).toHaveLength(8);
+
+      const monthlyEvaluations = monthlyInspections.flatMap((inspection, batch) => inspection.sources.map((source) => ({
+        batch,
+        source,
+        evaluation: evaluatePrecomputedEvidence(
+          precomputedEvidenceFromInspection(source, rules, evidencePlan),
+          rules,
+        ),
+      })));
+      expect(monthlyEvaluations).toHaveLength(480);
+      const monthlyOracleMatches = monthlyEvaluations.filter(({ source, evaluation }) => (
+        evaluation.result === fixtureByPath.get(source.relativePath!)?.expectedResult
+      )).length;
+      const monthlyReviewRequired = monthlyEvaluations.filter(({ evaluation }) => (
+        evaluation.result === "UNKNOWN" || evaluation.exceptions.length > 0
+      )).length;
+      expect(monthlyOracleMatches).toBe(480);
+      expect(monthlyReviewRequired).toBe(30);
+      console.info("PUBLIC_SYNTHETIC_MONTH_REPLAY", JSON.stringify({
+        businessDaysEquivalent: 20,
+        replayBatches: 10,
+        logEvaluations: monthlyEvaluations.length,
+        lineEvaluations: corpusLineCount * monthlyInspections.length,
+        resultClasses: new Set(monthlyEvaluations.map(({ evaluation }) => evaluation.result)).size,
+        autoClassified: monthlyEvaluations.length - monthlyReviewRequired,
+        reviewRequired: monthlyReviewRequired,
+        autoClassificationRatePct: Number((((monthlyEvaluations.length - monthlyReviewRequired) / monthlyEvaluations.length) * 100).toFixed(2)),
+        oracleMatches: monthlyOracleMatches,
+        networkCalls: fetchCalls,
+        replayMs: Number(monthReplayMs.toFixed(1)),
+      }));
 
       const comparisonRows = evaluations.map(({ source, evaluation }) => {
         return { parsed: parseFilename(source.relativePath!), evaluation };

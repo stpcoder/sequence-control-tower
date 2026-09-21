@@ -61,6 +61,14 @@ describe('ProjectStore', () => {
     const connected = await store.connectArtifacts({ projectId: project.id, expectedRevision: attached.revision, artifacts: [{ sourceId: 'log-vperi', rootId: attached.folders[0].rootId, artifactId: 'artifact-vperi', relativePath: 'vperi.log' }] })
     const reconnected = await store.connectArtifacts({ projectId: project.id, expectedRevision: connected.revision, artifacts: [{ sourceId: 'log-vperi', rootId: attached.folders[0].rootId, artifactId: 'artifact-vperi', relativePath: 'vperi.log' }] })
     expect(reconnected.revision).toBe(connected.revision)
+    const report = {
+      schemaVersion: 1 as const, revision: 2, createdAt: '2026-08-30T00:00:00.000Z', updatedAt: '2026-08-30T01:00:00.000Z',
+      purpose: { text: '동일 조건 RT 재현', category: 'reproduction' as const, baselineNodeId: 'base', changedConditions: [], fixedConditions: ['Sample', 'Sequence'], confidence: 'high' as const, evidenceSourceIds: ['log-vperi'], state: 'engineer-confirmed' as const },
+      results: { summary: 'TEST_FAIL 1개', total: 1, definitive: 1, byOutcome: { TEST_FAIL: 1 }, unknown: 0, excluded: 0, coverage: 'complete' as const, evidenceSourceIds: ['log-vperi'], state: 'computed' as const },
+      interpretation: { text: '동일 조건에서 DQ9 불량이 재현되었습니다.', findings: ['DQ9 재현'], counterEvidence: [], caveats: [], confidence: 'medium' as const, evidenceSourceIds: ['log-vperi'], state: 'engineer-confirmed' as const },
+      trends: { text: 'DQ9 집중 여부는 추가 Sample 비교가 필요합니다.', findings: [], confidence: 'low' as const, evidenceSourceIds: ['log-vperi'], state: 'engineer-confirmed' as const },
+      nextPlan: { text: '온도만 변경한 판별 평가를 수행합니다.', objective: '온도 기인성 확인', changedVariable: 'temperature', levels: ['Cold', 'Hot'], heldConditions: ['Sample', 'VDD'], samples: ['DHCST-89'], repeats: 3, successCriteria: ['동일 DQ9 재현율 비교'], historyNodeIds: ['base'], confidence: 'medium' as const, evidenceSourceIds: ['log-vperi'], state: 'engineer-confirmed' as const },
+    }
     const payload = {
       projectId: project.id, expectedRevision: reconnected.revision,
       lpddrDevelopmentContext: { product: 'LPDDR6', skew: 'SS', phase: 'bring-up', customer: 'Acme', targetDevice: 'Orion', densityGb: 16, nominalVoltage: 1.1 },
@@ -68,7 +76,7 @@ describe('ProjectStore', () => {
       failureHypotheses: [{ id: 'h-dq9', title: 'VPERI DQ9', origin: 'engineer-confirmed' as const, evaluationNodeIds: ['dq9'] }],
       evaluationNodes: [
         { id: 'base', name: 'baseline', purpose: 'screening' as const, relation: 'baseline' as const, relationConfidence: 1, relationReason: '최초 불량', dimensions: { bl: 16, temperatureC: 85, die: '03', socVendor: 'qualcomm' as const, socModel: 'SM-8975', bootProfileId: 'qualcomm-default' }, sequenceSignature: 'seq:vperi', attemptNo: 1, status: 'fail' as const },
-        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', evaluationScopeId: attached.folders[0].rootId, name: 'DQ9 RT', purpose: 'reproduction' as const, relation: 'retest' as const, relationConfidence: .96, relationReason: '같은 Sample·Sequence·조건', dimensions: { dq: 9, testMode: 'VPERI' }, interpretation: 'DQ9에서 동일 조건 재평가도 실패했습니다.', authorship: 'agent' as const, reviewState: 'confirmed' as const, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
+        { id: 'dq9', parentId: 'base', retestOf: 'base', hypothesisId: 'h-dq9', branchId: 'vperi', evaluationScopeId: attached.folders[0].rootId, name: 'DQ9 RT', purpose: 'reproduction' as const, relation: 'retest' as const, relationConfidence: .96, relationReason: '같은 Sample·Sequence·조건', dimensions: { dq: 9, testMode: 'VPERI' }, interpretation: 'DQ9에서 동일 조건 재평가도 실패했습니다.', report, authorship: 'agent' as const, reviewState: 'confirmed' as const, sequenceSignature: 'seq:vperi', attemptNo: 2, status: 'fail' as const },
       ],
       evidenceRecords: [{ id: 'e-dq9', evaluationNodeId: 'dq9', status: 'fail' as const, sourceIds: ['log-vperi'], result: 'repeatable fail' }],
     }
@@ -144,5 +152,28 @@ describe('ProjectStore', () => {
     const persisted = JSON.parse(await readFile(join(dataRoot, 'metadata', 'projects.json'), 'utf8'))
     expect(persisted.projects.broken.lpddrDevelopmentContext).toEqual({})
     expect(persisted.projects.broken.failureHypotheses).toEqual([])
+  })
+})
+
+describe('atomic layout and harness presets', () => {
+  it('commits both related presets once and preserves both on a validation failure', async () => {
+    const { mergeProjectPresets } = await import('../../src/state/projectPresets')
+    const root = await tempRoot(); const store = new ProjectStore(root)
+    const project = await store.create({ name: 'Atomic view' })
+    const presets = mergeProjectPresets(project, [
+      { id: 'layout', name: 'Layout', format: 'json', options: { rows: ['sample'] } },
+      { id: 'harness', name: 'Harness', format: 'json', options: { columns: ['result'] } },
+    ])
+    const saved = await store.save({ projectId: project.id, expectedRevision: project.revision, exportPresets: presets })
+    expect(saved.revision).toBe(project.revision + 1)
+    expect(saved.exportPresets).toHaveLength(2)
+    const invalid = mergeProjectPresets(saved, [
+      { id: 'layout', name: 'Changed', format: 'json', options: { rows: ['vdd'] } },
+      { id: 'harness', name: 'Harness', format: 'json', options: { invalid: new Date() } as unknown as Record<string, never> },
+    ])
+    await expect(store.save({ projectId: saved.id, expectedRevision: saved.revision, exportPresets: invalid })).rejects.toThrow('JSON')
+    const restarted = await new ProjectStore(root).get(saved.id)
+    expect(restarted?.exportPresets).toEqual(saved.exportPresets)
+    expect(restarted?.revision).toBe(saved.revision)
   })
 })

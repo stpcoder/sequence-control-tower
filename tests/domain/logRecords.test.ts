@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateRecordTrends, projectLogRecords, type LogResultRecord } from '../../src/state/logRecords'
+import { aggregateRecordTrends, evaluationScopeOptions, inferResultCandidate, projectLogRecords, recordsInEvaluationScope, resolveEvaluationScopeId, type LogResultRecord } from '../../src/state/logRecords'
 
 function record(id: string, testMode: string, result: LogResultRecord['result']): LogResultRecord {
   return {
     id,
+    evaluationScopeId: 'logs',
     fileName: `${id}.log`,
     folder: 'logs',
     relativePath: `${id}.log`,
@@ -32,6 +33,45 @@ describe('log records metadata fallback', () => {
 
     expect(record.sample).toEqual({ value: 'SMP-001', state: 'candidate' })
     expect(record.grid).toEqual({ value: null, state: 'missing' })
+  })
+
+  it('keeps Training Fail authoritative when recovery also emits reboot and FAIL markers', () => {
+    expect(inferResultCandidate({
+      id: 'training-recovery',
+      name: 'training-recovery.log',
+      text: 'TRAINING_FAIL\nWATCHDOG_RESET\nTERMINAL_RESULT=SYSTEM_REBOOT\n@FAIL',
+    })).toMatchObject({ result: 'TRAINING_FAIL' })
+  })
+})
+
+describe('evaluation folder boundary', () => {
+  it('uses rootId rather than a visible folder label and never mixes the default scope', () => {
+    const rows = projectLogRecords([
+      { id: 'a', rootId: 'root-a', origin: 'logs', name: 'a.log', text: '@PASS' },
+      { id: 'b', rootId: 'root-b', origin: 'logs', name: 'b.log', text: '@FAIL' },
+    ])
+    expect(rows.map((row) => row.evaluationScopeId)).toEqual(['root-a', 'root-b'])
+    expect(evaluationScopeOptions(rows)).toHaveLength(2)
+    expect(recordsInEvaluationScope(rows, 'root-a').map((row) => row.id)).toEqual(['a'])
+  })
+
+  it('uses the project evaluation folder id when the artifact root id differs', () => {
+    const rows = projectLogRecords(
+      [{ id: 'a', rootId: 'artifact-root-a', origin: 'folder-a', name: 'a.log', text: '@PASS' }],
+      {}, {}, {}, {}, { a: 'project-root-a' },
+    )
+
+    expect(rows[0].evaluationScopeId).toBe('project-root-a')
+    expect(recordsInEvaluationScope(rows, 'project-root-a').map((row) => row.id)).toEqual(['a'])
+  })
+
+  it('lets the current workbench folder replace a stale page-local folder selection', () => {
+    const rows = [
+      { ...record('a', 'DIAG', 'PASS'), evaluationScopeId: 'root-a', folder: 'folder-a' },
+      { ...record('b', 'DIAG', 'PASS'), evaluationScopeId: 'root-b', folder: 'folder-b' },
+    ]
+    expect(resolveEvaluationScopeId(rows, 'root-b', 'root-a')).toBe('root-a')
+    expect(recordsInEvaluationScope(rows, resolveEvaluationScopeId(rows, 'root-b', 'root-a')).map((row) => row.id)).toEqual(['a'])
   })
 })
 

@@ -1,3 +1,7 @@
+import { inspectionSummary, type InspectionStates } from '../state/inspectionStatus'
+import { InspectionNotice } from '../components/InspectionNotice'
+import { useViewDraft, useViewScopeGuard } from '../state/viewDrafts'
+import { mergeProjectPresets } from '../state/projectPresets'
 import {
   lazy,
   Suspense,
@@ -32,6 +36,8 @@ import {
 import type { ResultLabel } from '../domain/workbench'
 import {
   buildPivotGrid,
+  defaultEvaluationScopeId,
+  evaluationScopeOptions,
   EXPORT_COLUMN_DEFINITIONS,
   exportCellValue,
   filterLogRecords,
@@ -42,6 +48,9 @@ import {
   serializePivotGridTsv,
   summarizeFailureAddressEvents,
   isFailureAddressAggregation,
+  PROJECT_COMPARISON_SCOPE_ID,
+  recordsInEvaluationScope,
+  resolveEvaluationScopeId,
   type LogRecordExportColumn,
   type LogRecordFilters,
   type LogResultRecord,
@@ -69,12 +78,23 @@ import {
   type AnalysisViewPreset,
   type AnalysisVisualization,
 } from '../domain/analysis-view'
+import {
+  EVALUATION_HARNESS_PRESET_ID,
+  evaluationHarnessesFromPreset,
+  evaluationHarnessForScope,
+  evaluationHarnessPreset,
+  evaluationHarnessWithLayout,
+  upsertEvaluationHarness,
+} from '../state/evaluationHarness'
 
 const AnalysisChart = lazy(async () => ({
   default: (await import('../components/AnalysisChart')).AnalysisChart,
 }))
 
 interface PatternsViewProps {
+  stageInspectionStates?: InspectionStates
+  addressInspectionStates?: InspectionStates
+  onRetryInspections?: () => void
   records: readonly LogResultRecord[]
   onOpenFile: (fileId: string) => void
   project: ProjectSnapshot | null
@@ -83,11 +103,13 @@ interface PatternsViewProps {
   onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
   agentViewRequest?: NativeAgentAnalysisViewProposal | null
   onAgentViewRequestConsumed?: () => void
+  selectedEvaluationScopeId?: string
+  onSelectedEvaluationScopeChange?: (evaluationScopeId: string) => void
 }
 
 const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }> = [
-  { value: 'sample', label: '자재 (Sample)', group: '자재' },
-  { value: 'skew', label: 'SKEW', group: '자재' },
+  { value: 'sample', label: 'Sample', group: '자재' },
+  { value: 'skew', label: 'Skew', group: '자재' },
   { value: 'lot', label: 'Lot', group: '자재' },
   { value: 'die', label: 'Die', group: '자재' },
   { value: 'temperature', label: '온도 (°C)', group: '평가 조건' },
@@ -98,11 +120,11 @@ const DIMENSIONS: Array<{ value: PivotDimension; label: string; group: string }>
   { value: 'testMode', label: 'Test Mode', group: '평가 조건' },
   { value: 'frequencyMHz', label: '주파수 (MHz)', group: '평가 조건' },
   { value: 'pattern', label: 'Pattern', group: '평가 조건' },
-  { value: 'timingSkewPs', label: 'Timing SKEW (ps)', group: '평가 조건' },
+  { value: 'timingSkewPs', label: 'Timing Skew (ps)', group: '평가 조건' },
   { value: 'socModel', label: '실장기 SoC', group: '실장기' },
   { value: 'equipmentChannel', label: '실장기 채널', group: '실장기' },
   { value: 'eccMode', label: 'ECC', group: '평가 조건' },
-  { value: 'customCondition', label: '사용자 조건', group: '평가 조건' },
+  { value: 'customCondition', label: '평가 제목', group: '평가 조건' },
   { value: 'evaluationStep', label: '평가 Step', group: '평가 조건' },
   { value: 'dq', label: 'DQ', group: 'Fail 위치' },
   { value: 'bl', label: 'BL', group: 'Fail 위치' },
@@ -146,6 +168,7 @@ const EVALUATION_PRIMARY = new Set<PivotAggregation>(['pass_fail', 'fail_count',
 const ADDRESS_PRIMARY = new Set<PivotAggregation>(['fail_event_count', 'fail_source_count', 'fail_event_share'])
 const FAIL_RESULTS: ReadonlySet<ResultLabel> = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
 const RESULT_LIMIT = 150
+const PIVOT_ROW_AXIS_WIDTH = 132
 
 type AxisGroup = 'rows' | 'columns'
 type DraggedAxis = { group: AxisGroup; index: number }
@@ -247,14 +270,17 @@ async function copyText(contents: string): Promise<void> {
   if (!copied) throw new Error('클립보드에 복사하지 못했습니다.')
 }
 
-function formatPivotValue(value: number, aggregation: PivotAggregation, breakdown?: PivotCell['breakdown'], failureAddress?: PivotCell['failureAddress']): string {
+export function formatPivotValue(value: number, aggregation: PivotAggregation, breakdown?: PivotCell['breakdown'], failureAddress?: PivotCell['failureAddress']): string {
   if (aggregation === 'pass_fail') {
     const pass = breakdown?.passCount ?? 0
     const fail = breakdown?.failCount ?? 0
-    if (!pass && !fail) return '미확인'
-    if (!fail) return pass === 1 ? 'PASS' : `PASS ${pass.toLocaleString('ko-KR')}`
-    if (!pass) return `${fail === 1 ? 'FAIL' : `FAIL ${fail.toLocaleString('ko-KR')}`}${breakdown?.topFailureSignature ? ` · ${breakdown.topFailureSignature}` : ''}`
-    return `PASS ${pass.toLocaleString('ko-KR')} · FAIL ${fail.toLocaleString('ko-KR')}`
+    const parts = [
+      ...(pass ? [pass === 1 ? 'PASS' : `PASS ${pass.toLocaleString('ko-KR')}`] : []),
+      ...(fail ? [`${fail === 1 ? 'FAIL' : `FAIL ${fail.toLocaleString('ko-KR')}`}${breakdown?.topFailureSignature ? ` · ${breakdown.topFailureSignature}` : ''}`] : []),
+      ...(breakdown?.pendingCount ? [`미확인 ${breakdown.pendingCount}`] : []),
+      ...(breakdown?.excludedCount ? [`제외 ${breakdown.excludedCount}`] : []),
+    ]
+    return parts.join(' · ') || '—'
   }
   if (aggregation === 'fail_rate') return `${breakdown?.failCount ?? 0}/${breakdown?.definitiveCount ?? 0} · ${value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
   if (aggregation === 'fail_count') return `FAIL ${value.toLocaleString('ko-KR')}`
@@ -279,11 +305,12 @@ function DimensionPicker({ selected, disabled, onPick }: { selected: readonly Pi
   </details>
 }
 
-function AxisWell({ group, label, axes, selected, dragged, onDrag, onDrop, onRemove, onAdd, onKeyMove }: {
+function AxisWell({ group, label, axes, selected, protectedAxes = [], dragged, onDrag, onDrop, onRemove, onAdd, onKeyMove }: {
   group: AxisGroup
   label: string
   axes: readonly PivotDimension[]
   selected: readonly PivotDimension[]
+  protectedAxes?: readonly PivotDimension[]
   dragged: DraggedAxis | null
   onDrag: (value: DraggedAxis | null) => void
   onDrop: (from: DraggedAxis, toGroup: AxisGroup, toIndex: number) => void
@@ -313,7 +340,7 @@ function AxisWell({ group, label, axes, selected, dragged, onDrag, onDrop, onRem
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => drop(event, index)}
         onKeyDown={(event) => onKeyMove(group, index, event)}
-      ><GripVertical size={13} aria-hidden="true" /><span>{DIMENSION_LABEL[axis]}</span><button type="button" onClick={() => onRemove(index)} aria-label={`${DIMENSION_LABEL[axis]} 제거`}><X size={13} /></button></div>)}
+      ><GripVertical size={13} aria-hidden="true" /><span>{DIMENSION_LABEL[axis]}</span>{protectedAxes.includes(axis) ? null : <button type="button" onClick={() => onRemove(index)} aria-label={`${DIMENSION_LABEL[axis]} 제거`}><X size={13} /></button>}</div>)}
       {!axes.length ? <span className="pattern-axis-empty">전체</span> : null}
       <DimensionPicker selected={selected} disabled={axes.length >= MAX_PATTERN_AXES} onPick={onAdd} />
     </div>
@@ -324,30 +351,52 @@ export function isProjectRevisionConflict(error: unknown): boolean {
   return error instanceof Error && (error.message.includes('PROJECT_REVISION_CONFLICT') || error.message.includes('최신 revision'))
 }
 
-export function PatternsView({ records, onOpenFile, project, onProjectUpdated, onNotify, onAnalyzeContext, agentViewRequest, onAgentViewRequestConsumed }: PatternsViewProps) {
-  const [rowAxes, setRowAxes] = useState<PatternLayout['rowAxes']>(DEFAULT_PATTERN_LAYOUT.rowAxes)
-  const [columnAxes, setColumnAxes] = useState<PatternLayout['columnAxes']>(DEFAULT_PATTERN_LAYOUT.columnAxes)
-  const [aggregation, setAggregation] = useState<PivotAggregation>(DEFAULT_PATTERN_LAYOUT.aggregation)
-  const [visualization, setVisualization] = useState<AnalysisVisualization>(DEFAULT_PATTERN_LAYOUT.visualization)
-  const [dataBasis, setDataBasis] = useState<AnalysisDataBasis>(DEFAULT_PATTERN_LAYOUT.dataBasis)
-  const [resultFilter, setResultFilter] = useState<ResultLabel | 'all'>(DEFAULT_PATTERN_LAYOUT.resultFilter)
-  const [folderFilter, setFolderFilter] = useState(DEFAULT_PATTERN_LAYOUT.folderFilter)
-  const [failOnly, setFailOnly] = useState(DEFAULT_PATTERN_LAYOUT.failOnly)
-  const [unknownMetadataOnly, setUnknownMetadataOnly] = useState(DEFAULT_PATTERN_LAYOUT.unknownMetadataOnly)
+function layoutWithinEvaluationBoundary(layout: PatternLayout, comparisonMode: boolean): PatternLayout {
+  const withoutFolder = {
+    ...layout,
+    folderFilter: 'all',
+    rowAxes: layout.rowAxes.filter((axis) => axis !== 'folder'),
+    columnAxes: layout.columnAxes.filter((axis) => axis !== 'folder'),
+  }
+  if (!comparisonMode) return withoutFolder
+  return {
+    ...withoutFolder,
+    rowAxes: (['folder' as PivotDimension, ...withoutFolder.rowAxes]).slice(0, MAX_PATTERN_AXES),
+  }
+}
+
+export function PatternsView({ stageInspectionStates, addressInspectionStates, onRetryInspections, records, onOpenFile, project, onProjectUpdated, onNotify, onAnalyzeContext, agentViewRequest, onAgentViewRequestConsumed, selectedEvaluationScopeId, onSelectedEvaluationScopeChange }: PatternsViewProps) {
+  const [scopeId, setScopeId] = useViewDraft<string>(`${project?.id ?? 'preview'}:PatternsView:scope`, selectedEvaluationScopeId ?? '')
+  const scopeOptions = useMemo(() => evaluationScopeOptions(records), [records])
+  const effectiveScopeId = resolveEvaluationScopeId(records, scopeId, selectedEvaluationScopeId)
+  const comparisonMode = effectiveScopeId === PROJECT_COMPARISON_SCOPE_ID
+  const scopeRecords = useMemo(() => recordsInEvaluationScope(records, effectiveScopeId), [effectiveScopeId, records])
+  const draftKey = `${project?.id ?? 'preview'}:${effectiveScopeId ?? ''}:PatternsView`
+  const captureViewScope = useViewScopeGuard(draftKey)
+  const saveInFlight = useRef(false)
+  const initialLayout = layoutWithinEvaluationBoundary(patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived), effectiveScopeId), comparisonMode)
+  const [rowAxes, setRowAxes] = useViewDraft<PatternLayout['rowAxes']>(draftKey + ':rowAxes', initialLayout.rowAxes)
+  const [columnAxes, setColumnAxes] = useViewDraft<PatternLayout['columnAxes']>(draftKey + ':columnAxes', initialLayout.columnAxes)
+  const [aggregation, setAggregation] = useViewDraft<PivotAggregation>(draftKey + ':aggregation', initialLayout.aggregation)
+  const [visualization, setVisualization] = useViewDraft<AnalysisVisualization>(draftKey + ':visualization', initialLayout.visualization)
+  const [dataBasis, setDataBasis] = useViewDraft<AnalysisDataBasis>(draftKey + ':dataBasis', initialLayout.dataBasis)
+  const [resultFilter, setResultFilter] = useViewDraft<ResultLabel | 'all'>(draftKey + ':resultFilter', initialLayout.resultFilter)
+  const [folderFilter, setFolderFilter] = useViewDraft(draftKey + ':folderFilter', initialLayout.folderFilter)
+  const [failOnly, setFailOnly] = useViewDraft(draftKey + ':failOnly', initialLayout.failOnly)
+  const [unknownMetadataOnly, setUnknownMetadataOnly] = useViewDraft(draftKey + ':unknownMetadataOnly', initialLayout.unknownMetadataOnly)
   const [savingLayout, setSavingLayout] = useState(false)
-  const [markedCellKeys, setMarkedCellKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const [markedCellKeys, setMarkedCellKeys] = useViewDraft<ReadonlySet<string>>(draftKey + ':marking', new Set())
   const [draggedAxis, setDraggedAxis] = useState<DraggedAxis | null>(null)
   const [rawDetailsOpen, setRawDetailsOpen] = useState(false)
-  const [agentPreview, setAgentPreview] = useState<{ id: string; previous: PatternLayout; proposal: NativeAgentAnalysisViewProposal } | null>(null)
+  const [agentPreview, setAgentPreview] = useViewDraft<{ id: string; previous: PatternLayout; proposal: NativeAgentAnalysisViewProposal } | null>(draftKey + ':agent', null)
+
   const chartExportRef = useRef<(() => string | null) | null>(null)
+  const harnesses = useMemo(() => evaluationHarnessesFromPreset(project?.exportPresets.find((item) => item.id === EVALUATION_HARNESS_PRESET_ID && !item.archived)), [project?.exportPresets])
+  const activeHarness = useMemo(() => comparisonMode ? undefined : evaluationHarnessForScope(harnesses, effectiveScopeId), [comparisonMode, effectiveScopeId, harnesses])
 
   useEffect(() => {
-    const layout = patternLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID && !preset.archived))
-    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation); setVisualization(layout.visualization); setDataBasis(layout.dataBasis)
-    setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
-    setMarkedCellKeys(new Set())
-    setAgentPreview(null)
-  }, [project?.id])
+    setScopeId((current) => resolveEvaluationScopeId(records, current, selectedEvaluationScopeId) ?? '')
+  }, [project?.id, records, selectedEvaluationScopeId])
 
   useEffect(() => {
     if (!agentViewRequest || agentPreview?.id === agentViewRequest.id) return
@@ -356,7 +405,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
       previous: { rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly },
       proposal: agentViewRequest,
     })
-    const next = patternLayoutWithAgentProposal({ rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, agentViewRequest)
+    const next = layoutWithinEvaluationBoundary(patternLayoutWithAgentProposal({ rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, agentViewRequest), comparisonMode)
     setRowAxes(next.rowAxes); setColumnAxes(next.columnAxes); setAggregation(next.aggregation); setVisualization(next.visualization); setDataBasis(next.dataBasis)
     setResultFilter(next.resultFilter); setFolderFilter(next.folderFilter); setFailOnly(next.failOnly); setUnknownMetadataOnly(next.unknownMetadataOnly)
     setMarkedCellKeys(new Set())
@@ -364,16 +413,21 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }, [agentViewRequest?.id])
 
   const saveLayout = async () => {
-    if (!project || !window.sequenceIntelligence?.projects || savingLayout) return
+    if (saveInFlight.current || !project || !window.sequenceIntelligence?.projects || savingLayout) return
+    saveInFlight.current = true
+    const isCurrentView = captureViewScope()
     setSavingLayout(true)
     try {
       const api = window.sequenceIntelligence.projects
-      const layout = { rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }
-      const persist = (target: ProjectSnapshot) => api.saveExportPreset({
-        projectId: target.id,
-        expectedRevision: target.revision,
-        preset: patternLayoutPreset(layout, target.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID)),
-      })
+      const layout = layoutWithinEvaluationBoundary({ rowAxes, columnAxes, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, comparisonMode)
+      const persist = async (target: ProjectSnapshot) => {
+        const updates = [patternLayoutPreset(layout, target.exportPresets.find((preset) => preset.id === PATTERN_LAYOUT_PRESET_ID), effectiveScopeId)]
+        const storedHarnessPreset = target.exportPresets.find((item) => item.id === EVALUATION_HARNESS_PRESET_ID)
+        const storedHarnesses = evaluationHarnessesFromPreset(storedHarnessPreset)
+        const selectedHarness = comparisonMode ? undefined : evaluationHarnessForScope(storedHarnesses, effectiveScopeId)
+        if (selectedHarness) updates.push(evaluationHarnessPreset(upsertEvaluationHarness(storedHarnesses, evaluationHarnessWithLayout(selectedHarness, layout)), storedHarnessPreset))
+        return api.save({ projectId: target.id, expectedRevision: target.revision, exportPresets: mergeProjectPresets(target, updates) })
+      }
       let next: ProjectSnapshot
       try { next = await persist(project) }
       catch (error) {
@@ -383,21 +437,22 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         next = await persist(refreshed)
       }
       onProjectUpdated(next)
+      if (!isCurrentView()) return
       setAgentPreview(null)
-      onNotify('표 구성을 저장했습니다.', 'success')
+      onNotify(comparisonMode ? '폴더 비교용 표 구성을 저장했습니다.' : '현재 폴더의 표 구성을 저장했습니다.', 'success')
     } catch (error) {
+      if (!isCurrentView()) return
       onNotify(error instanceof Error ? `구성을 저장하지 못했습니다: ${error.message}` : '구성을 저장하지 못했습니다.', 'error')
-    } finally { setSavingLayout(false) }
+    } finally { saveInFlight.current = false; setSavingLayout(false) }
   }
 
-  const folders = useMemo(() => [...new Set(records.map((row) => row.folder))].sort((a, b) => a.localeCompare(b, 'ko-KR')), [records])
-  const resultChoices = useMemo(() => [...new Set(records.map((row) => row.result))], [records])
-  const filters = useMemo<LogRecordFilters>(() => ({ query: '', result: resultFilter, review: 'all', folder: folderFilter }), [folderFilter, resultFilter])
-  const scopedRecords = useMemo(() => filterLogRecords(records, filters).filter((row) => {
+  const resultChoices = useMemo(() => [...new Set(scopeRecords.map((row) => row.result))], [scopeRecords])
+  const filters = useMemo<LogRecordFilters>(() => ({ query: '', result: resultFilter, review: 'all', folder: 'all' }), [resultFilter])
+  const scopedRecords = useMemo(() => filterLogRecords(scopeRecords, filters).filter((row) => {
     if (failOnly && !FAIL_RESULTS.has(row.result)) return false
     if (unknownMetadataOnly && ![row.sample, row.temperature, row.vdd, row.grid].some((value) => value.value === null)) return false
     return true
-  }), [failOnly, filters, records, unknownMetadataOnly])
+  }), [failOnly, filters, scopeRecords, unknownMetadataOnly])
   const activeDimensions = [...rowAxes, ...columnAxes]
   const primaryAggregationSet = dataBasis === 'failure_address' ? ADDRESS_PRIMARY : EVALUATION_PRIMARY
   const primaryAggregations = AGGREGATIONS.filter((item) => primaryAggregationSet.has(item.value))
@@ -437,9 +492,9 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
 
   const visibleRows = useMemo(() => markedCells.length ? scopedRecords.filter((row) => markedSourceIds.has(row.id)) : scopedRecords, [markedCells.length, markedSourceIds, scopedRecords])
   const visibleFailureAddresses = useMemo(() => summarizeFailureAddressEvents(visibleRows), [visibleRows])
-  const hasFilters = resultFilter !== 'all' || folderFilter !== 'all' || failOnly || unknownMetadataOnly
+  const hasFilters = resultFilter !== 'all' || failOnly || unknownMetadataOnly
   const hasSelection = markedCells.length > 0
-  const unknownActiveDimensions = activeDimensions.filter((dimension) => scopedRecords.every((row) => {
+  const unknownActiveDimensions = !scopedRecords.length ? [] : activeDimensions.filter((dimension) => scopedRecords.every((row) => {
     if (dimension === 'run') return !row.run
     if (dataBasis === 'failure_address' && FAILURE_ADDRESS_DIMENSIONS.has(dimension)) {
       return !(row.failureAddressEvents ?? []).some((event) => {
@@ -471,7 +526,8 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   }
 
   const setAxes = (nextRows: PivotDimension[], nextColumns: PivotDimension[]) => {
-    setRowAxes(nextRows); setColumnAxes(nextColumns); clearSelection()
+    const bounded = layoutWithinEvaluationBoundary({ rowAxes: nextRows, columnAxes: nextColumns, aggregation, visualization, dataBasis, resultFilter, folderFilter, failOnly, unknownMetadataOnly }, comparisonMode)
+    setRowAxes(bounded.rowAxes); setColumnAxes(bounded.columnAxes); clearSelection()
   }
   const removeAxis = (group: AxisGroup, index: number) => {
     const nextRows = [...rowAxes], nextColumns = [...columnAxes]
@@ -533,6 +589,8 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     dataBasis === 'evaluation' || ['cross_table', 'heatmap', 'bar', 'bar_horizontal'].includes(item),
   )
   const VisualizationIcon = VISUALIZATION_ICONS[visualization]
+  const inspectionIncomplete = inspectionSummary(stageInspectionStates, scopeRecords).incomplete || inspectionSummary(addressInspectionStates, scopeRecords).incomplete
+
   const pivotExportOptions = {
     rowTotals: grid.rows.map((row) => { const cell = rowTotalByKey.get(row.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress) }),
     columnTotals: grid.columns.map((column) => { const cell = columnTotalByKey.get(column.key); return formatPivotValue(cell?.value ?? 0, aggregation, cell?.breakdown, cell?.failureAddress) }),
@@ -542,6 +600,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
   const projectFileName = safeExportName(project?.name ?? 'sequence-control-tower')
   const closeShareMenu = (target: HTMLElement) => target.closest('details')?.removeAttribute('open')
   const copyPivot = async (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     try {
       await copyText(serializePivotGridTsv(grid, rowLabels, pivotExportOptions))
       closeShareMenu(target)
@@ -549,28 +608,33 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     } catch (error) { onNotify(error instanceof Error ? error.message : '표를 복사하지 못했습니다.', 'error') }
   }
   const downloadPivot = (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     downloadText(serializePivotGridCsv(grid, rowLabels, pivotExportOptions), `${projectFileName}-analysis-table.csv`)
     closeShareMenu(target)
     onNotify('현재 표를 CSV로 저장했습니다.', 'success')
   }
   const downloadRaw = (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     const columns = analysisExportColumns(scopedRecords, activeDimensions)
     downloadText(serializeLogRecordsCsv(scopedRecords, columns), `${projectFileName}-spotfire-data.csv`)
     closeShareMenu(target)
     onNotify(`${scopedRecords.length.toLocaleString()}개 평가 결과를 CSV로 저장했습니다.`, 'success')
   }
   const downloadFailureAddresses = (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     downloadText(serializeFailureAddressEventsCsv(visibleRows), `${projectFileName}-fail-address-events.csv`)
     closeShareMenu(target)
     onNotify(`Fail 주소 이벤트 ${visibleFailureAddresses.eventCount.toLocaleString()}회를 CSV로 저장했습니다.`, 'success')
   }
   const downloadSelected = (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     const columns = analysisExportColumns(visibleRows, activeDimensions)
     downloadText(serializeLogRecordsCsv(visibleRows, columns), `${projectFileName}-selected-data.csv`)
     closeShareMenu(target)
     onNotify(`${visibleRows.length.toLocaleString()}개 선택 로그를 CSV로 저장했습니다.`, 'success')
   }
   const downloadChart = (target: HTMLElement) => {
+    if (inspectionIncomplete) { onNotify('검사 실패 또는 진행 중인 로그가 있습니다. 검사를 완료한 뒤 내보내세요.', 'info'); return }
     const image = chartExportRef.current?.()
     if (!image) return
     const anchor = document.createElement('a')
@@ -581,7 +645,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     onNotify('현재 시각화를 PNG로 저장했습니다.', 'success')
   }
   const analyzeView = () => {
-    if (!onAnalyzeContext) return
+    if (!onAnalyzeContext || inspectionIncomplete) return
     const rows = hasSelection ? visibleRows : scopedRecords
     onAnalyzeContext(analysisViewAgentContext({
       rows,
@@ -623,22 +687,40 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
     closeShareMenu(target)
   }
 
+  const applyHarnessOutput = () => {
+    if (!activeHarness) return
+    const layout = layoutWithinEvaluationBoundary(activeHarness.output.layout, comparisonMode)
+    setRowAxes(layout.rowAxes); setColumnAxes(layout.columnAxes); setAggregation(layout.aggregation); setVisualization(layout.visualization); setDataBasis(layout.dataBasis)
+    setResultFilter(layout.resultFilter); setFolderFilter(layout.folderFilter); setFailOnly(layout.failOnly); setUnknownMetadataOnly(layout.unknownMetadataOnly)
+    setMarkedCellKeys(new Set())
+    onNotify(`${activeHarness.name}의 분석 구성을 적용했습니다.`, 'success')
+  }
+
   return <div className="data-view patterns-view">
     <header className="data-view-header"><div><h1>결과 정리</h1></div><div className="data-actions pattern-toolbar">
       <details className="pattern-share"><summary><Share2 size={16} />공유<ChevronDown size={14} /></summary><div className="pattern-share-menu">
         <div className="pattern-share-summary"><strong>{rowLabels.join(' · ')} × {columnAxes.length ? columnAxes.map((axis) => DIMENSION_LABEL[axis]).join(' · ') : '전체'}</strong><span>{AGGREGATIONS.find((item) => item.value === aggregation)?.label}</span></div>
-        <button type="button" onClick={(event) => void copyPivot(event.currentTarget)}><Clipboard size={16} /><span><b>표 복사</b><small>Excel·메신저에 붙여넣기</small></span></button>
-        <button type="button" onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 왼쪽·상단 축 구성</small></span></button>
-        {visualization !== 'cross_table' ? <button type="button" onClick={(event) => downloadChart(event.currentTarget)}><Download size={16} /><span><b>현재 시각화 PNG</b><small>보고서·메신저 공유</small></span></button> : null}
-        {hasSelection ? <button type="button" onClick={(event) => downloadSelected(event.currentTarget)}><Download size={16} /><span><b>선택 로그 CSV</b><small>선택한 셀의 원본 행</small></span></button> : null}
-        {visibleFailureAddresses.eventCount ? <button type="button" onClick={(event) => downloadFailureAddresses(event.currentTarget)}><Download size={16} /><span><b>Fail 주소 CSV</b><small>주소 이벤트 1회당 1행</small></span></button> : null}
-        <button type="button" onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>평가 결과 CSV</b><small>로그 1개당 1행 · 조건과 판정</small></span></button>
+        <button type="button" disabled={inspectionIncomplete} onClick={(event) => void copyPivot(event.currentTarget)}><Clipboard size={16} /><span><b>표 복사</b><small>Excel·메신저에 붙여넣기</small></span></button>
+        <button type="button" disabled={inspectionIncomplete} onClick={(event) => downloadPivot(event.currentTarget)}><Download size={16} /><span><b>현재 표 CSV</b><small>화면의 왼쪽·상단 축 구성</small></span></button>
+        {visualization !== 'cross_table' ? <button type="button" disabled={inspectionIncomplete} onClick={(event) => downloadChart(event.currentTarget)}><Download size={16} /><span><b>현재 시각화 PNG</b><small>보고서·메신저 공유</small></span></button> : null}
+        {hasSelection ? <button type="button" disabled={inspectionIncomplete} onClick={(event) => downloadSelected(event.currentTarget)}><Download size={16} /><span><b>선택 로그 CSV</b><small>선택한 셀의 원본 행</small></span></button> : null}
+        {visibleFailureAddresses.eventCount ? <button type="button" disabled={inspectionIncomplete} onClick={(event) => downloadFailureAddresses(event.currentTarget)}><Download size={16} /><span><b>Fail 주소 CSV</b><small>주소 이벤트 1회당 1행</small></span></button> : null}
+        <button type="button" disabled={inspectionIncomplete} onClick={(event) => downloadRaw(event.currentTarget)}><Download size={16} /><span><b>평가 결과 CSV</b><small>로그 1개당 1행 · 조건과 판정</small></span></button>
       </div></details>
       <button onClick={() => void saveLayout()} disabled={!project || savingLayout}><Save size={16} />{savingLayout ? '저장 중…' : '구성 저장'}</button>
       {hasFilters || hasSelection ? <button onClick={clearAll}><FilterX size={15} />초기화</button> : null}
     </div></header>
 
-    {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : !scopedRecords.length ? <div className="data-empty pattern-empty"><strong>조건에 맞는 로그가 없습니다.</strong><span>필터를 초기화해 보세요.</span></div> : <>
+    <InspectionNotice label="단계 검사" states={stageInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
+    <InspectionNotice label="Fail 주소 검사" states={addressInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
+    {visibleFailureAddresses.truncated ? <div className="inspection-notice" role="status">일부 로그가 Fail 주소 검사 상한에 도달했습니다. 주소 집계와 CSV에는 조회된 이벤트만 포함됩니다.</div> : null}
+
+    {activeHarness ? <section className="evaluation-harness-strip" aria-label="적용 가능한 평가 하네스">
+      <div><span>현재 폴더 기준</span><strong>분석 규칙 {activeHarness.rules.length}개</strong></div>
+      <button type="button" onClick={applyHarnessOutput}>표 적용</button>
+    </section> : null}
+
+    {!records.length ? <div className="data-empty pattern-empty"><strong>분석할 로그가 없습니다.</strong><span>로그 화면에서 폴더를 추가하세요.</span></div> : <>
       <section className="pattern-section pivot-section" aria-labelledby="pivot-heading">
         <h2 id="pivot-heading" className="sr-only">분석 보기</h2>
         {agentPreview ? <div className="analysis-agent-preview" role="status"><Sparkles size={14} /><span>Agent 추천 보기</span>{agentPreview.proposal.rationale ? <small>{agentPreview.proposal.rationale}</small> : null}<button type="button" onClick={undoAgentPreview}>되돌리기</button></div> : null}
@@ -652,7 +734,7 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           <details className="analysis-visualization-picker"><summary><VisualizationIcon size={16} /><b>{ANALYSIS_VISUALIZATION_LABELS[visualization]}</b><ChevronDown size={14} /></summary><div className="analysis-visualization-menu" role="radiogroup" aria-label="시각화 선택">
             {availableVisualizations.map((item) => { const Icon = VISUALIZATION_ICONS[item]; return <button type="button" role="radio" aria-checked={visualization === item} className={visualization === item ? 'active' : ''} key={item} onClick={(event) => { changeVisualization(item); closeShareMenu(event.currentTarget) }}><Icon size={17} /><span>{ANALYSIS_VISUALIZATION_LABELS[item]}</span></button> })}
           </div></details>
-          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" onClick={analyzeView}><Sparkles size={15} />현재 표 분석</button> : null}
+          {onAnalyzeContext ? <button type="button" className="analysis-agent-action" disabled={inspectionIncomplete} onClick={analyzeView}><Sparkles size={15} />현재 표 분석</button> : null}
           <div className="pattern-metrics" aria-label="표시할 값">
           {primaryAggregations.map((item) => <button type="button" role="radio" aria-checked={aggregation === item.value} className={aggregation === item.value ? 'active' : ''} key={item.value} onClick={() => changeAggregation(item.value)}>{item.label}</button>)}
           <details className="pattern-metric-more"><summary className={secondaryAggregation ? 'active' : ''}>{secondaryAggregation?.label ?? '기타'}<ChevronDown size={13} /></summary><div className="pattern-metric-menu" role="radiogroup" aria-label="다른 집계 방식">
@@ -661,20 +743,21 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
           </div>
         </div>
         <div className="pattern-controls" aria-label="표 필터">
-          <SelectControl label="평가" value={folderFilter} onChange={(value) => { setFolderFilter(value); clearSelection() }}><option value="all">전체 평가</option>{folders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}</SelectControl>
+          <SelectControl label="평가 폴더" value={effectiveScopeId ?? ''} onChange={(value) => { setScopeId(value); clearSelection(); if (value !== PROJECT_COMPARISON_SCOPE_ID) onSelectedEvaluationScopeChange?.(value) }}>{scopeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}{scopeOptions.length > 1 ? <option value={PROJECT_COMPARISON_SCOPE_ID}>폴더 비교</option> : null}</SelectControl>
           <SelectControl label="결과" value={resultFilter} onChange={(value) => { setResultFilter(value as ResultLabel | 'all'); clearSelection() }}><option value="all">전체 결과</option>{resultChoices.map((result) => <option value={result} key={result}>{RESULT_LABEL_KO[result]}</option>)}</SelectControl>
           <button className={`pattern-quick-filter ${failOnly ? 'active' : ''}`} aria-pressed={failOnly} onClick={() => { setFailOnly((value) => !value); clearSelection() }}>FAIL만</button>
           <button className={`pattern-quick-filter ${unknownMetadataOnly ? 'active' : ''}`} aria-pressed={unknownMetadataOnly} onClick={() => { setUnknownMetadataOnly((value) => !value); clearSelection() }}>미확인 조건만</button>
         </div>
+        {!scopedRecords.length ? <div className="pattern-inline-empty" role="status"><strong>조건에 맞는 로그가 없습니다.</strong><button onClick={clearAll}>필터 초기화</button></div> : null}
         <div className="pattern-axis-builder">
-          <AxisWell group="rows" label="왼쪽 축" axes={rowAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('rows', index)} onAdd={(dimension) => addAxis('rows', dimension)} onKeyMove={keyboardMoveAxis} />
+          <AxisWell group="rows" label="왼쪽 축" axes={rowAxes} selected={activeDimensions} protectedAxes={comparisonMode ? ['folder'] : []} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('rows', index)} onAdd={(dimension) => addAxis('rows', dimension)} onKeyMove={keyboardMoveAxis} />
           <button type="button" className="pattern-swap-axes" onClick={() => setAxes([...columnAxes], [...rowAxes])} title="왼쪽 축과 상단 축 바꾸기"><ArrowLeftRight size={15} />축 바꾸기</button>
-          <AxisWell group="columns" label="상단 축" axes={columnAxes} selected={activeDimensions} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('columns', index)} onAdd={(dimension) => addAxis('columns', dimension)} onKeyMove={keyboardMoveAxis} />
+          <AxisWell group="columns" label="상단 축" axes={columnAxes} selected={activeDimensions} protectedAxes={comparisonMode ? ['folder'] : []} dragged={draggedAxis} onDrag={setDraggedAxis} onDrop={moveAxis} onRemove={(index) => removeAxis('columns', index)} onAdd={(dimension) => addAxis('columns', dimension)} onKeyMove={keyboardMoveAxis} />
         </div>
         {unknownActiveDimensions.length ? <p className="pivot-guidance">{unknownActiveDimensions.map((dimension) => DIMENSION_LABEL[dimension]).join(' · ')} 값이 없습니다. 다른 항목을 선택하거나 결과 화면에서 값을 입력하세요.</p> : null}
-        {dataBasis === 'failure_address' && !grid.rows.length ? <div className="pattern-inline-empty"><strong>확인된 Fail 주소가 없습니다.</strong><span>FAIL 로그 본문에 DQ, BL, Bank 등의 주소 정보가 있어야 표시됩니다.</span></div> : visualization === 'cross_table' ? <div className="pivot-scroll"><table className={`pivot-table metric-${aggregation}`} style={{ minWidth: Math.max(720, (rowAxes.length || 1) * 118 + grid.columns.length * (dataBasis === 'failure_address' ? 108 : 82) + 90) }}>
-          <thead>{columnHeaderRows.length ? columnHeaderRows.map((groups, level) => <tr key={level}>{level === 0 ? (rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" rowSpan={columnHeaderRows.length} key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis" rowSpan={columnHeaderRows.length}>전체</th>) : null}{groups.map((group) => <th colSpan={group.span} key={group.key}>{group.label}</th>)}{level === 0 ? <th className="pivot-total" rowSpan={columnHeaderRows.length}>합계</th> : null}</tr>) : <tr>{rowAxes.length ? rowAxes.map((axis) => <th className="pivot-row-axis" key={axis}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis">전체</th>}<th>전체</th><th className="pivot-total">합계</th></tr>}</thead>
-          <tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}>{rowAxes.length ? rowAxes.map((axis, level) => { const span = pivotRowHeaderSpan(grid.rows, rowIndex, level); return span ? <th className="pivot-row-value" scope="row" rowSpan={span} key={axis}>{row.values[level] ?? '미확인'}</th> : null }) : <th className="pivot-row-value" scope="row">전체</th>}{grid.columns.map((column, columnIndex) => {
+        {dataBasis === 'failure_address' && !grid.rows.length ? <div className="pattern-inline-empty"><strong>확인된 Fail 주소가 없습니다.</strong><span>FAIL 로그 본문에 DQ, BL, Bank 등의 주소 정보가 있어야 표시됩니다.</span></div> : visualization === 'cross_table' ? <div className="pivot-scroll" tabIndex={0} aria-label="결과 정리 표. 좌우로 스크롤할 수 있습니다."><table className={`pivot-table metric-${aggregation}`} style={{ minWidth: Math.max(720, (rowAxes.length || 1) * PIVOT_ROW_AXIS_WIDTH + grid.columns.length * (dataBasis === 'failure_address' ? 108 : 82) + 90) }}>
+          <thead>{columnHeaderRows.length ? columnHeaderRows.map((groups, level) => <tr key={level}>{level === 0 ? (rowAxes.length ? rowAxes.map((axis, axisIndex) => <th className="pivot-row-axis" rowSpan={columnHeaderRows.length} key={axis} style={{ '--pivot-row-offset': `${axisIndex * PIVOT_ROW_AXIS_WIDTH}px` } as CSSProperties}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis" rowSpan={columnHeaderRows.length} style={{ '--pivot-row-offset': '0px' } as CSSProperties}>전체</th>) : null}{groups.map((group) => <th colSpan={group.span} key={group.key}>{group.label}</th>)}{level === 0 ? <th className="pivot-total" rowSpan={columnHeaderRows.length}>합계</th> : null}</tr>) : <tr>{rowAxes.length ? rowAxes.map((axis, axisIndex) => <th className="pivot-row-axis" key={axis} style={{ '--pivot-row-offset': `${axisIndex * PIVOT_ROW_AXIS_WIDTH}px` } as CSSProperties}>{DIMENSION_LABEL[axis]}</th>) : <th className="pivot-row-axis" style={{ '--pivot-row-offset': '0px' } as CSSProperties}>전체</th>}<th>전체</th><th className="pivot-total">합계</th></tr>}</thead>
+          <tbody>{grid.rows.map((row, rowIndex) => <tr key={row.key}>{rowAxes.length ? rowAxes.map((axis, level) => { const span = pivotRowHeaderSpan(grid.rows, rowIndex, level); const value = row.values[level] ?? '미확인'; return span ? <th className="pivot-row-value" scope="row" rowSpan={span} key={axis} title={value} style={{ '--pivot-row-offset': `${level * PIVOT_ROW_AXIS_WIDTH}px` } as CSSProperties}>{value}</th> : null }) : <th className="pivot-row-value" scope="row" style={{ '--pivot-row-offset': '0px' } as CSSProperties}>전체</th>}{grid.columns.map((column, columnIndex) => {
             const cell = grid.cells[rowIndex][columnIndex]
             const cellKey = `${row.key}-${column.key}`
             const active = markedCellKeys.has(cellKey)
@@ -701,13 +784,13 @@ export function PatternsView({ records, onOpenFile, project, onProjectUpdated, o
         {hasSelection ? <section className="pattern-selection-inspector" aria-label="선택 상세">
           <div><strong>선택한 조건 {markedCells.length.toLocaleString()}개</strong><span>PASS {visibleRows.filter((row) => row.result === 'PASS').length.toLocaleString()} · FAIL {visibleRows.filter((row) => FAIL_RESULTS.has(row.result)).length.toLocaleString()}</span></div>
           {visibleFailureAddresses.eventCount ? <div className="pattern-address-summary"><span>Fail 주소 {visibleFailureAddresses.eventCount.toLocaleString()}회 · {visibleFailureAddresses.sourceCount.toLocaleString()}개 로그</span>{visibleFailureAddresses.distribution.slice(0, 3).map((item) => <b key={`${item.dimension}-${item.value}`}>{DIMENSION_LABEL[item.dimension as PivotDimension] ?? item.dimension} {item.value} · {item.eventCount.toLocaleString()}회</b>)}</div> : <span className="pattern-selection-muted">선택 범위에 Fail 주소 이벤트가 없습니다.</span>}
-          <div className="pattern-selection-tools"><button type="button" onClick={clearSelection}><X size={14} />선택 해제</button><button type="button" onClick={(event) => dataBasis === 'failure_address' ? downloadFailureAddresses(event.currentTarget) : downloadSelected(event.currentTarget)}><Download size={14} />선택 CSV</button></div>
+          <div className="pattern-selection-tools"><button type="button" onClick={clearSelection}><X size={14} />선택 해제</button><button type="button" disabled={inspectionIncomplete} onClick={(event) => dataBasis === 'failure_address' ? downloadFailureAddresses(event.currentTarget) : downloadSelected(event.currentTarget)}><Download size={14} />선택 CSV</button></div>
         </section> : null}
       </section>
 
       <details className="pattern-section marked-rows" open={hasSelection || rawDetailsOpen} onToggle={(event) => setRawDetailsOpen(event.currentTarget.open)}>
         <summary><span>{hasSelection ? `선택 로그 ${visibleRows.length.toLocaleString()}개` : `전체 로그 ${visibleRows.length.toLocaleString()}개`}</span><ChevronDown size={15} /></summary>
-        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th><th>평가 폴더</th><th>Sample</th><th>온도</th><th>결과</th><th>판정 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td><td>{row.folder}</td><td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '판정 완료' : '확인 필요'}</td></tr>)}</tbody></table></div>
+        <div className="marked-table-scroll"><table><thead><tr><th>파일명</th>{comparisonMode ? <th>폴더</th> : null}<th>Sample</th><th>온도</th><th>결과</th><th>판정 상태</th></tr></thead><tbody>{visibleRows.slice(0, RESULT_LIMIT).map((row) => <tr key={row.id} tabIndex={0} onClick={() => onOpenFile(row.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenFile(row.id) } }} aria-label={`${row.fileName} 로그 열기`}><td><button onClick={(event) => { event.stopPropagation(); onOpenFile(row.id) }}>{row.fileName}</button></td>{comparisonMode ? <td>{row.folder}</td> : null}<td>{row.sample.value ?? '미확인'}</td><td>{row.temperature.value ?? '미확인'}</td><td><span className={`result-label result-${row.result.toLowerCase()}`}>{RESULT_LABEL_KO[row.result]}</span></td><td>{row.review === 'confirmed' ? '판정 완료' : '확인 필요'}</td></tr>)}</tbody></table></div>
       </details>
     </>}
   </div>

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NativeAgentService } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
+import type { LlmToolCall } from './llm-service'
 import type { NativeAgentSessionView } from '../shared/contracts'
 
 const project = {
@@ -35,7 +36,9 @@ function waitFor(
   })
 }
 
-async function harness(responses: Array<{ content: string } | Error>) {
+const calls = (...names: string[]) => ({ content: '', toolCalls: names.map((name, i): LlmToolCall => ({ id: `call-${i}`, type: 'function', function: { name, arguments: '{}' } })) })
+
+async function harness(responses: Array<{ content: string; toolCalls?: LlmToolCall[] } | Error>) {
   const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), 'native-personas-')))
   const execute = vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => ({
     name: call.name,
@@ -75,7 +78,9 @@ async function harness(responses: Array<{ content: string } | Error>) {
 describe('Native Agent DRAM persona interactions', () => {
   it('keeps QC and MTK boot analysis in separate folder sessions and calls the correct tools', async () => {
     const { service, execute } = await harness([
+      calls('soc_boot_profile_scan', 'pass_fail_scan'),
       { content: 'QC Training은 UEFI 이전 근거를 기준으로 확인했습니다.' },
+      calls('soc_boot_profile_scan', 'console_transcript_scan', 'pass_fail_scan'),
       { content: 'MTK는 LK와 LK2 이후 reboot marker를 기준으로 확인했습니다.' },
     ])
 
@@ -103,7 +108,7 @@ describe('Native Agent DRAM persona interactions', () => {
   })
 
   it('turns a 4-Corner request into a reversible typed Results Summary proposal', async () => {
-    const { service, execute } = await harness([{ content: '온도와 전압 조건을 비교합니다.\n<sct-analysis-view>{"dataBasis":"evaluation","rowAxes":["temperatureCorner"],"columnAxes":["vddCorner"],"aggregation":"fail_rate","visualization":"heatmap","rationale":"4-Corner별 판정 분모를 비교합니다."}</sct-analysis-view>' }])
+    const { service, execute } = await harness([calls('evaluation_grid_scan', 'pass_fail_scan', 'failure_trends_get'), { content: '온도와 전압 조건을 비교합니다.\n<sct-analysis-view>{"dataBasis":"evaluation","rowAxes":["temperatureCorner"],"columnAxes":["vddCorner"],"aggregation":"fail_rate","visualization":"heatmap","rationale":"4-Corner별 판정 분모를 비교합니다."}</sct-analysis-view>' }])
     const session = await service.create(project.id, undefined, 'four-corner', ['corner-1', 'corner-2'])
     execute.mockClear()
     const idle = waitFor(service, session.id, 'idle')
@@ -130,7 +135,7 @@ describe('Native Agent DRAM persona interactions', () => {
     await service.send(session.id, 'QC Training FAIL 근거를 다시 확인해줘', ['qc-1'], 'results')
     const first = await paused
     expect(first.failure).toContain('사내 LLM 요청 시간 초과')
-    expect(first.messages.at(-1)?.content).toContain('로컬에서 계산된 값')
+    expect(first.messages.at(-1)?.content).toBe('QC Training FAIL 근거를 다시 확인해줘')
 
     const idle = waitFor(service, session.id, 'idle')
     await service.retry(session.id)

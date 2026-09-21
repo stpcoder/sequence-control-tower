@@ -6,9 +6,11 @@ import {
   createLatestProjectSaveQueue,
   hydrateEvaluation,
   projectArtifactFiles,
+  projectEvaluationScopeIds,
   projectLoadFileState,
   reconcileProjectListedFiles,
   reconcileProjectUpdateFileState,
+  workbenchEvaluationScope,
 } from './App'
 import type { WorkbenchFile } from './views/WorkbenchView'
 import type { LogResultRecord } from './state/logRecords'
@@ -175,7 +177,7 @@ describe('project UI state updates', () => {
 
   it('maps result rows to evaluation-memory log references without losing source identity', () => {
     const row: LogResultRecord = {
-      id: 'source-a', fileName: 'VPERI_DQ9.log', folder: 'logs', relativePath: 'VPERI_DQ9.log',
+      id: 'source-a', evaluationScopeId: 'root-a', fileName: 'VPERI_DQ9.log', folder: 'logs', relativePath: 'VPERI_DQ9.log',
       sample: { value: 'S01', state: 'approved' }, temperature: { value: '85', state: 'approved' },
       vdd: { value: '1.295', state: 'approved' },
       grid: { value: 'DQ9', state: 'candidate' }, dimensions: { testMode: 'VPERI', vdd: 1.295 },
@@ -188,6 +190,27 @@ describe('project UI state updates', () => {
       id: 'durable-source-a', openId: 'renderer-row-a', rootId: 'root-a', folderName: 'root-a', name: 'VPERI_DQ9.log', result: 'TEST_FAIL', sample: 'S01', temperatureC: 85, mode: 'VPERI', grid: 'DQ9',
     }])
     expect(availableEvaluationLogs([mappedRow], [rendererFile], { ...projectWithSource, artifacts: [] })).toEqual([])
+  })
+
+  it('opens result pages in the folder of the log currently visible in the workbench', () => {
+    const currentProject = {
+      ...project('p1', ['root-a', 'root-b']),
+      artifacts: [
+        { sourceId: 'source-a', rootId: 'root-a', artifactId: 'artifact-a', artifactRootId: 'artifact-root-a', relativePath: 'a.log' },
+        { sourceId: 'source-b', rootId: 'root-b', artifactId: 'artifact-b', artifactRootId: 'artifact-root-b', relativePath: 'b.log' },
+      ],
+    }
+    const files: WorkbenchFile[] = [
+      { id: 'file-a', name: 'a.log', artifactId: 'artifact-a', rootId: 'artifact-root-a', relativePath: 'a.log' },
+      { id: 'file-b', name: 'b.log', artifactId: 'artifact-b', rootId: 'artifact-root-b', relativePath: 'b.log' },
+    ]
+
+    expect(workbenchEvaluationScope(currentProject, files, 'file-a', 'root-b')).toBe('root-a')
+    expect(workbenchEvaluationScope(currentProject, files, null, 'root-b')).toBe('root-b')
+    expect(projectEvaluationScopeIds(currentProject, files)).toEqual({
+      'file-a': 'root-a',
+      'file-b': 'root-b',
+    })
   })
 
   it('keeps files and selection when validation changes only folder status', () => {

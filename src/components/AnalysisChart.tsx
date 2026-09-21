@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { Component, useEffect, useRef, type ReactNode } from 'react'
 import * as echarts from 'echarts/core'
 import { BarChart, HeatmapChart, LineChart } from 'echarts/charts'
 import {
@@ -84,15 +84,10 @@ const datum = (item: AnalysisChartDatum, selected: ReadonlySet<string>, color?: 
   itemStyle: selectedStyle(item.cellKeys.some((key) => selected.has(key)), color),
 })
 
-const compactDataZoom = (count: number, orientation: 'horizontal' | 'vertical') => count <= 18 ? [] : [{
-  type: 'inside',
-  ...(orientation === 'horizontal' ? { xAxisIndex: 0 } : { yAxisIndex: 0 }),
-  startValue: 0,
-  endValue: Math.min(count - 1, 17),
-  zoomOnMouseWheel: true,
-  moveOnMouseWheel: true,
-  moveOnMouseMove: true,
-}]
+export const compactDataZoom = (count: number, orientation: 'horizontal' | 'vertical') => count <= 18 ? [] : [
+  { id: orientation + '-inside', type: 'inside', ...(orientation === 'horizontal' ? { xAxisIndex: 0 } : { yAxisIndex: 0 }), start: 0, end: 100, zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: false },
+  { id: orientation + '-slider', type: 'slider', ...(orientation === 'horizontal' ? { xAxisIndex: 0, bottom: 4, height: 16 } : { yAxisIndex: 0, right: 2, width: 16 }), start: 0, end: 100, showDetail: false, borderColor: LINE, fillerColor: '#75a7ff22', handleStyle: { color: MUTED }, textStyle: { color: TEXT } },
+]
 
 /** Builds a restrained ECharts option while keeping SCT selection metadata on
  * every datum. The surrounding controls stay native to the product. */
@@ -120,7 +115,7 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
     const max = Math.max(1, ...values)
     return {
       ...base,
-      grid: { top: 16, right: 22, bottom: 44, left: 96, containLabel: true },
+      grid: { top: 16, right: 40, bottom: 50, left: 96, containLabel: true },
       xAxis: { type: 'category', data: grid.columns.map((column) => column.label), axisLabel: { color: TEXT, hideOverlap: true }, axisLine: { lineStyle: { color: LINE } }, splitArea: { show: false } },
       yAxis: { type: 'category', data: grid.rows.map((row) => row.label), axisLabel: { color: TEXT, width: 110, overflow: 'truncate' }, axisLine: { lineStyle: { color: LINE } }, splitArea: { show: false } },
       visualMap: { show: false, min: 0, max, inRange: { color: ['#222831', '#56353b', '#b45159', FAIL] } },
@@ -168,7 +163,7 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
   const valueAxis = { type: 'value', axisLabel: { color: MUTED, formatter: aggregation === 'fail_rate' || aggregation === 'fail_event_share' ? '{value}%' : '{value}' }, splitLine: { lineStyle: { color: LINE } }, axisLine: { show: false } }
   const commonCartesian = {
     ...base,
-    grid: { top: 42, right: 26, bottom: 44, left: horizontal ? 48 : 34, containLabel: true },
+    grid: { top: 42, right: 42, bottom: 50, left: horizontal ? 48 : 34, containLabel: true },
     legend: { top: 4, right: 18, textStyle: { color: TEXT, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
     xAxis: horizontal ? valueAxis : categoryAxis,
     yAxis: horizontal ? categoryAxis : valueAxis,
@@ -185,8 +180,8 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
       tooltip: { ...(base.tooltip as object), trigger: 'axis' },
       ...(percentage ? { yAxis: { ...valueAxis, max: 100, axisLabel: { color: MUTED, formatter: '{value}%' } } } : {}),
       series: [
-        { name: 'PASS', type: 'bar', stack: 'result', barMaxWidth: 42, data: passData },
-        { name: 'FAIL', type: 'bar', stack: 'result', barMaxWidth: 42, data: failData },
+        { name: 'PASS', type: 'bar', stack: 'result', barMaxWidth: 42, itemStyle: { color: PASS }, label: { show: true, position: 'inside', color: '#f4f7fb', fontSize: 11, formatter: (params: { value?: number }) => params.value ? `${params.value}${percentage ? '%' : ''}` : '' }, data: passData },
+        { name: 'FAIL', type: 'bar', stack: 'result', barMaxWidth: 42, itemStyle: { color: FAIL }, label: { show: true, position: 'inside', color: '#fff', fontSize: 11, formatter: (params: { value?: number }) => params.value ? `${params.value}${percentage ? '%' : ''}` : '' }, data: failData },
       ],
     }
     const rateData = totals.map((item) => datum({
@@ -198,7 +193,7 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
       tooltip: { ...(base.tooltip as object), trigger: 'axis' },
       yAxis: [valueAxis, { ...valueAxis, axisLabel: { color: '#dba96b', formatter: '{value}%' }, splitLine: { show: false } }],
       series: [
-        { name: 'FAIL 건수', type: 'bar', barMaxWidth: 42, data: failData },
+        { name: 'FAIL 건수', type: 'bar', barMaxWidth: 42, itemStyle: { color: FAIL }, data: failData },
         { name: '불량률', type: 'line', yAxisIndex: 1, symbolSize: 7, smooth: false, data: rateData, lineStyle: { width: 2, color: '#dba96b' }, itemStyle: { color: '#dba96b' } },
       ],
     }
@@ -210,8 +205,8 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
       ...commonCartesian,
       tooltip: { ...(base.tooltip as object), trigger: 'axis' },
       series: [
-        { name: 'PASS', type: 'bar', barMaxWidth: 38, data: totals.map((item) => datum({ ...item, value: item.passCount }, selectedCellKeys, PASS)) },
-        { name: 'FAIL', type: 'bar', barMaxWidth: 38, data: totals.map((item) => datum({ ...item, value: item.failCount }, selectedCellKeys, FAIL)) },
+        { name: 'PASS', type: 'bar', barMaxWidth: 38, itemStyle: { color: PASS }, data: totals.map((item) => datum({ ...item, value: item.passCount }, selectedCellKeys, PASS)) },
+        { name: 'FAIL', type: 'bar', barMaxWidth: 38, itemStyle: { color: FAIL }, data: totals.map((item) => datum({ ...item, value: item.failCount }, selectedCellKeys, FAIL)) },
       ],
     }
   }
@@ -227,9 +222,30 @@ export function buildAnalysisChartOption(input: Omit<AnalysisChartProps, 'onMark
   return { ...commonCartesian, tooltip: { ...(base.tooltip as object), trigger: 'axis' }, series }
 }
 
+export function restoreChartZoom(option: Record<string, unknown>, previous: Record<string, unknown> | undefined): Record<string, unknown> {
+  const ranges = previous?.dataZoom as Array<{ id: string; start: number; end: number }> | undefined
+  return { ...option, dataZoom: ((option.dataZoom ?? []) as Array<{ id: string }>).map((zoom) => {
+    const range = ranges?.find((item) => item.id === zoom.id)
+    return range ? { ...zoom, start: range.start, end: range.end } : zoom
+  }) }
+}
+
+class ChartErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() {
+    return this.state.failed ? <div className="pattern-inline-empty" role="alert"><strong>차트를 표시하지 못했습니다.</strong><button onClick={() => this.setState({ failed: false })}>다시 표시</button></div> : this.props.children
+  }
+}
+
 export function AnalysisChart(props: AnalysisChartProps) {
+  return <ChartErrorBoundary key={props.visualization}><RenderedAnalysisChart {...props} /></ChartErrorBoundary>
+}
+
+function RenderedAnalysisChart(props: AnalysisChartProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<EChartsType | null>(null)
+  const layoutKeyRef = useRef('')
   const markRef = useRef(props.onMark)
   markRef.current = props.onMark
 
@@ -238,6 +254,7 @@ export function AnalysisChart(props: AnalysisChartProps) {
     if (!host) return undefined
     const chart = echarts.init(host, undefined, { renderer: 'canvas' })
     chartRef.current = chart
+    layoutKeyRef.current = ''
     const resize = new ResizeObserver(() => chart.resize())
     resize.observe(host)
     chart.on('click', (params) => {
@@ -259,8 +276,13 @@ export function AnalysisChart(props: AnalysisChartProps) {
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.setOption(buildAnalysisChartOption(props), { notMerge: true, lazyUpdate: true })
+    const layoutKey = JSON.stringify([props.visualization, props.aggregation, props.grid.rows, props.grid.columns, props.grid.cells.flat().map((cell) => cell.sourceIds)])
+    const option = buildAnalysisChartOption(props)
+    const next = layoutKeyRef.current === layoutKey ? restoreChartZoom(option, chart.getOption()) : option
+    layoutKeyRef.current = layoutKey
+    chart.setOption(next, { notMerge: true, lazyUpdate: false })
   }, [props.aggregation, props.grid, props.passFailGrid, props.selectedCellKeys, props.visualization])
 
-  return <div className="analysis-chart" ref={hostRef} role="img" aria-label={`${props.visualization} 분석 시각화`} />
+  const hasZoom = props.grid.rows.length > 18 || props.grid.columns.length > 18
+  return <div className="analysis-chart-frame">{hasZoom ? <div className="chart-zoom-controls"><span>Ctrl + 휠로 확대 · 범위 막대로 이동</span><button type="button" onClick={() => chartRef.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })}>전체 보기</button></div> : null}<div className="analysis-chart" ref={hostRef} role="img" aria-label={`${props.visualization} 분석 시각화`} /></div>
 }

@@ -1,3 +1,6 @@
+import { agentEvaluationContext } from './agent-evaluation-context'
+import type { EvaluationStore } from './evaluation-store'
+import { getActiveEvaluationRecipeRevisions } from '../shared/contracts'
 import { basename } from 'node:path'
 import type {
   ArtifactEvidenceSpec, ArtifactRecord, EngineerBootProfileBindingView, EngineerConsolePromptRuleView, EngineerWorkflowMemoryView, ProjectEquipmentProfile, ProjectEvaluationDimensions, ProjectSnapshot
@@ -15,7 +18,7 @@ import type { NativeAgentStore } from './native-agent-store'
 import type { ProjectStore } from './project-store'
 
 export type LpddrAgentToolName =
-  | 'project_context_get' | 'project_history_get' | 'evaluation_relation_suggest' | 'similar_case_search'
+  | 'source_list' | 'evaluation_state_get' | 'project_context_get' | 'project_history_get' | 'evaluation_relation_suggest' | 'similar_case_search'
   | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'console_transcript_scan' | 'pass_fail_scan'
   | 'evaluation_grid_scan' | 'log_search' | 'log_read_window' | 'failure_trends_get'
 
@@ -29,6 +32,8 @@ export interface LpddrAgentToolResult {
 }
 
 export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> = {
+  source_list: '허용된 폴더의 파일명과 sourceId를 조회합니다. args: query(선택), offset(기본0), limit(최대100). 파일 지정·검색·읽기 전에 사용합니다.',
+  evaluation_state_get: '현재 폴더의 적용 규칙 전체 조건, 수동 판정, 최근 일괄평가, 근거 행과 재평가 필요 상태를 읽습니다. args: sourceIds(선택), offset(기본0), limit(최대100). 저장된 규칙과 실제 적용 규칙을 구분합니다.',
   project_context_get: '현재 프로젝트의 제품, 고객, 개발 단계와 사용자가 확정한 분석 목표를 조회합니다.',
   project_history_get: '현재 프로젝트의 불량 이슈, 평가 관계, 평가 결과와 근거 연결을 조회합니다.',
   evaluation_relation_suggest: '현재 평가 폴더의 근거를 기존 불량 이슈와 비교해 RT, 조건 비교, 개선, 검증, Side effect 또는 분류 대기를 제안합니다. 저장하거나 자동 확정하지 않습니다.',
@@ -36,13 +41,13 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
   engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
-  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, SKEW, Die, Sample, DRAM 위치, Sequence signature와 명령 후보를 추출합니다.',
+  filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, Skew, Die, Sample, DRAM 위치, Sequence signature와 명령 후보를 추출합니다.',
   soc_boot_profile_scan: '파일명에서 선택한 Qualcomm/MediaTek profile의 단계 marker를 검사하고 로그가 도달한 부팅 구간을 반환합니다.',
   console_transcript_scan: '콘솔 prompt 뒤의 엔지니어 입력과 장비 출력·상태 marker를 분리하고, 프로젝트에서 확정한 prompt 규칙을 적용합니다.',
   pass_fail_scan: '모든 선택 로그를 한 번씩 읽어 PASS, FAIL, training fail, reboot, halt, fast fail을 결정 규칙으로 분류합니다.',
   evaluation_grid_scan: '전원 인가 또는 명시된 Grid 경계를 기준으로 온도, VDD, 주파수, Test Mode, Sequence 명령과 종료 결과를 묶어 Grid 후보를 계산합니다.',
-  log_search: '허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
-  log_read_window: '검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
+  log_search: 'args: query(필수), mode(literal/regex), sourceIds(선택). 허용된 프로젝트 로그에서 문자열 또는 정규식을 검색하고 최대 12개 근거 위치를 반환합니다.',
+  log_read_window: 'args: sourceId(필수), startLine(기본1), lineCount(최대24). 검색으로 찾은 한 지점 주변을 최대 24줄만 읽습니다. 전체 로그 읽기는 허용되지 않습니다.',
   failure_trends_get: '선택 로그의 확정 Pass/Fail 분모와 Hdiag FAIL 본문의 Channel, Sub Channel, CS, BK, RK, BG, Row, Col, WR, RD, DQ, BL을 함께 사용해 조건별 실패 집중도와 Fail 주소 분포를 계산합니다.'
 }
 
@@ -56,9 +61,9 @@ const promptSafe = (value: unknown, max = 500): string => safe(value, max).repla
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
 const agentDimensionView = (dimensions: ProjectEvaluationDimensions | undefined) => ({ ...dimensions })
 const AGENT_DIMENSION_LABELS: Record<string, string> = {
-  skew: 'SKEW', timingSkewPs: 'Timing SKEW (ps)', temperatureC: '온도', frequencyMHz: '주파수',
-  testMode: 'Mode', material: '자재 (Sample)', sample: '자재 (Sample)', die: 'Die', lot: 'Lot', socModel: 'SoC', bootProfileId: 'Boot profile',
-  equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '사용자 조건', evaluationStep: '평가 Step',
+  skew: 'Skew', timingSkewPs: 'Timing Skew (ps)', temperatureC: '온도', frequencyMHz: '주파수',
+  testMode: 'Mode', material: 'Sample', sample: 'Sample', die: 'Die', lot: 'Lot', socModel: 'SoC', bootProfileId: 'Boot profile',
+  equipmentChannel: '실장기 채널', eccMode: 'ECC', customCondition: '평가 제목', evaluationStep: '평가 Step',
   channel: 'Channel', subChannel: 'Sub Channel', chipSelect: 'CS', rank: 'Rank', bankGroup: 'Bank Group', bank: 'Bank', row: 'Row', column: 'Column',
   dq: 'DQ', bl: 'BL', pattern: 'Pattern', writeData: 'WR', readData: 'RD', gridId: 'Grid', temperatureCorner: '온도 조건', vdd: 'VDD', vddCorner: 'VDD 조건', conditionCorner: '4-Corner',
 }
@@ -138,13 +143,21 @@ export class LpddrAgentToolService {
   constructor(private readonly deps: {
     artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow' | 'inspectEvidence'>
     projects: Pick<ProjectStore, 'get' | 'list'>
+    evaluations?: Pick<EvaluationStore, 'snapshot'>
     agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings' | 'consolePromptRules'>
   }) {}
 
   async execute(projectId: string, call: LpddrAgentToolCall, allowedSourceIds?: string[]): Promise<LpddrAgentToolResult> {
     const project = await this.project(projectId)
-    const allowed = this.sources(project, allowedSourceIds)
+    let allowed = this.sources(project, allowedSourceIds)
+    if (call.args?.sourceIds !== undefined) {
+      if (!Array.isArray(call.args.sourceIds) || !call.args.sourceIds.length || call.args.sourceIds.some((id) => typeof id !== 'string' || !allowed.some((source) => source.sourceId === id))) throw new Error('허용된 로그 범위를 벗어났습니다.')
+      const selected = new Set(call.args.sourceIds)
+      allowed = allowed.filter((source) => selected.has(source.sourceId))
+    }
     switch (call.name) {
+      case 'source_list': return this.sourceList(allowed, call.args)
+      case 'evaluation_state_get': return this.evaluationState(project, allowed, call.args)
       case 'project_context_get': return this.context(project, allowed)
       case 'project_history_get': return this.history(project, allowed)
       case 'evaluation_relation_suggest': return this.relationSuggestion(project, allowed, call.args)
@@ -155,7 +168,7 @@ export class LpddrAgentToolService {
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
       case 'soc_boot_profile_scan': return this.bootProfiles(project, allowed)
       case 'console_transcript_scan': return this.consoleTranscript(project, allowed)
-      case 'pass_fail_scan': return this.statuses(allowed)
+      case 'pass_fail_scan': return this.statuses(allowed, project, call.args, true)
       case 'evaluation_grid_scan': return this.gridSequence(allowed)
       case 'log_search': return this.search(allowed, call.args)
       case 'log_read_window': return this.window(allowed, call.args)
@@ -171,30 +184,81 @@ export class LpddrAgentToolService {
   }
 
   private sources(project: ProjectSnapshot, requested?: string[]): ProjectSnapshot['artifacts'] {
-    const wanted = requested?.length ? new Set(requested.map((item) => safe(item, 160))) : null
-    const sources = project.artifacts.filter((source) => !wanted || wanted.has(source.sourceId)).slice(0, 100)
+    const wanted = requested !== undefined ? new Set(requested.map((item) => safe(item, 160))) : null
+    const sources = project.artifacts.filter((source) => !wanted || wanted.has(source.sourceId)).slice(0, 10_000)
     if (wanted && sources.length !== wanted.size) throw new Error('프로젝트에 속하지 않은 로그가 포함되어 있습니다.')
     return sources
   }
 
+  private sourceList(sources: ProjectSnapshot['artifacts'], args?: Record<string, unknown>): LpddrAgentToolResult {
+    const query = safe(args?.query, 240).toLocaleLowerCase()
+    const found = sources.filter((source) => !query || source.relativePath.toLocaleLowerCase().includes(query))
+    const offset = Math.max(0, Math.trunc(finite(args?.offset) ?? 0))
+    const limit = Math.max(1, Math.min(100, Math.trunc(finite(args?.limit) ?? 100)))
+    return { name: 'source_list', label: '파일 목록', summary: `허용 로그 ${sources.length}개 · 검색 결과 ${found.length}개`, data: { total: found.length, offset, nextOffset: offset + limit < found.length ? offset + limit : null, sources: found.slice(offset, offset + limit).map((source) => ({ sourceId: source.sourceId, fileName: promptSafe(source.relativePath, 500), folderId: source.rootId })) }, evidenceSourceIds: [] }
+  }
+
+  private async evaluationState(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts'], args?: Record<string, unknown>): Promise<LpddrAgentToolResult> {
+    if (!this.deps.evaluations) throw new Error('평가 저장소를 사용할 수 없습니다.')
+    const snapshot = await this.deps.evaluations.snapshot(project.id)
+    const rows = agentEvaluationContext(snapshot, sources)
+    const offset = Math.max(0, Math.trunc(finite(args?.offset) ?? 0))
+    const limit = Math.max(1, Math.min(100, Math.trunc(finite(args?.limit) ?? 100)))
+    const page = rows.slice(offset, offset + limit)
+    const totals = rows.reduce<Record<string, number>>((all, row) => { const key = row.result ?? 'UNKNOWN'; all[key] = (all[key] ?? 0) + 1; return all }, {})
+    return { name: 'evaluation_state_get', label: '적용 규칙과 판정', summary: `로그 ${rows.length}개 · 재평가 필요 ${rows.filter((row) => row.needsReevaluation).length}개`, data: {
+      revision: snapshot.revision, totals, total: rows.length, offset, nextOffset: offset + limit < rows.length ? offset + limit : null,
+      rows: page,
+      savedRecipes: getActiveEvaluationRecipeRevisions(snapshot.recipes).filter((recipe) => recipe.recipeId !== 'active-batch-ruleset').map((recipe) => ({ id: recipe.recipeId, revision: recipe.revision, name: recipe.name, rules: recipe.rules, applied: rows.some((row) => row.appliedRules.some((rule) => recipe.rules.some((saved) => saved.id === rule.id))) })),
+      notice: 'savedRecipes는 저장된 규칙입니다. 각 로그의 appliedRules만 실제 적용 범위입니다. needsReevaluation이면 과거 판정을 현재 확정 결과로 설명하지 마십시오. 읽기는 규칙·판정·이력을 변경하지 않습니다.',
+    }, evidenceSourceIds: page.map((row) => row.sourceId) }
+  }
+
+  private reportView(report: NonNullable<ProjectSnapshot['evaluationNodes']>[number]['report']) {
+    if (!report) return undefined
+    return {
+      purpose: promptSafe(report.purpose.text, 1_000),
+      results: {
+        summary: promptSafe(report.results.summary, 1_000), total: report.results.total,
+        definitive: report.results.definitive, byOutcome: report.results.byOutcome,
+        unknown: report.results.unknown, coverage: report.results.coverage,
+      },
+      interpretation: promptSafe(report.interpretation.text, 1_500),
+      trends: promptSafe(report.trends.text, 1_500),
+      nextPlan: promptSafe(report.nextPlan.text, 1_500),
+      revision: report.revision,
+    }
+  }
+
   private context(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): LpddrAgentToolResult {
+    const evaluationScopeIds = [...new Set(sources.map((source) => source.rootId).filter(Boolean))]
+    const layoutScopeId = evaluationScopeIds.length === 1 ? evaluationScopeIds[0] : '__project_compare__'
+    const selectedLayoutOptions = (options: Record<string, unknown>): Record<string, unknown> => {
+      const layouts = options.layoutsByEvaluation
+      const scoped = layouts && typeof layouts === 'object' && !Array.isArray(layouts)
+        ? (layouts as Record<string, unknown>)[layoutScopeId]
+        : undefined
+      if (scoped && typeof scoped === 'object' && !Array.isArray(scoped)) return scoped as Record<string, unknown>
+      const fallback = options.defaultLayout
+      return fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback as Record<string, unknown> : options
+    }
     const savedLayouts = project.exportPresets.filter((item) => !item.archived).slice(-10).map((item) => {
+      const options = selectedLayoutOptions(item.options)
       if (item.id === 'sequence-control-tower.results-export.v1') {
-        return { id: item.id, name: item.name, format: item.format, columns: Array.isArray(item.options.columns) ? item.options.columns.slice(0, 32) : [] }
+        return { id: item.id, name: item.name, format: item.format, columns: Array.isArray(options.columns) ? options.columns.slice(0, 32) : [] }
       }
       if (item.id === 'sequence-control-tower.patterns-layout.v1') {
         return {
           id: item.id, name: item.name, format: item.format,
-          rowAxes: Array.isArray(item.options.rowAxes) ? item.options.rowAxes.slice(0, 3) : [],
-          columnAxes: Array.isArray(item.options.columnAxes) ? item.options.columnAxes.slice(0, 3) : [],
-          aggregation: item.options.aggregation,
-          visualization: item.options.visualization,
-          dataBasis: item.options.dataBasis,
+          rowAxes: Array.isArray(options.rowAxes) ? options.rowAxes.slice(0, 3) : [],
+          columnAxes: Array.isArray(options.columnAxes) ? options.columnAxes.slice(0, 3) : [],
+          aggregation: options.aggregation,
+          visualization: options.visualization,
+          dataBasis: options.dataBasis,
         }
       }
       return { id: item.id, name: item.name, format: item.format }
     })
-    const evaluationScopeIds = [...new Set(sources.map((source) => source.rootId))]
     const folderLabels = new Map(project.folders.map((folder) => [folder.rootId, promptSafe(folder.displayLabel, 160)]))
     const scopedNodes = (project.evaluationNodes ?? []).filter((node) => node.evaluationScopeId && evaluationScopeIds.includes(node.evaluationScopeId))
     const latestScopedNode = [...scopedNodes].reverse()[0]
@@ -207,10 +271,10 @@ export class LpddrAgentToolService {
         } : undefined
     const data = {
       name: project.name, description: project.description, ...project.lpddrDevelopmentContext, onboarding,
-      contextScope: 'project',
+      contextScope: evaluationScopeIds.length === 1 ? 'evaluation' : 'project_compare',
       currentEvaluation: {
         folders: evaluationScopeIds.map((scopeId) => folderLabels.get(scopeId) ?? '연결 폴더'), logCount: sources.length, confirmed: Boolean(currentNode),
-        ...(currentNode ? { name: currentNode.name, purpose: currentNode.purpose, interpretation: currentNode.interpretation } : {}),
+        ...(currentNode ? { name: currentNode.name, purpose: currentNode.purpose, interpretation: currentNode.interpretation, report: this.reportView(currentNode.report) } : {}),
         ...(!currentNode && latestScopedNode ? {
           proposal: { name: latestScopedNode.name, purpose: latestScopedNode.purpose, interpretation: latestScopedNode.interpretation },
         } : {}),
@@ -220,7 +284,7 @@ export class LpddrAgentToolService {
     return { name: 'project_context_get', label: '프로젝트 조건', summary: `${project.name} · 선택 폴더 로그 ${sources.length}개 · 저장된 평가 ${project.evaluationNodes?.length ?? 0}건`, data, evidenceSourceIds: [] }
   }
 
-  private history(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): LpddrAgentToolResult {
+  private async history(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
     const allowed = new Set(sources.map((source) => source.sourceId))
     const currentScopeIds = new Set(sources.map((source) => source.rootId))
     // Project history is structured memory, not raw-log access. Return every
@@ -236,19 +300,32 @@ export class LpddrAgentToolService {
     const hypothesisNames = new Map((project.failureHypotheses ?? []).map((item) => [item.id, promptSafe(item.title, 240)]))
     const nodeNames = new Map(linkedNodes.map((item) => [item.id, promptSafe(item.name, 240)]))
     const folderName = (scopeId?: string): string => scopeId ? folderLabels.get(scopeId) ?? '연결 폴더' : '폴더 미지정'
+    const currentRows = this.deps.evaluations ? agentEvaluationContext(await this.deps.evaluations.snapshot(project.id), sources) : []
+    const discrepancies = nodes.flatMap((node) => {
+      if (!node.evaluationScopeId || !currentScopeIds.has(node.evaluationScopeId) || !node.report) return []
+      const rows = currentRows.filter((row) => row.folderId === node.evaluationScopeId)
+      if (!rows.length || rows.length !== project.artifacts.filter((source) => source.rootId === node.evaluationScopeId).length) return []
+      const current = rows.reduce<Record<string, number>>((counts, row) => { const result = row.result ?? 'UNKNOWN'; counts[result] = (counts[result] ?? 0) + 1; return counts }, {})
+      const saved = node.report.results.byOutcome
+      const keys = new Set([...Object.keys(saved), ...Object.keys(current)])
+      const different = node.report.results.total !== rows.length || [...keys].some((key) => (saved[key as keyof typeof saved] ?? 0) !== (current[key] ?? 0))
+      return different ? [{ evaluationId: node.id, evaluation: node.name, savedTotal: node.report.results.total, currentTotal: rows.length, saved, current, needsReevaluation: rows.some((row) => row.needsReevaluation), note: '현재 저장된 판정과 이력 요약이 다릅니다. 재평가·수동 판정 변경·다른 시점의 기록인지 확인해야 합니다. 자동 수정하지 않습니다.' }] : []
+    })
     const data = {
+      discrepancies,
       lineageRule: '같은 issue의 평가만 한 흐름입니다. relation은 평가를 이어간 이유이며 previousEvaluation은 직접 연결입니다. 배열 순서는 시간 흐름이 아닙니다.',
       currentFolders: [...currentScopeIds].map(folderName),
       hypotheses: (project.failureHypotheses ?? []).filter((item) => hypothesisIds.has(item.id)).slice(-50)
         .map((item) => ({
-          title: promptSafe(item.title, 240), description: promptSafe(item.description, 1_000), origin: item.origin,
+          hypothesisId: item.id, title: promptSafe(item.title, 240), description: promptSafe(item.description, 1_000), origin: item.origin,
           evaluationCount: item.evaluationNodeIds?.filter((nodeId) => nodeIds.has(nodeId)).length ?? 0,
         })),
       nodes: linkedNodes.map((item) => ({
-        folder: folderName(item.evaluationScopeId), name: promptSafe(item.name, 240),
+        evaluationId: item.id, folder: folderName(item.evaluationScopeId), name: promptSafe(item.name, 240),
         issue: item.hypothesisId ? hypothesisNames.get(item.hypothesisId) : undefined,
         relation: item.relation, relationReason: promptSafe(item.relationReason, 500),
         purpose: item.purpose, status: item.status, interpretation: promptSafe(item.interpretation, 1_000),
+        report: this.reportView(item.report),
         dimensions: agentDimensionView(item.dimensions), authorship: item.authorship, reviewState: item.reviewState,
         attemptNo: item.attemptNo, retest: Boolean(item.retestOf),
         ...(item.parentId && nodeNames.has(item.parentId) ? { previousEvaluation: nodeNames.get(item.parentId) } : {}),
@@ -612,18 +689,29 @@ export class LpddrAgentToolService {
     return { name: 'soc_boot_profile_scan', label: 'SoC · 부팅 구간', summary: `${rows.length}개 중 SoC profile ${identified}개 식별`, data: { rows }, evidenceSourceIds: rows.filter((row) => row.stages.length).map((row) => row.sourceId) }
   }
 
-  private async statuses(sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
+  private async statuses(sources: ProjectSnapshot['artifacts'], project?: ProjectSnapshot, args?: Record<string, unknown>, paginate = false): Promise<LpddrAgentToolResult> {
     if (!sources.length) return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: '검사할 로그 없음', data: { rows: [] }, evidenceSourceIds: [] }
     const inspected = await this.deps.artifacts.inspectEvidence({
       sources: sources.map((source) => ({ sourceId: source.sourceId, artifactId: source.artifactId, rootId: source.artifactRootId ?? source.rootId, relativePath: source.relativePath })),
       specs: LPDDR_STATUS_SPECS
     })
-    const rows = inspected.sources.map((source) => {
+    const persisted = project && this.deps.evaluations ? agentEvaluationContext(await this.deps.evaluations.snapshot(project.id), sources) : []
+    const inspectedById = new Map(inspected.sources.map((source) => [source.sourceId, source]))
+    const rows = sources.map((input) => {
+      const source = inspectedById.get(input.sourceId)
+      const saved = persisted.find((row) => row.sourceId === input.sourceId)
+      if (!source || source.error) return { sourceId: input.sourceId, fileName: promptSafe(input.relativePath), status: saved?.result ?? 'UNKNOWN', resultSource: saved?.resultSource ?? 'unknown', error: source?.error ?? '검사 결과 없음', confidence: 0, reason: '로그 읽기 실패' }
       const counts = Object.fromEntries(source.evidence.map((item) => [item.specId, item.occurrenceCount ?? 0]))
-      return { sourceId: source.sourceId, fileName: promptSafe(source.fileName, 240), counts, ...classifyLpddrStatus(counts) }
+      const marker = classifyLpddrStatus(counts)
+      return { sourceId: source.sourceId, fileName: promptSafe(source.fileName, 240), counts, ...marker,
+        markerStatus: marker.status, resultSource: saved?.result !== undefined ? saved.resultSource : 'local-marker',
+        ...(saved?.result !== undefined ? { status: saved.result, reason: saved.needsReevaluation && saved.resultSource !== 'engineer' ? '규칙이 변경되어 재평가 필요' : `${saved.resultSource}: 저장된 판정`, evidence: saved.evidence, matchedRuleId: saved.batch?.matchedRuleId } : {}),
+      }
     })
     const totals = rows.reduce<Record<string, number>>((all, row) => ({ ...all, [row.status]: (all[row.status] ?? 0) + 1 }), {})
-    return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: LPDDR_STATUS_SPECS.map((item) => item.id), rows, totals }, evidenceSourceIds: rows.map((row) => row.sourceId) }
+    const offset = Math.max(0, Math.trunc(finite(args?.offset) ?? 0))
+    const limit = Math.max(1, Math.min(100, Math.trunc(finite(args?.limit) ?? 100)))
+    return { name: 'pass_fail_scan', label: 'Pass/Fail 규칙 검사', summary: Object.entries(totals).map(([key, value]) => `${key} ${value}`).join(' · '), data: { rules: LPDDR_STATUS_SPECS.map((item) => item.id), rows: paginate ? rows.slice(offset, offset + limit) : rows, total: rows.length, nextOffset: paginate && offset + limit < rows.length ? offset + limit : null, totals, errorCount: rows.filter((row) => 'error' in row).length, coverage: rows.some((row) => 'error' in row) ? 'partial' : 'complete' }, evidenceSourceIds: rows.map((row) => row.sourceId) }
   }
 
   private async gridSequence(sources: ProjectSnapshot['artifacts']): Promise<LpddrAgentToolResult> {
@@ -766,10 +854,10 @@ export class LpddrAgentToolService {
       sourceId: source.sourceId,
       ...sourceContextWithBinding(source.relativePath, artifactById.get(source.artifactId), project.equipmentProfiles, bindings.find((item) => item.sourceIds.includes(source.sourceId))),
     }))
-    const statusResult = await this.statuses(sources)
+    const statusResult = await this.statuses(sources, project)
     const statusRows = (statusResult.data as { rows?: Array<{ sourceId: string; status: string }> }).rows ?? []
     const statusBySource = new Map(statusRows.map((row) => [row.sourceId, row.status]))
-    const failureStatuses = new Set(['TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
+    const failureStatuses = new Set(['DIAG_FAIL', 'TEST_FAIL', 'TRAINING_FAIL', 'SYSTEM_HALT', 'SYSTEM_REBOOT'])
     const definitiveStatuses = new Set(['PASS', ...failureStatuses])
     const dimensions: Array<keyof ProjectEvaluationDimensions> = [
       'temperatureCorner', 'temperatureC', 'vddCorner', 'vdd', 'conditionCorner', 'gridId', 'dq', 'bl', 'channel', 'subChannel', 'chipSelect', 'rank', 'bank', 'bankGroup', 'row', 'column', 'writeData', 'readData', 'pattern',

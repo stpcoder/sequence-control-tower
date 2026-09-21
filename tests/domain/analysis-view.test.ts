@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { analysisChartModel, analysisHeatmapData, normalizedVisualization } from '../../src/domain/analysis-view'
+import { ANALYSIS_VIEW_PRESETS, analysisChartModel, analysisHeatmapData, normalizedVisualization } from '../../src/domain/analysis-view'
 import { buildPivotGrid, type LogResultRecord } from '../../src/state/logRecords'
 
 const row = (id: string, sample: string, temperature: string, result: LogResultRecord['result']): LogResultRecord => ({
-  id, fileName: `${id}.log`, folder: 'evaluation-a', relativePath: `${id}.log`,
+  id, evaluationScopeId: 'evaluation-a', fileName: `${id}.log`, folder: 'evaluation-a', relativePath: `${id}.log`,
   sample: { value: sample, state: 'approved' }, temperature: { value: temperature, state: 'approved' },
   vdd: { value: '1.0', state: 'approved' },
   grid: { value: 'G1', state: 'approved' },
@@ -27,5 +27,11 @@ describe('shared analysis canvas model', () => {
     expect(normalizedVisualization('heatmap', 'fail_count')).toBe('heatmap')
     expect(normalizedVisualization('stacked_bar', 'fail_rate')).toBe('cross_table')
     expect(normalizedVisualization('invented-chart', 'count')).toBe('cross_table')
+  })
+
+  it('offers one-click cumulative PASS/FAIL counts by Skew', () => {
+    expect(ANALYSIS_VIEW_PRESETS).toContainEqual(expect.objectContaining({
+      id: 'skew-pass-fail', visualization: 'stacked_bar', rowAxes: ['skew'], columnAxes: [], aggregation: 'pass_fail',
+    }))
   })
 })

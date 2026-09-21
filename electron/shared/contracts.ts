@@ -468,6 +468,18 @@ export interface EvaluationDecisionRevision {
   evidenceRefs: EvaluationEvidenceRef[]
   createdAt: string
   supersedesId?: string
+  /** Auditable removal of the manual override; UNKNOWN itself is a judgment. */
+  reset?: boolean
+}
+
+export function getActiveEvaluationDecisions(revisions: readonly EvaluationDecisionRevision[]): EvaluationDecisionRevision[] {
+  const latest = new Map<string, EvaluationDecisionRevision>()
+  revisions.forEach((item) => {
+    const key = `${item.source.sourceId}\u0000${item.source.artifactId}`
+    latest.delete(key)
+    latest.set(key, item)
+  })
+  return [...latest.values()].filter((item) => !item.reset)
 }
 
 export interface EvaluationRecipeClause {
@@ -596,6 +608,9 @@ export interface EvaluationSaveDecisionInput extends EvaluationProjectRequest {
   source: EvaluationSourceInput
   result: EvaluationResultLabel
   evidenceRefs?: EvaluationEvidenceRef[]
+  reset?: boolean
+  /** Historical renderer IDs for this same log, reset atomically with the primary ID. */
+  resetSourceIds?: string[]
 }
 
 export interface EvaluationSaveRecipeInput extends EvaluationProjectRequest {
@@ -855,6 +870,20 @@ export interface ProjectEvaluationDimensions {
   frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string
   timingSkewPs?: number; testMode?: string
 }
+export type ProjectEvaluationReportOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN' | 'EXCLUDED'
+export type ProjectEvaluationReportConfidence = 'high' | 'medium' | 'low'
+export type ProjectEvaluationReportSectionState = 'computed' | 'agent-proposed' | 'engineer-confirmed'
+export interface ProjectEvaluationReportTextSection {
+  text: string; confidence: ProjectEvaluationReportConfidence; evidenceSourceIds: string[]; state: ProjectEvaluationReportSectionState
+}
+export interface ProjectEvaluationReport {
+  schemaVersion: 1; revision: number; createdAt: string; updatedAt: string
+  purpose: ProjectEvaluationReportTextSection & { category?: ProjectEvaluationNode['purpose']; baselineNodeId?: string; changedConditions: string[]; fixedConditions: string[] }
+  results: { summary: string; total: number; definitive: number; byOutcome: Partial<Record<ProjectEvaluationReportOutcome, number>>; unknown: number; excluded: number; coverage: 'complete' | 'partial'; evidenceSourceIds: string[]; state: 'computed' }
+  interpretation: ProjectEvaluationReportTextSection & { findings: string[]; counterEvidence: string[]; caveats: string[] }
+  trends: ProjectEvaluationReportTextSection & { findings: Array<{ dimension: string; value: string; statement: string; failures?: number; total?: number; failureRate?: number; confidence: ProjectEvaluationReportConfidence; evidenceSourceIds: string[] }> }
+  nextPlan: ProjectEvaluationReportTextSection & { objective?: string; changedVariable?: string; levels: string[]; heldConditions: string[]; samples: string[]; repeats?: number; successCriteria: string[]; historyNodeIds: string[] }
+}
 export interface ProjectFailureHypothesis {
   id: string; title: string; description?: string; origin: ProjectAssessmentOrigin; evaluationNodeIds?: string[]
 }
@@ -862,7 +891,7 @@ export interface ProjectEvaluationNode {
   id: string; hypothesisId?: string; parentId?: string; branchId?: string; evaluationScopeId?: string; name: string
   purpose?: 'screening' | 'improvement' | 'reproduction' | 'characterization' | 'verification' | 'stage-verification'
   dimensions: ProjectEvaluationDimensions; status?: ProjectEvaluationStatus
-  interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState
+  interpretation?: string; report?: ProjectEvaluationReport; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState
   sequenceSignature?: string; attemptNo?: number; retestOf?: string
   relation?: ProjectEvaluationRelationKind; relationConfidence?: number; relationReason?: string
 }
@@ -910,9 +939,12 @@ export interface SequenceIntelligenceProjectsApi {
 /** Persistent, renderer-safe native agent workspace. Raw paths, secrets and
  * unbounded log excerpts are deliberately excluded from these contracts. */
 export type NativeAgentBackend = 'opencode' | 'internal'
-export type NativeAgentSessionStatus = 'idle' | 'queued' | 'running' | 'paused' | 'failed'
+export type NativeAgentSessionStatus = 'idle' | 'queued' | 'running' | 'waiting_question' | 'paused' | 'failed'
 export type NativeAgentMessageRole = 'user' | 'assistant' | 'tool' | 'system'
 export type NativeAgentContextKind = 'free_chat' | 'log_search' | 'results' | 'analysis_view' | 'evaluation_history' | 'project_compare'
+/** The five engineering decisions remain shared project memory. This value
+ * only tells the Agent which decision the current screen is helping with. */
+export type NativeAgentEvaluationStage = 'purpose' | 'results' | 'interpretation' | 'trends' | 'next_plan'
 export type NativeAgentAnalysisDimension =
   | 'sample' | 'temperature' | 'temperatureCorner' | 'testMode' | 'skew' | 'frequencyMHz' | 'vdd' | 'vddCorner' | 'conditionCorner' | 'pattern'
   | 'lot' | 'material' | 'die' | 'socModel' | 'equipmentChannel' | 'eccMode' | 'customCondition' | 'evaluationStep' | 'dq' | 'bl' | 'channel' | 'subChannel' | 'chipSelect' | 'rank' | 'bankGroup' | 'bank'
@@ -929,27 +961,67 @@ export interface NativeAgentAnalysisViewProposal {
   failOnly?: boolean
   rationale?: string
 }
+export interface NativeAgentEvaluationDraft {
+  purpose: string
+  changedConditions: string[]
+  fixedConditions: string[]
+  interpretation: string
+  findings: string[]
+  counterEvidence: string[]
+  caveats: string[]
+  trends: string
+  nextPlan: string
+  nextObjective?: string
+  changedVariable?: string
+  levels: string[]
+  heldConditions: string[]
+  samples: string[]
+  repeats?: number
+  successCriteria: string[]
+}
+/** Reviewable evaluation-history proposal authored by the same OpenCode
+ * session that inspected the folder. Exact result counts are deliberately not
+ * accepted here; the renderer recomputes them from local records. */
+export interface NativeAgentEvaluationProposal {
+  id: string
+  outcome: ProjectEvaluationReportOutcome
+  purpose?: ProjectEvaluationNode['purpose']
+  dimensions: Partial<ProjectEvaluationDimensions>
+  rationale: string
+  draft: NativeAgentEvaluationDraft
+  evidenceSourceIds: string[]
+}
 export interface NativeAgentToolTraceView {
   id: string; name: string; label: string; state: 'running' | 'completed' | 'failed'
   startedAt: string; completedAt?: string; summary?: string; evidenceSourceIds?: string[]
 }
 export interface NativeAgentMessageView {
   id: string; role: NativeAgentMessageRole; content: string; createdAt: string
-  toolTraceId?: string; evidenceSourceIds?: string[]; contextKind?: NativeAgentContextKind
+  question?: NativeAgentQuestionView; questionId?: string; toolTraceId?: string; evidenceSourceIds?: string[]; contextKind?: NativeAgentContextKind; evaluationStage?: NativeAgentEvaluationStage
 }
 export interface NativeAgentSessionSummary {
+  revision?: number
   id: string; projectId: string; title: string; backend: NativeAgentBackend
   /** Attached root folder used as one evaluation context. */
   evaluationScopeId?: string
   status: NativeAgentSessionStatus; createdAt: string; updatedAt: string
-  lastMessage?: string; failure?: string; lastContextKind?: NativeAgentContextKind
+  lastMessage?: string; failure?: string; lastContextKind?: NativeAgentContextKind; lastEvaluationStage?: NativeAgentEvaluationStage
+}
+export interface NativeAgentRuleProposal {
+  id: string; recipeId: string; baseRevision: number; name: string; rationale: string; rules: EvaluationRecipeRule[]
 }
 export interface NativeAgentSessionView extends NativeAgentSessionSummary {
   messages: NativeAgentMessageView[]; tools: NativeAgentToolTraceView[]; question?: NativeAgentQuestionView
   /** Engineer-selected purpose candidate for this evaluation folder. */
   evaluationIntent?: string
   /** Typed, uncommitted Results Summary proposal. Applying it never saves the project layout. */
+  ruleProposal?: NativeAgentRuleProposal
   analysisViewProposal?: NativeAgentAnalysisViewProposal
+  /** Typed, uncommitted evaluation summary authored by this OpenCode chat. */
+  evaluationProposal?: NativeAgentEvaluationProposal
+  /** The OpenCode conversation asked one clarification and still owes the
+   * typed evaluation summary on the engineer's next reply. */
+  evaluationReportPending?: boolean
 }
 export interface NativeAgentBackendStatusView {
   preferred: NativeAgentBackend; active: NativeAgentBackend; opencodeAvailable: boolean
@@ -958,7 +1030,7 @@ export interface NativeAgentBackendStatusView {
 export interface NativeAgentCreateRequest { projectId: string; title?: string; evaluationScopeId?: string; sourceIds?: string[] }
 export interface NativeAgentListRequest { projectId: string; evaluationScopeId?: string }
 export interface NativeAgentGetRequest { sessionId: string }
-export interface NativeAgentSendRequest { sessionId: string; content: string; sourceIds?: string[]; contextKind?: NativeAgentContextKind }
+export interface NativeAgentSendRequest { sessionId: string; content: string; questionId?: string; sourceIds?: string[]; contextKind?: NativeAgentContextKind; evaluationStage?: NativeAgentEvaluationStage }
 export interface NativeAgentRetryRequest { sessionId: string }
 export interface NativeAgentCancelRequest { sessionId: string }
 export interface NativeAgentSearchEventInput {
@@ -1011,6 +1083,7 @@ export interface EngineerConsolePromptRuleView {
   confirmedCount: number; createdAt: string; updatedAt: string
 }
 export type NativeAgentQuestionView =
+  | { id: string; kind: 'agent'; prompt: string; choices: string[] }
   | { id: string; kind: 'command-purpose'; prompt: string; choices: string[]; command: string; bootProfileId?: string; socModel?: string }
   | { id: string; kind: 'boot-profile'; prompt: string; choices: string[]; sourceIds: string[] }
   | { id: string; kind: 'console-role'; prompt: string; choices: string[]; sourceId: string; lineNumber: number; promptSignature: string; promptKind: string; command: string }
@@ -1063,26 +1136,27 @@ export type EvaluationAgentPublicStatus = 'running' | 'paused' | 'waiting_questi
 export type EvaluationAgentPublicOutcome = 'PASS' | 'DIAG_FAIL' | 'TEST_FAIL' | 'TRAINING_FAIL' | 'SYSTEM_HALT' | 'SYSTEM_REBOOT' | 'INCOMPLETE' | 'UNKNOWN'
 /** JSON projection of LPDDR evaluation dimensions; values are observations, not paths or log text. */
 export interface EvaluationAgentDimensions { skew?: string; lot?: string; material?: string; die?: string; sample?: string; socVendor?: ProjectSocVendor; socModel?: string; bootProfileId?: string; equipmentChannel?: string | number; eccMode?: string; customCondition?: string; evaluationStep?: string; bl?: string | number; dq?: string | number; channel?: string | number; subChannel?: string | number; chipSelect?: string | number; rank?: string | number; bank?: string | number; bankGroup?: string | number; row?: string | number; column?: string | number; pattern?: string | number; writeData?: string | number; readData?: string | number; gridId?: string; frequencyMHz?: number; temperatureC?: number; temperatureCorner?: string; vdd?: number; vddCorner?: string; conditionCorner?: string; timingSkewPs?: number; testMode?: string }
-export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; intent?: string; issueId?: string }
+export interface EvaluationAgentStartRequest { projectId: string; sourceIds?: string[]; evaluationScopeId?: string; intent?: string; issueId?: string }
 export interface EvaluationAgentRestoreRequest { projectId: string; evaluationScopeId?: string }
 export interface EvaluationAgentResumeRequest { sessionId: string; answer?: string; confirm?: 'accept' | 'reject' }
 export type EvaluationAgentQuestionField = keyof EvaluationAgentDimensions | 'evaluationIntent'
 export interface EvaluationAgentQuestionView { id: string; field: EvaluationAgentQuestionField; dimension?: keyof EvaluationAgentDimensions; prompt: string; impact: 'high'; choices?: string[] }
 export interface EvaluationAgentSourceAssessmentView { sourceId: string; outcome: EvaluationAgentPublicOutcome; evidenceIds: string[] }
-export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; evidenceIds: string[]; sourceIds: string[]; sourceAssessments?: EvaluationAgentSourceAssessmentView[] }
+export interface EvaluationAgentProposalView { outcome: EvaluationAgentPublicOutcome; purpose?: ProjectEvaluationNode['purpose']; dimensions: Partial<EvaluationAgentDimensions>; rationale: string; /** Optional for sessions saved by pre-report builds. */ report?: ProjectEvaluationReport; evidenceIds: string[]; sourceIds: string[]; sourceAssessments?: EvaluationAgentSourceAssessmentView[] }
 export interface EvaluationAgentEvidenceView { id: string; kind: 'metadata' | 'search' | 'window'; sourceId: string; summary: string; lineNumbers: number[] }
 export interface EvaluationAgentSessionView {
   schemaVersion: 1; id: string; status: EvaluationAgentPublicStatus; depth: number; calls: number; searches: number
-  files: Array<{ sourceId: string; name: string; lineCount?: number; size?: number; dimensions?: Partial<EvaluationAgentDimensions> }>
+  files: Array<{ sourceId: string; name: string; lineCount?: number; size?: number; dimensions?: Partial<EvaluationAgentDimensions>; commandSignatures?: string[] }>
   evidence: EvaluationAgentEvidenceView[]; transcript: Array<{ at: string; role: 'runtime' | 'provider' | 'user'; type: string }>
   dimensions: Partial<EvaluationAgentDimensions>; evaluationIntent?: string
+  folderSummary?: { totalFiles: number; analyzedFiles: number; resultCounts: Partial<Record<ProjectEvaluationReportOutcome, number>>; resultCoverage: 'complete' | 'partial'; resultSources: Partial<Record<'engineer' | 'rule' | 'local-marker' | 'filename' | 'unknown', number>>; commonDimensions: Partial<EvaluationAgentDimensions>; variedDimensions: Array<keyof EvaluationAgentDimensions>; commandSignatures: Array<{ command: string; files: number }> }
   analysisPolicy?: { id: string; version: string; source: 'bundled-skill' | 'built-in' }
   question?: EvaluationAgentQuestionView; proposal?: EvaluationAgentProposalView; failure?: string
 }
 export interface EvaluationAgentMemoryPayloadRequest { sessionId: string; projectId: string; hypothesisId: string; nodeId: string; evidenceIdPrefix: string }
 export interface EvaluationAgentMemoryPayloadView {
   hypothesis: { id: string; projectId: string; title: string; description?: string; origin: 'ai-proposed' | 'engineer-confirmed'; evaluationNodeIds?: string[] }
-  node: { id: string; projectId: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running'; evaluationScopeId?: string; interpretation?: string; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState; sequenceSignature?: string; attemptNo?: number; retestOf?: string; relation?: ProjectEvaluationRelationKind; relationConfidence?: number; relationReason?: string }
+  node: { id: string; projectId: string; hypothesisId?: string; parentId?: string; branchId?: string; name: string; purpose?: ProjectEvaluationNode['purpose']; dimensions: EvaluationAgentDimensions; status?: 'pass' | 'fail' | 'inconclusive' | 'running'; evaluationScopeId?: string; interpretation?: string; report?: ProjectEvaluationReport; authorship?: ProjectEvaluationAuthorship; reviewState?: ProjectEvaluationReviewState; sequenceSignature?: string; attemptNo?: number; retestOf?: string; relation?: ProjectEvaluationRelationKind; relationConfidence?: number; relationReason?: string }
   evidence: Array<{ id: string; projectId: string; evaluationNodeId: string; status: 'pass' | 'fail' | 'inconclusive' | 'running'; result?: string; dimensions?: Partial<EvaluationAgentDimensions>; sourceIds: string[]; summary?: string; origin?: 'ai-proposed' | 'engineer-confirmed' }>
 }
 
@@ -1118,13 +1192,6 @@ export interface SequenceIntelligenceApi {
     confirm(input: AgentConfirmInput): Promise<AgentConfirmResult>
     cancel(input: AgentCancelInput): Promise<AgentRun>
     onRunUpdate(listener: (run: AgentRun) => void): () => void
-  }
-  evaluationAgent: {
-    start(input: EvaluationAgentStartRequest): Promise<EvaluationAgentSessionView>
-    restore(input: EvaluationAgentRestoreRequest): Promise<EvaluationAgentSessionView | null>
-    get(sessionId: string): Promise<EvaluationAgentSessionView | null>
-    resume(input: EvaluationAgentResumeRequest): Promise<EvaluationAgentSessionView>
-    memorySavePayload(input: EvaluationAgentMemoryPayloadRequest): Promise<EvaluationAgentMemoryPayloadView | null>
   }
   nativeAgent: NativeAgentWorkspaceApi
   settings: {

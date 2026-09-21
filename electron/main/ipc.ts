@@ -146,11 +146,12 @@ function evaluationAgentView(session: import('../../src/domain/evaluation-agent'
     : undefined
   return {
     schemaVersion: 1, id: session.id, status: session.status, depth: session.depth, calls: session.calls, searches: session.searches,
-    files: session.files.map((file) => ({ sourceId: file.id, name: safeAgentText(file.name, 240), lineCount: file.lineCount, size: file.size, dimensions: file.metadata })),
+    files: session.files.map((file) => ({ sourceId: file.id, name: safeAgentText(file.name, 240), lineCount: file.lineCount, size: file.size, dimensions: file.metadata, commandSignatures: file.commandSignatures?.map((item) => safeAgentText(item, 120)) })),
     evidence: session.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, sourceId: evidence.fileId, summary: safeAgentText(evidence.detail, 400), lineNumbers: evaluationEvidenceLines(evidence) })),
     transcript: session.transcript.map((item) => ({ at: item.at, role: item.role, type: item.type })),
     dimensions: session.context.dimensions,
     ...(session.context.evaluationIntent ? { evaluationIntent: safeAgentText(session.context.evaluationIntent, 400) } : {}),
+    ...(session.context.folderSummary ? { folderSummary: session.context.folderSummary } : {}),
     ...(session.context.analysisPolicy ? { analysisPolicy: session.context.analysisPolicy } : {}),
     ...(question ? { question } : {}),
     proposal: session.proposal, failure: session.failure ? safeAgentText(session.failure, 300) : undefined
@@ -495,33 +496,38 @@ export function registerIpc(services: Services): void {
     return services.agent.cancel(input as never)
   })
 
-  handle(IPC_CHANNELS.evaluationAgentStart, async (event, input) => {
-    const session = await evaluationAgent().start(input as EvaluationAgentStartRequest)
-    if (event.sender.isDestroyed()) return evaluationAgentView(session)
-    registerEvaluationAgentOwner(event.sender, session.id)
-    return evaluationAgentView(session)
-  })
-  handle(IPC_CHANNELS.evaluationAgentRestore, async (event, input) => {
-    const value = input as EvaluationAgentRestoreRequest
-    const session = await evaluationAgent().restoreLatest(value.projectId, value.evaluationScopeId)
-    if (!session || event.sender.isDestroyed()) return session ? evaluationAgentView(session) : null
-    registerEvaluationAgentOwner(event.sender, session.id)
-    return evaluationAgentView(session)
-  })
-  handle(IPC_CHANNELS.evaluationAgentGet, (event, id) => {
-    const sessionId = String(id ?? ''); requireEvaluationAgentOwner(event, sessionId)
-    const session = evaluationAgent().get(sessionId); return session ? evaluationAgentView(session) : null
-  })
-  handle(IPC_CHANNELS.evaluationAgentResume, async (event, input) => {
-    const value = input as EvaluationAgentResumeRequest; requireEvaluationAgentOwner(event, value.sessionId)
-    return evaluationAgentView(await evaluationAgent().resume(value.sessionId, { answer: value.answer, confirm: value.confirm }))
-  })
-  handle(IPC_CHANNELS.evaluationAgentMemorySavePayload, (event, input) => {
-    const value = input as EvaluationAgentMemoryPayloadRequest; requireEvaluationAgentOwner(event, value.sessionId)
-    const prefix = safeAgentText(value.evidenceIdPrefix, 120); if (!prefix) throw new Error('invalid evidence ID prefix')
-    const payload = evaluationAgent().memorySavePayload(value.sessionId, { projectId: value.projectId, hypothesisId: value.hypothesisId, nodeId: value.nodeId, evidenceId: (id) => `${prefix}-${safeAgentText(id, 120)}` })
-    return payload ? evaluationMemoryView(payload) : null
-  })
+  // Kept only for legacy test/data migration hosts. Production bootstrap no
+  // longer supplies this service; the renderer exposes the Native/OpenCode
+  // Agent as the single project Agent surface.
+  if (services.evaluationAgent) {
+    handle(IPC_CHANNELS.evaluationAgentStart, async (event, input) => {
+      const session = await evaluationAgent().start(input as EvaluationAgentStartRequest)
+      if (event.sender.isDestroyed()) return evaluationAgentView(session)
+      registerEvaluationAgentOwner(event.sender, session.id)
+      return evaluationAgentView(session)
+    })
+    handle(IPC_CHANNELS.evaluationAgentRestore, async (event, input) => {
+      const value = input as EvaluationAgentRestoreRequest
+      const session = await evaluationAgent().restoreLatest(value.projectId, value.evaluationScopeId)
+      if (!session || event.sender.isDestroyed()) return session ? evaluationAgentView(session) : null
+      registerEvaluationAgentOwner(event.sender, session.id)
+      return evaluationAgentView(session)
+    })
+    handle(IPC_CHANNELS.evaluationAgentGet, (event, id) => {
+      const sessionId = String(id ?? ''); requireEvaluationAgentOwner(event, sessionId)
+      const session = evaluationAgent().get(sessionId); return session ? evaluationAgentView(session) : null
+    })
+    handle(IPC_CHANNELS.evaluationAgentResume, async (event, input) => {
+      const value = input as EvaluationAgentResumeRequest; requireEvaluationAgentOwner(event, value.sessionId)
+      return evaluationAgentView(await evaluationAgent().resume(value.sessionId, { answer: value.answer, confirm: value.confirm }))
+    })
+    handle(IPC_CHANNELS.evaluationAgentMemorySavePayload, (event, input) => {
+      const value = input as EvaluationAgentMemoryPayloadRequest; requireEvaluationAgentOwner(event, value.sessionId)
+      const prefix = safeAgentText(value.evidenceIdPrefix, 120); if (!prefix) throw new Error('invalid evidence ID prefix')
+      const payload = evaluationAgent().memorySavePayload(value.sessionId, { projectId: value.projectId, hypothesisId: value.hypothesisId, nodeId: value.nodeId, evidenceId: (id) => `${prefix}-${safeAgentText(id, 120)}` })
+      return payload ? evaluationMemoryView(payload) : null
+    })
+  }
 
   handle(IPC_CHANNELS.nativeAgentBackendStatus, () => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
@@ -544,7 +550,7 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentSend, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
     const value = input as NativeAgentSendRequest
-    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds, value.contextKind)
+    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds, value.contextKind, value.evaluationStage, value.questionId)
   })
   handle(IPC_CHANNELS.nativeAgentRetry, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')

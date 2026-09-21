@@ -4,6 +4,7 @@ import {
   buildProjectClonePlan,
   buildProjectOnboardingAnswers,
   isProjectInitStepValid,
+  PROJECT_INIT_ITEMS,
   projectListSecondary,
   serializeOnboardingItems,
   type ProjectInitDraft
@@ -17,7 +18,7 @@ describe('ProjectControl initialization helpers', () => {
     expect(serializeOnboardingItems([], '  ')).toBe('')
   })
 
-  it('maps project purpose to evaluationTarget and extraction decisions to importantMetadata', () => {
+  it('maps project purpose and always stores every standard extraction field', () => {
     expect(buildProjectOnboardingAnswers(draft({
       name: 'Bring-up',
       purpose: 'Evaluate reboot safety',
@@ -25,18 +26,16 @@ describe('ProjectControl initialization helpers', () => {
       custom: 'stop reason'
     }))).toEqual({
       evaluationTarget: 'Evaluate reboot safety',
-      importantMetadata: 'Mode · PASS/FAIL · stop reason',
+      importantMetadata: PROJECT_INIT_ITEMS.join(' · '),
       reuseRules: '새로 시작'
     })
   })
 
-  it('validates one progressive step at a time', () => {
+  it('requires only a project name now that extraction fields are automatic', () => {
     expect(isProjectInitStepValid(1, draft())).toBe(false)
     expect(isProjectInitStepValid(1, draft({ name: 'Bring-up' }))).toBe(true)
-    expect(isProjectInitStepValid(2, draft({ name: 'Bring-up' }))).toBe(false)
-    expect(isProjectInitStepValid(2, draft({ name: 'Bring-up', items: ['Mode'] }))).toBe(true)
-    expect(isProjectInitStepValid(2, draft({ name: 'Bring-up', custom: '정지 원인' }))).toBe(true)
-    expect(isProjectInitStepValid(3, draft({ name: 'Bring-up', items: ['Mode'] }))).toBe(true)
+    expect(isProjectInitStepValid(2, draft({ name: 'Bring-up' }))).toBe(true)
+    expect(isProjectInitStepValid(3, draft({ name: 'Bring-up' }))).toBe(true)
   })
 
   it('builds a clone plan from settings only', () => {
@@ -56,6 +55,6 @@ describe('ProjectControl initialization helpers', () => {
     expect(plan).not.toHaveProperty('results')
     expect(plan.exportPresets).not.toBe(source.exportPresets)
     expect(plan.exportPresets?.[0]?.options).not.toBe(source.exportPresets[0].options)
-    expect(projectListSecondary(source)).toBe('Evaluate reboot safety · 로그 1 · 폴더 1')
+    expect(projectListSecondary(source)).toBe('Evaluate reboot safety · 평가 1 · 로그 1')
   })
 })

@@ -17,7 +17,7 @@ const CONTEXT_LABELS: Record<NativeAgentContextKind, string> = {
   results: '결과',
   analysis_view: '결과 정리',
   evaluation_history: '평가 이력',
-  project_compare: '평가 비교',
+  project_compare: '폴더 비교',
 }
 
 export const analysisContextLabel = (kind?: NativeAgentContextKind): string => kind ? CONTEXT_LABELS[kind] : ''

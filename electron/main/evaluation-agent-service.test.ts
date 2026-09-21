@@ -24,11 +24,17 @@ async function waitForStatus(service: EvaluationAgentService, sessionId: string,
 }
 describe('EvaluationAgentService', () => {
   it('rejects cross-project sources before accessing artifacts', async () => { const { service } = setup([]); await expect(service.start({ projectId: 'p1', sourceIds: ['other'] })).rejects.toThrow('not authorized') })
-  it('returns a no-cost evaluation-purpose question before provider analysis', async () => {
-    const { service, prompts } = setup(['{"action":"propose","outcome":"PASS","rationale":"confirmed"}'])
+  it('runs provider inspection before asking a contextual evaluation-purpose question', async () => {
+    const { service, prompts } = setup([
+      '{"action":"ask","field":"evaluationIntent","impact":"high","question":"DIAG와 DQ8 FAIL은 확인됐지만 이전 FAIL 재현인지 검출 조건 탐색인지 구분되지 않습니다. 어느 쪽인가요?","choices":["이전 FAIL 재현","불량 검출 조건 탐색"]}',
+      '{"action":"propose","outcome":"PASS","rationale":"confirmed"}',
+    ])
     const started = await service.start({ projectId: 'p1', sourceIds: ['s1'] })
-    expect(started).toMatchObject({ status: 'waiting_question', question: { field: 'evaluationIntent' } })
-    expect(prompts).toHaveLength(0)
+    expect(['running', 'waiting_question']).toContain(started.status)
+    const question = await waitForStatus(service, started.id, 'waiting_question')
+    expect(question).toMatchObject({ question: { field: 'evaluationIntent' } })
+    expect(question.question?.prompt).toContain('DQ8 FAIL')
+    expect(prompts).toHaveLength(1)
     const resumed = await service.resume(started.id, { answer: '개선 효과 검증' })
     expect(['running', 'waiting_confirmation']).toContain(resumed.status)
     expect(await waitForStatus(service, started.id, 'waiting_confirmation')).toMatchObject({ proposal: { purpose: 'verification' } })
@@ -99,6 +105,41 @@ describe('EvaluationAgentService', () => {
       ],
     })
     expect(result.proposal?.rationale).toContain('PASS 1 · SYSTEM_HALT 1')
+  })
+  it('aggregates the entire folder while sending only representative files to the LLM', async () => {
+    const artifacts = Array.from({ length: 40 }, (_, index) => ({
+      sourceId: `source-${index}`, rootId: 'large-evaluation', artifactId: `artifact-${index}`,
+      relativePath: `26-08-07_UTF02A-2_Ch8_SM8975_1_25_1.295_CStep_HDIAG_COM74_SAMPLE-${index}_Pass.log`,
+    }))
+    const largeProject: ProjectSnapshot = { ...project, folders: [{ rootId: 'large-evaluation', displayLabel: 'Cold VDD 평가', status: 'available', connectedAt: '' }], artifacts }
+    const prompts: string[] = []
+    const records = artifacts.map((source, index) => ({
+      id: source.artifactId, sha256: source.artifactId, size: 10, extension: '.log', originalNames: [source.relativePath], importedAt: '', lastSeenAt: '', importCount: 1,
+      ...(index === 0 ? { fingerprint: { parserVersion: '1', lineCount: 8_000, blockCount: 1, commandCount: 2, commandTokens: ['erase', 'ddr'], commandSignatures: ['uefi:erase ddr', 'uefi:exit'], structuralHash: 'x', facts: [] } } : {}),
+    }))
+    const service = new EvaluationAgentService({
+      projects: { get: async () => largeProject }, artifacts: {
+        list: async () => records,
+        inspectStages: async (input) => ({ sources: input.sources.map((source) => ({ sourceId: source.sourceId, artifactId: source.artifactId, stages: [] })) }),
+        search: async () => ({ query: '', mode: 'literal', caseSensitive: false, matches: [], totalMatchCount: 0, truncated: false, files: [] }),
+        lineWindow: async () => ({ artifactId: '', startLine: 1, lines: [], hasMoreBefore: false, hasMoreAfter: false }),
+      },
+      evaluations: { snapshot: async () => ({
+        schemaVersion: 1, projectIdHash: 'p', revision: 1, recipes: [], batches: [], metadataApprovals: [],
+        decisions: [{ id: 'decision-1', revision: 1, source: { sourceId: 'source-0', artifactId: 'artifact-0', sourceKeyHash: 'x' }, result: 'TEST_FAIL', decidedBy: 'engineer', evidenceRefs: [], createdAt: '' }],
+      }) },
+      llm: { complete: async (prompt) => { prompts.push(prompt); return { content: '{"action":"propose","outcome":"PASS","rationale":"all pass"}', model: 'fake' } } },
+      id: () => 'large-folder-session',
+    })
+    const started = await service.start({ projectId: 'p1', evaluationScopeId: 'large-evaluation', intent: 'Cold VDD 경향 확인' })
+    const result = await waitForStatus(service, started.id, 'waiting_confirmation')
+    expect(result.files).toHaveLength(32)
+    expect(result.context.folderSummary).toMatchObject({
+      totalFiles: 40, analyzedFiles: 40, resultCounts: { PASS: 39, TEST_FAIL: 1 }, resultSources: { engineer: 1, filename: 39 },
+    })
+    expect(result.proposal?.report?.results).toMatchObject({ total: 40, byOutcome: { PASS: 39, TEST_FAIL: 1 }, state: 'computed' })
+    expect(prompts.join('\n')).toContain('uefi:erase ddr')
+    expect(prompts.join('\n')).toContain('"totalFiles":40')
   })
   it('supplies bounded confirmed evaluation and Ctrl-F procedure context to the planner', async () => {
     const contextualProject: ProjectSnapshot = {
@@ -176,7 +217,7 @@ describe('EvaluationAgentService', () => {
     const restored = await reopened.restoreLatest('p1', 'r')
     expect(restored).toMatchObject({ id: 'restorable', status: 'waiting_question' })
     await reopened.resume('restorable', { answer: 'HDIAG' })
-    expect(await waitForStatus(reopened, 'restorable', 'waiting_confirmation')).toMatchObject({ proposal: { outcome: 'PASS' } })
+    expect(await waitForStatus(reopened, 'restorable', 'waiting_confirmation')).toMatchObject({ proposal: { outcome: 'UNKNOWN' } })
   })
 
   it('keeps the project evaluation folder id while using a separate physical artifact root', async () => {

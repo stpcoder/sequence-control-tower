@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, reusableNativeLaunchSessionId, shouldRestoreEvaluationReview, shouldRetainAgentSession, shouldShowNativeAgentSuggestions, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
-import type { EvaluationAgentMemoryPayloadView, EvaluationAgentSessionView, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
+import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, exactFolderOutcome, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, nativeEvaluationReport, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, reusableNativeLaunchSessionId, shouldRestoreEvaluationReview, shouldRetainAgentSession, acceptNativeSession, mergeNativeSessionSummaries, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
+import type { EvaluationAgentMemoryPayloadView, EvaluationAgentSessionView, NativeAgentEvaluationProposal, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
+import type { LogResultRecord } from '../state/logRecords'
 
 const project: ProjectSnapshot = { schemaVersion: 2, id: 'p1', name: 'P', revision: 4, archived: false, createdAt: '', updatedAt: '', folders: [], artifacts: [], equipmentProfiles: [], templatePins: [], exportPresets: [] }
+
+const record = (id: string, result: LogResultRecord['result']): LogResultRecord => ({
+  id, evaluationScopeId: 'folder-a', fileName: `${id}.log`, folder: 'folder-a', relativePath: `${id}.log`,
+  sample: { value: 'S1', state: 'candidate' },
+  temperature: { value: '85', state: 'candidate' },
+  vdd: { value: '1.295', state: 'candidate' },
+  grid: { value: 'G1', state: 'candidate' },
+  result, resultSource: 'engineer', stageResults: [], review: 'confirmed', evidenceCount: 0, selectedEvidenceCount: 0,
+})
 
 describe('mergeEvaluationAgentMemory', () => {
   it('adds confirmed hypothesis, node, and source-linked evidence without replacing existing memory', () => {
@@ -69,7 +79,7 @@ describe('mergeEvaluationAgentMemory', () => {
     expect(evaluationOutcomeLabel('UNKNOWN')).toBe('미정')
     expect(proposalDecisionResult('TEST_FAIL')).toBe('TEST_FAIL')
     expect(proposalDecisionResult('UNKNOWN')).toBeNull()
-    expect(evaluationDimensionSummary({ skew: 'SS', channel: 0, subChannel: 1, bank: 5 })).toEqual(['SKEW SS', 'CH 0', 'Sub CH 1', 'Bank 5'])
+    expect(evaluationDimensionSummary({ skew: 'SS', channel: 0, subChannel: 1, bank: 5 })).toEqual(['Skew SS', 'CH 0', 'Sub CH 1', 'Bank 5'])
     expect(agentEvaluationPurposeLabel('characterization')).toBe('불량 경향 파악')
     expect(agentEvaluationPurposeLabel('stage-verification')).toBe('부팅·Training 확인')
     expect(evaluationAgentRecordPrefix('project/one', 'session:1')).toBe('ea-projectone-session1')
@@ -100,6 +110,25 @@ describe('mergeEvaluationAgentMemory', () => {
       outcome: 'TEST_FAIL', dimensions: {}, rationale: '', evidenceIds: ['e1', 'e2'], sourceIds: ['s1', 's2'],
       sourceAssessments: [{ sourceId: 's1', outcome: 'PASS', evidenceIds: ['e1'] }, { sourceId: 's2', outcome: 'TEST_FAIL', evidenceIds: ['e2'] }],
     })).toEqual([{ sourceId: 's1', outcome: 'PASS', evidenceIds: ['e1'] }, { sourceId: 's2', outcome: 'TEST_FAIL', evidenceIds: ['e2'] }])
+  })
+
+  it('keeps exact folder outcomes local while using OpenCode only for qualitative report text', () => {
+    const proposal: NativeAgentEvaluationProposal = {
+      id: 'proposal-1', outcome: 'PASS', purpose: 'characterization', dimensions: { dq: 9 }, rationale: 'DQ9 반복',
+      draft: {
+        purpose: '고온 재현 경향 확인', changedConditions: ['온도'], fixedConditions: ['VDD'],
+        interpretation: '고온에서 불량이 더 잘 재현되는 경향이 있습니다.', findings: ['DQ9 반복'], counterEvidence: [], caveats: [],
+        trends: 'DQ9와 Bank 3에서 반복되었습니다.', nextPlan: '같은 Sample로 온도만 바꿔 재평가합니다.',
+        levels: ['Hot', 'Room'], heldConditions: ['VDD'], samples: ['S1'], successCriteria: ['동일 signature 재현'],
+      }, evidenceSourceIds: [],
+    }
+    const mixed = [record('pass', 'PASS'), record('fail', 'TEST_FAIL')]
+    expect(exactFolderOutcome(mixed)).toBe('UNKNOWN')
+    const report = nativeEvaluationReport(proposal, mixed, '고온 경향 확인')
+    expect(report.results.summary).toContain('PASS 1')
+    expect(report.results.summary).toContain('TEST_FAIL 1')
+    expect(report.interpretation.text).toContain('고온에서 불량이 더 잘 재현')
+    expect(report.results.evidenceSourceIds).toEqual(['pass', 'fail'])
   })
 
   it('keeps a live agent session for revision-only updates and clears it when its log scope changes', () => {
@@ -165,17 +194,10 @@ describe('mergeEvaluationAgentMemory', () => {
     expect(agentEvaluationSources({ ...scopedProject, artifacts: scopedProject.artifacts.slice(0, 2) }).map((item) => item.sourceId)).toEqual(['a-1', 'a-2'])
   })
 
-  it('keeps primary actions reachable after bounded onboarding answers', () => {
-    const session = (userMessages: number, question = false): NativeAgentSessionView => ({
-      id: 'session', projectId: 'p1', title: 'analysis', backend: 'internal', status: 'idle',
-      createdAt: '', updatedAt: '', tools: [],
-      messages: Array.from({ length: userMessages }, (_, index) => ({ id: `m-${index}`, role: 'user' as const, content: `answer ${index}`, createdAt: '' })),
-      ...(question ? { question: { id: 'q', kind: 'command-purpose' as const, command: 'memory_training', prompt: 'purpose?', choices: ['Training'] } } : {}),
-    })
-    expect(shouldShowNativeAgentSuggestions(session(0))).toBe(true)
-    expect(shouldShowNativeAgentSuggestions(session(3))).toBe(true)
-    expect(shouldShowNativeAgentSuggestions(session(4))).toBe(false)
-    expect(shouldShowNativeAgentSuggestions(session(1, true))).toBe(false)
+  it('keeps the latest answer when a queued IPC response arrives late', () => {
+    const current: NativeAgentSessionView = { id: 's', projectId: 'p', title: '', backend: 'internal', status: 'waiting_question', revision: 5, createdAt: '', updatedAt: '2026-09-22', messages: [], tools: [], question: { id: 'q', kind: 'agent', prompt: '결과를 확인할까요?', choices: [] } }
+    expect(acceptNativeSession(current, { ...current, status: 'queued', question: undefined, revision: 3 })).toBe(current)
+    expect(acceptNativeSession(current, { ...current, status: 'idle', revision: 6 }).status).toBe('idle')
   })
 
   it('places only the tools used for an answer directly before that answer', () => {
@@ -211,5 +233,17 @@ describe('mergeEvaluationAgentMemory', () => {
     }
     expect(toolsForCurrentAgentRun(session).map((tool) => tool.id)).toEqual(['new'])
     expect(toolsForCurrentAgentRun({ ...session, status: 'idle' })).toEqual([])
+  })
+})
+
+
+describe('conversation list races', () => {
+  it('merges a delayed list without dropping a newly created session or regressing live status', () => {
+    const session = { id: 'a', projectId: 'p1', title: 'A', backend: 'internal' as const, status: 'idle' as const, createdAt: '', updatedAt: '2026-09-22', revision: 5 }
+    const newSession = { ...session, id: 'b', title: 'B' }
+    const merged = mergeNativeSessionSummaries([session, newSession], [{ ...session, status: 'running', revision: 2 }])
+    expect(merged).toHaveLength(2)
+    expect(merged.find((item) => item.id === 'a')).toMatchObject({ revision: 5, status: 'idle' })
+    expect(mergeNativeSessionSummaries(merged, [{ ...session, revision: 6, status: 'waiting_question' }]).find((item) => item.id === 'a')?.status).toBe('waiting_question')
   })
 })

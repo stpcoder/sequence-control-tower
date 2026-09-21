@@ -26,6 +26,8 @@ import {
   LoaderCircle,
   Pencil,
   Play,
+  RotateCcw,
+  MoreHorizontal,
   Regex,
   Search,
   SearchCode,
@@ -45,7 +47,7 @@ import type {
   ArtifactSearchInput,
   ArtifactSearchResult,
   EngineerWorkflowCheckView,
-  EngineerWorkflowReviewView,
+  EngineerWorkflowMemoryView,
   EvaluationBatchExceptionCode,
   NativeAgentCompleteEvaluationResult,
   ProjectSnapshot,
@@ -91,6 +93,7 @@ import {
   type LogDraft,
 } from '../state/logDraft'
 import '../workbench.css'
+import { useViewDraft } from '../state/viewDrafts'
 import { resolveProjectSource } from '../state/sourceIdentity'
 
 export type WorkbenchDecision = ResultLabel
@@ -112,6 +115,7 @@ export interface WorkbenchFile {
   decision?: WorkbenchDecision
   /** Deterministic result applied by the active folder rule set. */
   ruleResult?: WorkbenchDecision
+  ruleStale?: boolean
   ruleNeedsReview?: boolean
   ruleExceptionCode?: EvaluationBatchExceptionCode
 }
@@ -123,8 +127,8 @@ export function filterWorkbenchFiles(
   filter: WorkbenchFileFilter,
 ): WorkbenchFile[] {
   if (filter === 'all') return [...files]
-  if (filter === 'conflict') return files.filter((file) => !file.decision && file.ruleExceptionCode === 'RULE_CONFLICT')
-  return files.filter((file) => !file.decision && file.ruleNeedsReview === true)
+  if (filter === 'conflict') return files.filter((file) => file.ruleExceptionCode === 'RULE_CONFLICT')
+  return files.filter((file) => file.ruleNeedsReview === true)
 }
 
 export interface WorkbenchRecipeDraft {
@@ -150,7 +154,7 @@ export interface WorkbenchViewProps {
   onSelectedFileChange?: (fileId: string | null) => void
   onSelectedFolderChange?: (rootId: string | null) => void
   onEvidenceCountChange?: (fileId: string, count: number) => void
-  onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision, evidenceLines: number[]) => void | Promise<void>
+  onDecision?: (file: WorkbenchFile, decision: WorkbenchDecision | null, evidenceLines: number[]) => void | Promise<void>
   onBatchResults?: (resolution: PrecomputedBatchResolution) => void | Promise<void>
   onSaveRecipe?: (draft: WorkbenchRecipeDraft) => void | Promise<void>
   onArchiveRecipe?: (recipeId: string) => void | Promise<void>
@@ -158,6 +162,7 @@ export interface WorkbenchViewProps {
   onImportProjectFolder?: () => Promise<{ cancelled: true } | { cancelled: false; importedCount: number; failureCount: number; skippedCount: number }>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
+  onWorkflowConfirmed?: (memory: EngineerWorkflowMemoryView) => void | Promise<void>
   projectId?: string
   projectSources?: readonly ProjectSnapshot['artifacts'][number][]
 }
@@ -239,16 +244,24 @@ export function compactIncrementalSearchObservations(observations: readonly Sear
   }, [])
 }
 
-/** Keep an engineer's explicit condition choices. On a first decision there is
- * no prior choice, so every Enter-executed search starts selected instead of
- * forcing the same searches to be picked a second time. */
+/** Keep explicit choices. For a first decision, promote positive Enter-searches
+ * automatically. A missing PASS/FAIL marker is promoted only when absence can
+ * help explain a non-PASS outcome such as reboot or an interrupted failure. */
 export function defaultRuleObservationIds(
   existingIds: readonly string[],
   observations: readonly SearchObservation[],
+  decision?: WorkbenchDecision,
 ): string[] {
   const available = new Set(observations.map((observation) => observation.id))
   const existing = existingIds.filter((id) => available.has(id))
-  return existing.length ? existing : observations.map((observation) => observation.id)
+  if (existing.length) return existing
+  if (!decision) return observations.map((observation) => observation.id)
+
+  const terminalMarker = (query: string) => /^(?:@\s*)?(?:pass|fail)$|^terminal[_ ]result\s*=\s*(?:pass|fail)$/i.test(query.trim())
+  const absenceCarriesMeaning = decision !== 'PASS' && decision !== 'UNKNOWN' && decision !== 'EXCLUDED'
+  const inferred = observations.filter((observation) => observation.matched
+    || (absenceCarriesMeaning && terminalMarker(observation.query)))
+  return (inferred.length ? inferred : observations).map((observation) => observation.id)
 }
 
 /** Most-recent-first Ctrl-F terms for the active log. Searches are deliberately
@@ -375,7 +388,7 @@ export function saveWorkbenchPaneWidths(storage: Storage | undefined, key: strin
 }
 
 export function patternReviewFailureMessage(): string {
-  return 'AI 로그 검토를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  return '빠른 로그 검토를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
 }
 
 export function lineWindowEdgeRequestKey(fileId: string, edge: LineWindowEdge, boundary: number): string {
@@ -480,7 +493,10 @@ export function ruleEditorPresentation(input: RuleEditorPresentationInput): {
 } {
   const available = input.hasDraft && input.hasObservations
   return {
-    showWorkflowReview: input.hasWorkflowReview,
+    // Search-workflow memory is confirmed when an engineer explicitly applies
+    // the rule. A second checkbox form after every decision made the primary
+    // workflow harder to understand and duplicated the deterministic rule UI.
+    showWorkflowReview: false,
     showEditor: input.hasDraft && input.editorOpen,
     showOpenButton: available && !input.editorOpen,
   }
@@ -1257,7 +1273,7 @@ export function resolvePrecomputedBatch(
       conflictIds.push(file.id)
     }
     outcomes[file.id] = savedDecision ?? (decisionConflict ? 'UNKNOWN' : evaluation.result)
-    const exceptional = decisionConflict || evaluation.result === 'UNKNOWN' || evaluation.exceptions.length > 0
+    const exceptional = !rules.length && savedDecision && savedDecision !== 'UNKNOWN' ? false : decisionConflict || evaluation.result === 'UNKNOWN' || evaluation.exceptions.length > 0
     if (exceptional) {
       exceptions += 1
       exceptionIds.push(file.id)
@@ -1358,6 +1374,20 @@ export function engineerWorkflowCheckKey(check: EngineerWorkflowCheckView): stri
   return [check.mode, check.caseSensitive ? '1' : '0', check.query.trim().toLowerCase(), check.expected, check.stage].join('\u001f')
 }
 
+export function confirmedWorkflowChecksFromObservations(
+  availableChecks: readonly EngineerWorkflowCheckView[],
+  selectedObservations: readonly SearchObservation[],
+): EngineerWorkflowCheckView[] {
+  const key = (query: string, mode: string, caseSensitive: boolean) => (
+    `${mode}:${caseSensitive ? '1' : '0'}:${query.trim().toLocaleLowerCase('ko-KR')}`
+  )
+  const available = new Map(availableChecks.map((check) => [key(check.query, check.mode, check.caseSensitive), check]))
+  return selectedObservations.flatMap((observation) => {
+    const check = available.get(key(observation.query, observation.matcherKind, observation.caseSensitive))
+    return check ? [check] : []
+  }).map((check, index) => ({ ...check, order: index + 1 }))
+}
+
 export function toggleEngineerWorkflowCheck(
   selected: readonly EngineerWorkflowCheckView[],
   check: EngineerWorkflowCheckView,
@@ -1402,6 +1432,7 @@ export function WorkbenchView({
   onImportProjectFolder,
   onNotify,
   onAnalyzeContext,
+  onWorkflowConfirmed,
   projectId = 'log-workbench',
   projectSources = [],
 }: WorkbenchViewProps) {
@@ -1419,7 +1450,7 @@ export function WorkbenchView({
   const [searchOpen, setSearchOpen] = useState(false)
   const [goToLineOpen, setGoToLineOpen] = useState(false)
   const [goToLineValue, setGoToLineValue] = useState('')
-  const [wordWrap, setWordWrap] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('sequence-control-tower:word-wrap') === 'true')
+  const [wordWrap, setWordWrap] = useState(() => workbenchStorage()?.getItem('sequence-control-tower:word-wrap') === 'true')
   const [searchHistoryIndex, setSearchHistoryIndex] = useState(-1)
   const [replaceMode, setReplaceMode] = useState(false)
   const [replacement, setReplacement] = useState('')
@@ -1446,12 +1477,16 @@ export function WorkbenchView({
   const [candidateDecisions, setCandidateDecisions] = useState<Record<string, ResultLabel>>({})
   const [savedDecisions, setSavedDecisions] = useState<Record<string, ResultLabel>>({})
   const [savedRecipes, setSavedRecipes] = useState<LogWorkbenchRecipe[]>([])
-  const [sessionAppliedRulesByFolder, setSessionAppliedRulesByFolder] = useState<Record<string, RecipeRule[]>>({})
+  const [sessionAppliedRulesByFolder, setSessionAppliedRulesByFolder] = useViewDraft<Record<string, RecipeRule[]>>(`workbench-rules:${projectId}`, {})
   const [recipeVisible, setRecipeVisible] = useState(false)
   const [recipeSaved, setRecipeSaved] = useState(false)
+  const [ruleSaving, setRuleSaving] = useState(false)
+  const ruleSavingRef = useRef(false)
+  const batchInFlightRef = useRef(false)
+  const [decisionSaving, setDecisionSaving] = useState(false)
+  const decisionSavingRef = useRef(false)
   const [editingRecipeId, setEditingRecipeId] = useState<string | undefined>(undefined)
   const [recipeManagerOpen, setRecipeManagerOpen] = useState(false)
-  const [recipeApplyId, setRecipeApplyId] = useState<string | null>(null)
   const [archivedRecipeIds, setArchivedRecipeIds] = useState<Set<string>>(() => new Set())
   const [unresolvedRecipeClauseIds, setUnresolvedRecipeClauseIds] = useState<Set<string>>(() => new Set())
   const [recipeEvidenceBusy, setRecipeEvidenceBusy] = useState(false)
@@ -1462,10 +1497,6 @@ export function WorkbenchView({
   const [invalidPattern, setInvalidPattern] = useState(false)
   const [patternReviewComment, setPatternReviewComment] = useState('')
   const [patternReview, setPatternReview] = useState<PatternReviewState>({ status: 'idle' })
-  const [workflowReviews, setWorkflowReviews] = useState<Record<string, EngineerWorkflowReviewView>>({})
-  const [workflowPurposes, setWorkflowPurposes] = useState<Record<string, string>>({})
-  const [workflowCheckDrafts, setWorkflowCheckDrafts] = useState<Record<string, EngineerWorkflowCheckView[]>>({})
-  const [workflowSaving, setWorkflowSaving] = useState(false)
   const [paneWidths, setPaneWidths] = useState<WorkbenchPaneWidths>(() => readWorkbenchPaneWidths(
     typeof window === 'undefined' ? undefined : workbenchStorage(),
     `sequence-control-tower:workbench-widths:${projectId}`,
@@ -1546,7 +1577,6 @@ export function WorkbenchView({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        setRecipeApplyId(null)
         setRecipeManagerOpen(false)
         return
       }
@@ -1560,7 +1590,7 @@ export function WorkbenchView({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [recipeApplyId, recipeManagerOpen])
+  }, [recipeManagerOpen])
 
   useEffect(() => {
     setRecipeDetailsOpen(false)
@@ -1606,24 +1636,14 @@ export function WorkbenchView({
   const projectFolderGroups = useMemo(() => groupWorkbenchFiles(files), [files])
   const effectiveRulesByFolder = useMemo<Record<string, RecipeRule[]>>(() => Object.fromEntries(
     projectFolderGroups.map((group) => {
-      const rules = [
-        ...(appliedRulesByFolder?.[group.key] ?? []),
-        ...(sessionAppliedRulesByFolder[group.key] ?? []),
-      ]
+      const rules = durableRecipes !== undefined
+        ? appliedRulesByFolder?.[group.key] ?? []
+        : sessionAppliedRulesByFolder[group.key] ?? []
       return [group.key, [...new Map(rules.map((rule) => [rule.id, rule])).values()]]
     }),
-  ), [appliedRulesByFolder, projectFolderGroups, sessionAppliedRulesByFolder])
+  ), [appliedRulesByFolder, durableRecipes, projectFolderGroups, sessionAppliedRulesByFolder])
   const activeFolderKey = activeFile ? workbenchRootGroupKey(activeFile) : undefined
   const activeFolderRules = activeFolderKey ? effectiveRulesByFolder[activeFolderKey] ?? [] : []
-  const activeProjectSource = activeFile ? resolveProjectSource({ artifacts: projectSources }, activeFile) : null
-  const workflowReview = activeProjectSource ? workflowReviews[activeProjectSource.sourceId] ?? null : null
-  const workflowPurpose = workflowReview ? workflowPurposes[workflowReview.id] ?? '' : ''
-  const workflowChecks = workflowReview ? workflowCheckDrafts[workflowReview.id] ?? workflowReview.checks : []
-  const orderedWorkflowReviewChecks = workflowReview ? orderSelectionRows(
-    workflowReview.checks,
-    workflowChecks,
-    engineerWorkflowCheckKey,
-  ) : []
   const activeWindow = activeFile ? lineWindows[activeFile.id] : undefined
   const activeSourceLines = useMemo(() => {
     if (!activeFile) return []
@@ -1672,9 +1692,6 @@ export function WorkbenchView({
   const activeTotalLines = activeFile?.artifactId ? activeWindow?.totalLines : activeSourceLines.length
 
   useEffect(() => {
-    setWorkflowReviews({})
-    setWorkflowPurposes({})
-    setSessionAppliedRulesByFolder({})
     setFileFilter('all')
   }, [projectId])
   const searchTotal = memoryHits.length + backendTotal
@@ -1689,6 +1706,10 @@ export function WorkbenchView({
   }), [backendCounts, memoryHits, searchFiles])
   const activeBatchEvaluation = batchPreview.evaluations?.[activeFile?.id ?? '']
   const activeBatchConflict = batchPreview.conflictIds?.includes(activeFile?.id ?? '') ?? false
+  const batchExceptionFiles = useMemo(() => (batchPreview.exceptionIds ?? []).flatMap((fileId) => {
+    const file = files.find((item) => item.id === fileId)
+    return file ? [file] : []
+  }), [batchPreview.exceptionIds, files])
   const patternReviewBusy = patternReview.status === 'starting'
     || patternReview.status === 'queued'
     || patternReview.status === 'running'
@@ -1702,6 +1723,8 @@ export function WorkbenchView({
       ? counts[activeFile.id]
       : collectHits([activeFile], query, options).length
     if (activeCount === undefined) return
+    setRecipeSaved(false)
+    if (!batchInFlightRef.current) setBatchPreview(emptyBatchPreview())
 
     setSearchHistory((current) => ({
       ...current,
@@ -1933,6 +1956,7 @@ export function WorkbenchView({
   }, [activeFile?.artifactId, activeFile?.id, recipeEvidenceSignature, recipeVisible, ruleDecision])
 
   const canArrangeMarkerOrder = selectedRecipeObservations.length > 1
+    && selectedRecipeObservations.every((observation) => observation.matched && observation.target === 'content')
 
   const updateRecipeObservation = (observationId: string, patch: Partial<Pick<SearchObservation, 'query' | 'matcherKind' | 'target' | 'caseSensitive'>>) => {
     if (!activeFile) return
@@ -2061,13 +2085,13 @@ export function WorkbenchView({
 
   const archiveRecipe = async (recipeId: string) => {
     const recipe = activeRecipeRevisions.find((item) => item.recipeId === recipeId)
-    if (!recipe || !window.confirm(`“${recipe.name}” 규칙을 삭제할까요?`)) return
+    if (!recipe || ruleSavingRef.current || batchInFlightRef.current || !window.confirm(`“${recipe.name}” 규칙을 프로젝트에서 삭제할까요? 사용 중인 평가 폴더는 재검사가 필요합니다.`)) return
+    ruleSavingRef.current = true; setRuleSaving(true)
     const deletedRuleIds = new Set(recipe.rules.map((rule) => rule.id))
     invalidateBatchRun()
-    setRecipeApplyId((current) => current === recipeId ? null : current)
     setArchivedRecipeIds((current) => new Set(current).add(recipeId))
     try {
-      if (onArchiveRecipe) {
+      if (electronApi()?.evaluations && onArchiveRecipe) {
         await onArchiveRecipe(recipeId)
       } else {
         const stored = loadLogWorkbenchState(window.localStorage, projectId).state
@@ -2082,12 +2106,17 @@ export function WorkbenchView({
         setRecipeSaved(false)
       }
       setSessionAppliedRulesByFolder((current) => removeRulesFromAppliedFolders(current, deletedRuleIds))
+      if (!electronApi()?.evaluations) updateFiles(filesRef.current.map((file) => {
+        if (!(sessionAppliedRulesByFolder[workbenchRootGroupKey(file)] ?? []).some((rule) => deletedRuleIds.has(rule.id))) return file
+        const { ruleResult: _result, ruleExceptionCode: _exception, ...rest } = file
+        return { ...rest, ruleStale: true, ruleNeedsReview: true }
+      }))
       onNotify?.(`${recipe.name} 규칙을 삭제했습니다.`, 'success')
     } catch (error) {
       console.error('[WorkbenchView] Failed to delete analysis rule', { recipeId, error })
       setArchivedRecipeIds((current) => { const next = new Set(current); next.delete(recipeId); return next })
       onNotify?.(error instanceof Error ? `규칙을 삭제하지 못했습니다: ${error.message}` : '규칙을 삭제하지 못했습니다.', 'error')
-    }
+    } finally { ruleSavingRef.current = false; if (mountedRef.current) setRuleSaving(false) }
   }
 
   const draft = useMemo<WorkbenchRecipeDraft | null>(() => {
@@ -2105,7 +2134,7 @@ export function WorkbenchView({
     hasDraft: Boolean(draft),
     hasObservations: recipeObservations.length > 0,
     editorOpen: recipeVisible,
-    hasWorkflowReview: Boolean(workflowReview),
+    hasWorkflowReview: false,
   })
 
   const buildWorkbenchRule = useCallback((sourceFileId: string, result: Exclude<WorkbenchDecision, 'UNKNOWN'>): RecipeRule | null => {
@@ -2150,6 +2179,7 @@ export function WorkbenchView({
       const previousFile = filesRef.current.find((file) => file.id === activeFileIdRef.current)
       const nextFile = filesRef.current.find((file) => file.id === fileId)
       if (previousFile && nextFile && workbenchRootGroupKey(previousFile) !== workbenchRootGroupKey(nextFile)) {
+        invalidateBatchRun()
         setFileFilter('all')
       }
       setRecipeDetailsOpen(false)
@@ -2158,7 +2188,6 @@ export function WorkbenchView({
       setEditingRecipeId(undefined)
       setCandidateDecisions({})
       bestEffortCancelPatternReview()
-      invalidateBatchRun()
       lineScrollAnchor.current = null
       activeFileIdRef.current = fileId
       lineWindowEpochs.current.set(fileId, (lineWindowEpochs.current.get(fileId) ?? 0) + 1)
@@ -2979,36 +3008,45 @@ export function WorkbenchView({
     return () => window.removeEventListener('sequence-control-tower:command', handleAppCommand)
   }, [importFolder, openSearch])
 
-  const applyCompletedEvaluation = (
-    completed: NativeAgentCompleteEvaluationResult,
-    sourceId: string,
-  ) => {
+  const applyCompletedEvaluation = (completed: NativeAgentCompleteEvaluationResult) => {
     if (completed.attempt?.relation === 'retest') {
       onNotify?.(`RT 연결됨 · 동일 Sample/Sequence의 이전 FAIL 평가 #${completed.attempt.attemptNo - 1}`, 'success')
     } else if (completed.attempt?.relation === 'unresolved-retest') {
       onNotify?.('RT 표기는 확인했지만 연결할 이전 동일 평가를 찾지 못했습니다.', 'info')
     }
-    if (completed.kind === 'review') {
-      setWorkflowReviews((current) => ({ ...current, [completed.review.sourceId]: completed.review }))
-      setWorkflowCheckDrafts((current) => ({ ...current, [completed.review.id]: completed.review.checks }))
-      setWorkflowPurposes((current) => ({
-        ...current,
-        [completed.review.id]: current[completed.review.id]
-          ?? completed.review.suggestions.find((item) => item !== '직접 입력')
-          ?? '',
-      }))
-    } else if (completed.kind === 'applied') {
-      setWorkflowReviews((current) => {
-        const next = { ...current }
-        delete next[sourceId]
-        return next
+  }
+
+  const rememberAppliedWorkflow = async (
+    completed: NativeAgentCompleteEvaluationResult,
+    result: WorkbenchDecision,
+    selectedObservations: readonly SearchObservation[],
+  ): Promise<void> => {
+    applyCompletedEvaluation(completed)
+    if (completed.kind !== 'review') return
+    const api = electronApi()
+    if (!api?.nativeAgent) return
+    const confirmedChecks = confirmedWorkflowChecksFromObservations(completed.review.checks, selectedObservations)
+    if (confirmedChecks.length < 2) return
+    const resultLabel = DECISIONS.find((item) => item.value === result)?.label ?? result
+    try {
+      const memory = await api.nativeAgent.confirmWorkflow({
+        projectId,
+        reviewId: completed.review.id,
+        purpose: `${resultLabel} 판정`,
+        checks: confirmedChecks,
       })
-      onNotify?.(`저장된 분석 절차 적용 · ${completed.memory.purpose}`, 'success')
+      await onWorkflowConfirmed?.(memory)
+    } catch (error) {
+      // The deterministic folder rule is already saved and applied. Agent
+      // memory is secondary and must never make the primary action fail.
+      console.warn('[WorkbenchView] Failed to remember applied search workflow', error)
     }
   }
 
   const commitEngineerDecision = async (nextDecision: WorkbenchDecision): Promise<boolean> => {
-    if (!activeFile) return false
+    if (!activeFile || decisionSavingRef.current || ruleSavingRef.current || batchInFlightRef.current) return false
+    decisionSavingRef.current = true
+    setDecisionSaving(true)
     try {
       if (!window.sequenceIntelligence?.evaluations) {
         const stored = loadLogWorkbenchState(window.localStorage, projectId).state
@@ -3021,6 +3059,7 @@ export function WorkbenchView({
         setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
       }
       await onDecision?.(activeFile, nextDecision, evidenceLines)
+      if (!mountedRef.current || activeFileIdRef.current !== activeFile.id) return false
       setDecisions((current) => ({ ...current, [activeFile.id]: nextDecision }))
       setCandidateDecisions((current) => {
         const next = { ...current }
@@ -3039,7 +3078,7 @@ export function WorkbenchView({
               caseSensitive: observation.caseSensitive,
             })) } : {}),
           }))
-          .then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
+          .then(applyCompletedEvaluation).catch(() => undefined)
       }
       return true
     } catch (error) {
@@ -3047,93 +3086,7 @@ export function WorkbenchView({
         onNotify?.(error instanceof Error ? `판정을 저장하지 못했습니다: ${error.message}` : '판정을 저장하지 못했습니다.', 'error')
       }
       return false
-    }
-  }
-
-  const prepareRuleFromWorkflow = (checks: readonly EngineerWorkflowCheckView[]) => {
-    if (!activeFile || !checks.length) return
-    const signature = (query: string, mode: SearchObservation['matcherKind'], caseSensitive: boolean) => (
-      `${mode}:${caseSensitive ? '1' : '0'}:${query.trim().toLocaleLowerCase('ko-KR')}`
-    )
-    let nextHistory = searchHistory[activeFile.id] ?? []
-    checks.forEach((check) => {
-      nextHistory = recordObservation(nextHistory, {
-        sourceId: activeFile.id,
-        query: check.query,
-        matcherKind: check.mode,
-        target: 'content',
-        caseSensitive: check.caseSensitive,
-        matched: check.expected === 'present',
-        matchCount: check.matchCount,
-        role: 'search_history',
-      })
-    })
-    const observationBySignature = new Map(nextHistory.map((observation) => [
-      signature(observation.query, observation.matcherKind, observation.caseSensitive), observation,
-    ]))
-    const selected = checks.flatMap((check) => {
-      const observation = observationBySignature.get(signature(check.query, check.mode, check.caseSensitive))
-      return observation ? [observation] : []
-    })
-    const selectedIds = selected.map((observation) => observation.id)
-    setSearchHistory((current) => ({ ...current, [activeFile.id]: nextHistory }))
-    setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
-    setRecipeClauseOrderByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
-    setOccurrenceByObservationId((current) => ({
-      ...current,
-      ...Object.fromEntries(checks.flatMap((check) => {
-        const observation = observationBySignature.get(signature(check.query, check.mode, check.caseSensitive))
-        return observation ? [[observation.id, check.expected === 'absent' ? { kind: 'zero' as const } : { kind: 'atLeast' as const }]] : []
-      })),
-    }))
-    setRequireMarkerOrder(selectedIds.length > 1 && checks.every((check) => check.expected === 'present'))
-    if (activeFile.artifactId) setUnresolvedRecipeClauseIds(new Set(selectedIds))
-    setEditingRecipeId(undefined)
-    setRecipeSaved(false)
-    setRecipeVisible(true)
-  }
-
-  const confirmWorkflow = async () => {
-    const api = electronApi()
-    if (!api?.nativeAgent || !workflowReview || !workflowPurpose.trim()) return
-    setWorkflowSaving(true)
-    try {
-      const memory = await api.nativeAgent.confirmWorkflow({
-        projectId, reviewId: workflowReview.id, purpose: workflowPurpose.trim(), checks: workflowChecks,
-      })
-      prepareRuleFromWorkflow(workflowChecks)
-      setWorkflowReviews((current) => {
-        const next = { ...current }; delete next[workflowReview.sourceId]; return next
-      })
-      setWorkflowPurposes((current) => {
-        const next = { ...current }; delete next[workflowReview.id]; return next
-      })
-      setWorkflowCheckDrafts((current) => {
-        const next = { ...current }; delete next[workflowReview.id]; return next
-      })
-      onNotify?.(`분석 절차 저장 · ${memory.purpose}`, 'success')
-    } catch (error) {
-      onNotify?.(error instanceof Error ? error.message : '분석 절차를 저장하지 못했습니다.', 'error')
-    } finally {
-      setWorkflowSaving(false)
-    }
-  }
-
-  const dismissWorkflow = async () => {
-    const api = electronApi()
-    if (!workflowReview) return
-    const reviewId = workflowReview.id
-    prepareRuleFromWorkflow(workflowChecks)
-    setWorkflowReviews((current) => {
-      const next = { ...current }; delete next[workflowReview.sourceId]; return next
-    })
-    setWorkflowPurposes((current) => {
-      const next = { ...current }; delete next[workflowReview.id]; return next
-    })
-    setWorkflowCheckDrafts((current) => {
-      const next = { ...current }; delete next[reviewId]; return next
-    })
-    if (api?.nativeAgent) void api.nativeAgent.dismissWorkflow({ projectId, reviewId }).catch(() => undefined)
+    } finally { decisionSavingRef.current = false; if (mountedRef.current) setDecisionSaving(false) }
   }
 
   const closeRuleEditor = () => {
@@ -3155,6 +3108,7 @@ export function WorkbenchView({
       const selectedIds = defaultRuleObservationIds(
         selectedObservationIdsByFile[activeFile.id] ?? [],
         recipeObservations,
+        nextDecision,
       )
       setSelectedObservationIdsByFile((current) => ({ ...current, [activeFile.id]: selectedIds }))
       setRecipeClauseOrderByFile((current) => ({
@@ -3241,14 +3195,10 @@ export function WorkbenchView({
     rules: readonly RecipeRule[],
     ruleName: string,
     scope: RuleApplyScope = 'folder',
+    confirmedOverride?: Readonly<Record<string, ResultLabel>>,
   ): Promise<{ ok: true; resolution: PrecomputedBatchResolution } | { ok: false; error: string } | null> => {
-    if (!activeFile || !mountedRef.current) return null
+    if (!activeFile || !mountedRef.current || batchInFlightRef.current) return null
     const uniqueRules = [...new Map(rules.map((rule) => [rule.id, rule])).values()]
-    if (!uniqueRules.length) {
-      const error = '적용할 규칙이 없습니다.'
-      setBatchPreview({ status: 'error', matched: 0, exceptions: 0, error, ruleName, scope })
-      return { ok: false, error }
-    }
     const plans = planRuleApplication(projectFolderGroups, effectiveRulesByFolder, uniqueRules, scope, workbenchRootGroupKey(activeFile))
     if (!plans.length) {
       const error = '규칙을 적용할 평가 폴더가 없습니다.'
@@ -3256,6 +3206,7 @@ export function WorkbenchView({
       return { ok: false, error }
     }
     const targetGroups = plans.map((plan) => plan.group)
+    batchInFlightRef.current = true
     const runGeneration = advanceBatchGeneration(batchGeneration.current)
     batchGeneration.current = runGeneration
     setBatchPreview({ status: 'running', matched: 0, exceptions: 0, ruleName, scope, folderCount: targetGroups.length })
@@ -3265,7 +3216,7 @@ export function WorkbenchView({
       for (const target of plans) {
         const precomputed = new Map<string, PrecomputedDocumentEvidence>()
         const artifactRows = target.group.files.filter((file): file is WorkbenchFile & { artifactId: string } => Boolean(file.artifactId))
-        if (artifactRows.length) {
+        if (artifactRows.length && target.rules.length) {
           if (!api?.artifacts.inspectEvidence) throw new Error('데스크톱 로컬 검사 서비스를 사용할 수 없습니다.')
           const evidencePlan = buildRecipeEvidencePlan(target.rules)
           const inspected = await api.artifacts.inspectEvidence({
@@ -3293,7 +3244,7 @@ export function WorkbenchView({
         if (!canApplyBatchResult(mountedRef.current, batchGeneration.current, runGeneration)) return null
         pending.push({
           folderKey: target.group.key,
-          resolution: resolvePrecomputedBatch(target.group.files, target.rules, precomputed, { ...decisions, ...savedDecisions }),
+          resolution: resolvePrecomputedBatch(target.group.files, target.rules, precomputed, confirmedOverride ?? { ...decisions, ...savedDecisions }),
         })
       }
       for (const item of pending) {
@@ -3323,32 +3274,30 @@ export function WorkbenchView({
       const targetFileCount = targetGroups.reduce((count, group) => count + group.files.length, 0)
       setBatchPreview({ status: 'error', matched: 0, exceptions: targetFileCount, error: message, ruleName, scope, folderCount: targetGroups.length })
       return { ok: false, error: message }
-    }
+    } finally { batchInFlightRef.current = false }
   }
 
-  const applyRuleSet = async (rules: readonly RecipeRule[], ruleName: string, scope: RuleApplyScope) => {
-    setRecipeApplyId(null)
+  const applyRuleSet = async (rules: readonly RecipeRule[], ruleName: string) => {
+    if (ruleSavingRef.current || batchInFlightRef.current || decisionSavingRef.current) return
     setRecipeManagerOpen(false)
-    const scopedRules = scope === 'folder'
-      ? mergeAppliedFolderRules(activeFolderRules, new Set(), rules)
-      : rules
-    const applied = await applyRulesToScope(scopedRules, ruleName, scope)
+    const scopedRules = mergeAppliedFolderRules(activeFolderRules, new Set(), rules)
+    const applied = await applyRulesToScope(scopedRules, ruleName, 'folder')
     if (!applied) return
     if (!applied.ok) {
       onNotify?.(`규칙을 적용하지 못했습니다: ${applied.error}`, 'error')
       return
     }
     const { matched, exceptions, conflicts } = applied.resolution
-    const scopeLabel = scope === 'project' ? '전체 프로젝트' : '현재 평가 폴더'
-    onNotify?.(`${scopeLabel} 판정 완료 · 판정 완료 ${matched}개 · 확인 필요 ${exceptions}개${conflicts ? ` · 규칙 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
+    onNotify?.(`현재 폴더 판정 완료 · 판정 완료 ${matched}개 · 확인 필요 ${exceptions}개${conflicts ? ` · 규칙 충돌 ${conflicts}개` : ''}`, exceptions ? 'info' : 'success')
   }
 
-  const applySavedRecipe = async (recipe: EvaluationRecipeRevision, scope: RuleApplyScope) => {
-    const name = scope === 'project' ? recipe.name : `${workbenchFolderLabel(activeFile!)} · ${recipe.name}`
-    await applyRuleSet(recipe.rules as RecipeRule[], name, scope)
+  const applySavedRecipe = async (recipe: EvaluationRecipeRevision) => {
+    if (!activeFile) return
+    await applyRuleSet(recipe.rules as RecipeRule[], `${workbenchFolderLabel(activeFile)} · ${recipe.name}`)
   }
 
   const saveRecipe = async () => {
+    if (ruleSavingRef.current || batchInFlightRef.current || decisionSavingRef.current) return
     if (!draft || !activeFile || !ruleDecision || ruleDecision === 'UNKNOWN') return
     const selectedIds = selectedRecipeObservations.map((observation) => observation.id)
     if (!selectedIds.length) {
@@ -3367,17 +3316,21 @@ export function WorkbenchView({
       return
     }
     const confirmedDraft = { ...draft, rule, ...(editingRecipeId ? { recipeId: editingRecipeId } : {}) }
+    ruleSavingRef.current = true
+    setRuleSaving(true)
     try {
       await onSaveRecipe?.(confirmedDraft)
-      const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+      if (!mountedRef.current || activeFileIdRef.current !== activeFile.id) return
       const localRecipeId = editingRecipeId ?? rule.id
-      const existingRecipe = savedRecipes.find((item) => item.metadata.id === localRecipeId)
       const recipeName = `${workbenchFolderLabel(activeFile)} · ${ruleDecision} 판정`
+      const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
+      try {
+      const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+      const existingRecipe = savedRecipes.find((item) => item.metadata.id === localRecipeId)
       const recipe: LogWorkbenchRecipe = {
         metadata: { id: localRecipeId, name: recipeName, revision: (existingRecipe?.metadata.revision ?? 0) + 1, updatedAt: new Date().toISOString() },
         rules: [rule],
       }
-      const existingDecision = savedDecisions[activeFile.id] ?? activeFile.decision
       const confirmedDecision = existingDecision
         ? { ...engineerDecision, result: existingDecision }
         : engineerDecision
@@ -3391,14 +3344,19 @@ export function WorkbenchView({
         decisions: nextDecisions,
         recipes: nextRecipes,
       })
-      if (!saved.ok) throw new Error(saved.error)
+      if (!saved.ok && !electronApi()?.evaluations) throw new Error(saved.error)
+      if (!saved.ok) onNotify?.('규칙은 저장했습니다. 검색 기록 캐시를 보관하지 못했습니다.', 'info')
       setSearchHistory((current) => ({
         ...current,
         [activeFile.id]: (current[activeFile.id] ?? []).map((observation) =>
           promoted.find((item) => item.id === observation.id) ?? observation),
       }))
       setSavedRecipes(saved.state.recipes)
-      setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
+      if (!electronApi()?.evaluations) setSavedDecisions(Object.fromEntries(saved.state.decisions.map((item) => [item.sourceId, item.result])))
+      } catch (cacheError) {
+        if (!electronApi()?.evaluations) throw cacheError
+        onNotify?.('규칙은 저장했습니다. 검색 기록 캐시를 보관하지 못했습니다.', 'info')
+      }
       setArchivedRecipeIds((current) => {
         if (!current.has(localRecipeId)) return current
         const next = new Set(current)
@@ -3406,7 +3364,6 @@ export function WorkbenchView({
         return next
       })
       setRecipeSaved(true)
-      setEditingRecipeId(localRecipeId)
 
       // Saving from an exception must recalculate the folder with the rules
       // already learned for that same evaluation, not only the new rule.
@@ -3414,11 +3371,11 @@ export function WorkbenchView({
         .find((item) => item.recipeId === editingRecipeId)?.rules.map((item) => item.id) ?? [])
       const folderRules = mergeAppliedFolderRules(activeFolderRules, replacedRuleIds, rule)
       const applied = await applyRulesToScope(folderRules, recipeName)
-      if (applied?.ok) {
-        const preserved = existingDecision && existingDecision !== ruleDecision
-          ? ` 기존 ${existingDecision} 엔지니어 판정은 유지됩니다.`
-          : ''
-        onNotify?.(`규칙을 저장하고 현재 평가 폴더를 판정했습니다. 판정 완료 ${applied.resolution.matched}개 · 확인 필요 ${applied.resolution.exceptions}개.${preserved}`, applied.resolution.exceptions ? 'info' : 'success')
+      if (applied?.ok && activeFileIdRef.current === activeFile.id) {
+        setRecipeVisible(false)
+        setRecipeDetailsOpen(false)
+        setEditingRecipeId(undefined)
+        onNotify?.(`현재 폴더 적용 완료 · ${applied.resolution.matched}개${applied.resolution.exceptions ? ` · ${applied.resolution.exceptions}개 확인 필요` : ''}`, applied.resolution.exceptions ? 'info' : 'success')
       } else if (applied && !applied.ok) {
         // The rule itself is already stored, but keep the action available so
         // the engineer can retry after a transient desktop/IPC failure.
@@ -3426,10 +3383,9 @@ export function WorkbenchView({
         onNotify?.(`규칙은 저장했지만 현재 폴더에 적용하지 못했습니다: ${applied.error}`, 'error')
       }
 
-      // A rule is the deterministic automation, while a workflow is the
-      // engineer's reusable search order and purpose. Creating the review at
-      // save time keeps the two together even when the result was already
-      // inferred before the engineer opened the rule editor.
+      // Explicitly applying the rule also confirms the same Ctrl-F procedure
+      // for Agent reuse. This removes the duplicate checkbox/purpose form from
+      // the judgment panel while keeping behavior memory native to the flow.
       const api = electronApi()
       const source = resolveProjectSource({ artifacts: projectSources }, activeFile)
       if (api?.nativeAgent && source && projectId !== 'log-workbench' && selectedRecipeObservations.length >= 2) {
@@ -3445,11 +3401,45 @@ export function WorkbenchView({
               caseSensitive: observation.caseSensitive,
             })),
           }))
-          .then((completed) => applyCompletedEvaluation(completed, source.sourceId)).catch(() => undefined)
+          .then((completed) => rememberAppliedWorkflow(
+            completed,
+            (existingDecision ?? ruleDecision) as WorkbenchDecision,
+            selectedRecipeObservations,
+          )).catch(() => undefined)
       }
     } catch (error) {
-      onNotify?.(error instanceof Error ? `분석 규칙을 저장하지 못했습니다: ${error.message}` : '분석 규칙을 저장하지 못했습니다.', 'error')
-    }
+      if (mountedRef.current) onNotify?.(error instanceof Error ? `분석 규칙을 저장하지 못했습니다: ${error.message}` : '분석 규칙을 저장하지 못했습니다.', 'error')
+    } finally { ruleSavingRef.current = false; if (mountedRef.current) setRuleSaving(false) }
+  }
+
+  const unapplyRecipe = async (recipe: EvaluationRecipeRevision) => {
+    if (ruleSavingRef.current || batchInFlightRef.current) return
+    const removed = new Set(recipe.rules.map((rule) => rule.id))
+    const remaining = activeFolderRules.filter((rule) => !removed.has(rule.id))
+    const applied = await applyRulesToScope(remaining, '규칙 적용 해제')
+    if (applied?.ok) onNotify?.('현재 평가 폴더에서 해제했습니다. 수동 판정은 유지됩니다.', 'success')
+  }
+
+  const resetEngineerDecision = async () => {
+    if (!activeFile || decisionSavingRef.current || ruleSavingRef.current || batchInFlightRef.current) return
+    decisionSavingRef.current = true; setDecisionSaving(true)
+    const confirmed = { ...decisions, ...savedDecisions }
+    delete confirmed[activeFile.id]
+    try {
+      if (!electronApi()?.evaluations) {
+        const stored = loadLogWorkbenchState(window.localStorage, projectId).state
+        const saved = saveLogWorkbenchState(window.localStorage, projectId, { ...stored, decisions: stored.decisions.filter((item) => item.sourceId !== activeFile.id) })
+        if (!saved.ok) throw new Error(saved.error)
+      }
+      await onDecision?.(activeFile, null, [])
+      if (!mountedRef.current || activeFileIdRef.current !== activeFile.id) return
+      setDecisions(confirmed); setSavedDecisions(electronApi()?.evaluations ? {} : confirmed)
+      closeRuleEditor()
+      const applied = await applyRulesToScope(activeFolderRules, '수동 판정 취소', 'folder', confirmed)
+      if (applied?.ok) onNotify?.('수동 판정을 취소하고 평가 폴더를 다시 검사했습니다.', 'success')
+    } catch (error) {
+      onNotify?.(error instanceof Error ? error.message : '수동 판정을 취소하지 못했습니다.', 'error')
+    } finally { decisionSavingRef.current = false; if (mountedRef.current) setDecisionSaving(false) }
   }
 
   const closeTab = (event: React.MouseEvent, fileId: string) => {
@@ -3484,12 +3474,11 @@ export function WorkbenchView({
     }
   }
 
-  const openBatchExceptions = () => {
+  const openBatchException = (fileId: string) => {
     setSideMode('files')
-    const filter: WorkbenchFileFilter = batchPreview.conflictIds?.length ? 'conflict' : 'review'
-    setFileFilter(filter)
-    const firstId = filter === 'conflict' ? batchPreview.conflictIds?.[0] : batchPreview.exceptionIds?.[0]
-    const file = files.find((item) => item.id === firstId)
+    // Reviewing an exception must not replace the engineer's full folder list.
+    setFileFilter('all')
+    const file = files.find((item) => item.id === fileId)
     if (!file) return
     const line = firstEvaluationLine(batchPreview.evaluations?.[file.id])
     if (line) void revealLine(file, line)
@@ -3559,7 +3548,7 @@ export function WorkbenchView({
             className="search-agent-action"
             onClick={() => onAnalyzeContext(searchAgentContext({
               query,
-              scopeLabel: searchScope === 'file' ? '현재 파일' : searchScope === 'folder' ? '현재 평가' : searchScope === 'open' ? '열린 파일' : '전체 프로젝트',
+              scopeLabel: searchScope === 'file' ? '현재 파일' : searchScope === 'folder' ? '현재 폴더' : searchScope === 'open' ? '열린 파일' : '전체 프로젝트',
               matchCount: searchTotal,
               fileIds: searchAgentFileIds,
               regex: options.regex,
@@ -3581,14 +3570,14 @@ export function WorkbenchView({
           <div className="folder-tree">
             <div className="log-source-actions">
               <button className="add-folder-row" onClick={() => void importFolder()} disabled={importing}>
-                {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '로그 폴더 열기'}</span>
+                {importing ? <LoaderCircle className="wb-spin" size={18} /> : <FolderOpen size={18} />}<span>{importing ? '폴더를 읽는 중…' : '평가 폴더 열기'}</span>
               </button>
               <button className="search-log-row" type="button" onClick={() => openSearch('workspace')} aria-label="프로젝트 전체 찾기" title="프로젝트 전체 찾기"><Search size={18} /></button>
             </div>
             <div className="workbench-file-filters" role="group" aria-label="로그 필터">
               <button type="button" className={fileFilter === 'all' ? 'active' : ''} aria-pressed={fileFilter === 'all'} onClick={() => setFileFilter('all')}>전체 <span>{files.length}</span></button>
-              <button type="button" className={fileFilter === 'review' ? 'active' : ''} aria-pressed={fileFilter === 'review'} disabled={reviewFiles.length === 0} onClick={() => setFileFilter('review')}>확인 필요 <span>{reviewFiles.length}</span></button>
-              <button type="button" className={fileFilter === 'conflict' ? 'active' : ''} aria-pressed={fileFilter === 'conflict'} disabled={conflictFiles.length === 0} onClick={() => setFileFilter('conflict')}>충돌 <span>{conflictFiles.length}</span></button>
+              {reviewFiles.length ? <button type="button" className={fileFilter === 'review' ? 'active' : ''} aria-pressed={fileFilter === 'review'} onClick={() => setFileFilter('review')}>확인 필요 <span>{reviewFiles.length}</span></button> : null}
+              {conflictFiles.length ? <button type="button" className={fileFilter === 'conflict' ? 'active' : ''} aria-pressed={fileFilter === 'conflict'} onClick={() => setFileFilter('conflict')}>충돌 <span>{conflictFiles.length}</span></button> : null}
             </div>
             {groupedFiles.map((group) => {
               const expanded = expandedOrigins.has(group.key)
@@ -3617,8 +3606,9 @@ export function WorkbenchView({
                     <span title={group.label}>{group.label}</span><small>{group.files.length}</small>
                   </button>
                   {expanded ? group.files.map((file) => (
-                    <button className={`file-row ${file.id === activeFile?.id ? 'active' : ''}`} key={file.id} onClick={() => selectFile(file.id)} title={file.relativePath ?? file.name}>
+                    <button className={`file-row ${file.id === activeFile?.id ? 'active' : ''} ${batchPreview.exceptionIds?.includes(file.id) ? 'needs-review' : ''}`} key={file.id} onClick={() => selectFile(file.id)} title={file.relativePath ?? file.name}>
                       <FileText size={13} /><span>{file.name}</span>
+                      {batchPreview.exceptionIds?.includes(file.id) ? <AlertTriangle className="file-review-indicator" size={12} aria-label="확인 필요" /> : null}
                       {decisions[file.id] || file.decision || file.ruleResult || batchPreview.outcomes?.[file.id] ? <i className={`file-state ${(decisions[file.id] ?? file.decision ?? file.ruleResult ?? batchPreview.outcomes?.[file.id])?.toLowerCase()}`} title={decisions[file.id] ?? file.decision ? '엔지니어 판정' : '규칙 적용 결과'} /> : null}
                     </button>
                   )) : null}
@@ -3664,13 +3654,13 @@ export function WorkbenchView({
       ><span aria-hidden="true" /></div>
 
       <main className="workbench-editor-shell">
-        <div className="editor-tabs" role="tablist" aria-label="열린 로그">
+        <div className="editor-tabs" role="toolbar" aria-label="열린 로그">
           {openFileIds.map((fileId) => {
             const file = files.find((item) => item.id === fileId)
             if (!file) return null
             return (
-              <div role="tab" aria-selected={fileId === activeFile?.id} className={`editor-tab ${fileId === activeFile?.id ? 'active' : ''}`} key={fileId}>
-                <button className="editor-tab-select" onClick={() => selectFile(fileId)} title={file.relativePath ?? file.name}><FileText size={13} /><span>{file.name}</span><i>{decisions[fileId] ?? file.decision ?? ''}</i></button>
+              <div className={`editor-tab ${fileId === activeFile?.id ? 'active' : ''}`} key={fileId}>
+                <button aria-pressed={fileId === activeFile?.id} className="editor-tab-select" onClick={() => selectFile(fileId)} title={file.relativePath ?? file.name}><FileText size={13} /><span>{file.name}</span><i>{decisions[fileId] ?? file.decision ?? ''}</i></button>
                 <button className="editor-tab-close" onClick={(event) => closeTab(event, fileId)} aria-label={`${file.name} 닫기`} title="탭 닫기"><X size={13} /></button>
               </div>
             )
@@ -3703,7 +3693,7 @@ export function WorkbenchView({
             <Search size={18} />
             <select className="find-scope-select" value={searchScope} onChange={(event) => openSearch(event.target.value as SearchScope)} aria-label="검색 범위" title="검색 범위">
               <option value="file">현재 파일</option>
-              <option value="folder">현재 평가</option>
+              <option value="folder">현재 폴더</option>
               <option value="open">열린 파일</option>
               <option value="workspace">전체 프로젝트</option>
             </select>
@@ -3729,7 +3719,7 @@ export function WorkbenchView({
           </div>
         ) : null}
 
-        <div className={`log-editor ${wordWrap ? 'is-wrapped' : ''}`} ref={editorRef} onScroll={handleEditorScroll} tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
+        <div className={`log-editor ${wordWrap ? 'is-wrapped' : ''}`} ref={editorRef} onScroll={handleEditorScroll} role="region" tabIndex={0} aria-label={`${activeFile?.name ?? '로그'} 읽기 전용 편집기`}>
           {activeFile && activeLines.length ? activeLines.map((line) => {
             const lineNumber = line.lineNumber
             const isEvidence = evidenceLines.includes(lineNumber)
@@ -3742,7 +3732,7 @@ export function WorkbenchView({
                 <code>{renderHighlightedLine(line.text, lineNumber, draftActiveForFile ? [] : activeHitsByLine.get(lineNumber) ?? [], draftActiveForFile ? undefined : activeHit)}</code>
               </div>
             )
-          }) : <div className="editor-empty">{windowLoading ? <LoaderCircle className="wb-spin" size={22} /> : <FolderOpen size={22} />}<span>{windowLoading ? '필요한 로그 구간을 읽고 있습니다.' : '분석할 로그 폴더를 추가하세요.'}</span></div>}
+          }) : <div className="editor-empty">{windowLoading ? <LoaderCircle className="wb-spin" size={22} /> : <FolderOpen size={22} />}<span>{windowLoading ? '필요한 로그 구간을 읽고 있습니다.' : '분석할 평가 폴더를 추가하세요.'}</span></div>}
         </div>
 
         <footer className="editor-statusbar">
@@ -3750,8 +3740,11 @@ export function WorkbenchView({
           <button className={wordWrap ? 'active' : ''} aria-pressed={wordWrap} onClick={() => setWordWrap((current) => !current)}><WrapText size={14} />줄 바꿈 <kbd>Alt Z</kbd></button>
           <button onClick={openGoToLine}><Hash size={14} />줄 이동 <kbd>Ctrl G</kbd></button>
           <button onClick={() => openSearch('file')} title="현재 파일에서 찾기"><Search size={14} />찾기 <kbd>Ctrl F</kbd></button>
-          <button onClick={() => openSearch('open')} title="열린 파일에서 찾기"><Search size={14} />열린 파일 <kbd>Ctrl Alt F</kbd></button>
-          <button onClick={() => openSearch('workspace')} title="프로젝트 전체에서 찾기"><SearchCode size={14} />전체 프로젝트 <kbd>Ctrl Shift F</kbd></button>
+          <details className="editor-more"><summary aria-label="추가 검색"><MoreHorizontal size={15} /></summary><div>
+            <button onClick={(event) => { openSearch('folder'); event.currentTarget.closest('details')?.removeAttribute('open') }}>현재 폴더에서 찾기</button>
+            <button onClick={(event) => { openSearch('open'); event.currentTarget.closest('details')?.removeAttribute('open') }}>열린 파일에서 찾기 <kbd>Ctrl Alt F</kbd></button>
+            <button onClick={(event) => { openSearch('workspace'); event.currentTarget.closest('details')?.removeAttribute('open') }}>전체 프로젝트에서 찾기 <kbd>Ctrl Shift F</kbd></button>
+          </div></details>
         </footer>
       </main>
 
@@ -3774,9 +3767,9 @@ export function WorkbenchView({
 
       <aside className="decision-panel" aria-label="로그 판정">
         <header>
-          <strong>판정</strong>
-          <button className="recipe-manager-trigger" type="button" onClick={() => { setRecipeApplyId(null); setRecipeManagerOpen(true) }} aria-haspopup="dialog" aria-expanded={recipeManagerOpen}>
-            <Braces size={14} /> 규칙
+          <strong>이 로그 판정</strong>
+          <button className="recipe-manager-trigger" type="button" onClick={() => setRecipeManagerOpen(true)} aria-haspopup="dialog" aria-expanded={recipeManagerOpen}>
+            <Braces size={14} /> 규칙 관리
           </button>
         </header>
 
@@ -3785,103 +3778,18 @@ export function WorkbenchView({
             <>
               <section className="decision-picker" aria-label="결과 선택">
                 <div className="section-label"><label htmlFor="decision-select">결과</label></div>
-                <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="">결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
-                {!activeFile.decision && activeFile.ruleResult && activeFile.ruleResult !== 'UNKNOWN' ? <div className="rule-applied-result"><span>규칙 적용 결과</span><b>{activeFile.ruleResult}</b></div> : null}
+                <div className={`decision-select ${DECISIONS.find((item) => item.value === decision)?.tone ?? 'unset'}`}><i /><select id="decision-select" disabled={decisionSaving || ruleSaving || batchPreview.status === 'running'} value={decision ?? ''} onChange={(event) => { if (event.target.value) void chooseDecision(event.target.value as WorkbenchDecision) }}><option value="" disabled>결과를 선택하세요</option>{DECISIONS.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select><ChevronDown size={18} /></div>
+                {activeFile.decision || savedDecisions[activeFile.id] || decisions[activeFile.id] ? <button className="decision-reset" onClick={() => void resetEngineerDecision()} disabled={decisionSaving || ruleSaving || batchPreview.status === 'running'}><RotateCcw size={13} />{decisionSaving ? '저장 중…' : '수동 판정 취소'}</button> : null}
+                {!decision && !savedDecisions[activeFile.id] && activeFile.ruleResult && activeFile.ruleResult !== 'UNKNOWN' ? <div className="rule-applied-result"><span>규칙 적용 결과</span><b>{activeFile.ruleResult}</b></div> : null}
               </section>
 
-              {ruleEditorUi.showWorkflowReview && workflowReview ? (
-                <section className="workflow-confirmation recipe-suggestion" aria-label="판정 규칙 만들기">
-                  <div className="recipe-title">
-                    <div><strong>판정 규칙</strong><span>검색 조건 선택</span></div>
-                  </div>
-                  <div className="recipe-observations workflow-checks" aria-label="판정에 사용할 검색 조건">
-                    {orderedWorkflowReviewChecks.map((check) => {
-                      const key = engineerWorkflowCheckKey(check)
-                      const selectedIndex = workflowChecks.findIndex((item) => engineerWorkflowCheckKey(item) === key)
-                      const selected = selectedIndex >= 0
-                      return <div className={selected ? 'selected' : ''} key={key}>
-                        <SearchConditionRow
-                          query={check.query}
-                          matchLabel={check.matchCount > 0 ? `${check.matchCount}회` : '없음'}
-                          selected={selected}
-                          onToggle={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: toggleEngineerWorkflowCheck(workflowChecks, check) }))}
-                          onMoveUp={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, -1) }))}
-                          onMoveDown={() => setWorkflowCheckDrafts((current) => ({ ...current, [workflowReview.id]: moveEngineerWorkflowCheck(workflowChecks, key, 1) }))}
-                          moveUpDisabled={selectedIndex === 0}
-                          moveDownDisabled={selectedIndex === workflowChecks.length - 1}
-                        />
-                      </div>
-                    })}
-                  </div>
-                  <p>평가 목적</p>
-                  <div className="workflow-purpose-options">
-                    {workflowReview.suggestions.filter((item) => item !== '직접 입력').map((item) => (
-                      <button type="button" className={workflowPurpose === item ? 'active' : ''} aria-pressed={workflowPurpose === item} onClick={() => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: item }))} key={item}><i aria-hidden="true" />{item}</button>
-                    ))}
-                  </div>
-                  <input value={workflowPurpose} onChange={(event) => setWorkflowPurposes((current) => ({ ...current, [workflowReview.id]: event.target.value.slice(0, 160) }))} placeholder="평가 목적" aria-label="평가 목적" />
-                  <div className="workflow-confirmation-actions"><button type="button" onClick={() => void confirmWorkflow()} disabled={workflowSaving || !workflowPurpose.trim() || workflowChecks.length < 2}>{workflowSaving ? <LoaderCircle className="wb-spin" size={13} /> : <ChevronRight size={13} />}다음</button><button type="button" onClick={() => void dismissWorkflow()} disabled={workflowSaving}>건너뛰기</button></div>
-                </section>
-              ) : null}
-
-              <section className="pattern-review" aria-label="AI 로그 검토">
-                <div className="pattern-review-heading">
-                  <div><strong>AI 로그 검토</strong></div>
-                  <SearchCode size={15} />
-                </div>
-                <textarea
-                  value={patternReviewComment}
-                  onChange={(event) => setPatternReviewComment(event.target.value.slice(0, 160))}
-                  placeholder="확인할 내용 (선택)"
-                  maxLength={160}
-                  rows={2}
-                  disabled={patternReviewBusy}
-                  aria-label="AI 로그 검토 요청"
-                />
-                <div className="pattern-review-actions">
-                  <button className="pattern-review-start" onClick={() => void startPatternReview()} disabled={!patternReviewAvailable || patternReviewBusy}>
-                    <SearchCode size={13} /> AI로 검토
-                  </button>
-                  {patternReviewBusy && patternReview.jobId ? <button className="pattern-review-cancel" onClick={() => void cancelPatternReview()} disabled={patternReview.status === 'cancelling'}>취소</button> : null}
-                </div>
-                {!patternReviewAvailable ? <small className="pattern-review-hint">가져온 로그를 선택하면 사용할 수 있습니다.</small> : null}
-                {patternReviewBusy ? (
-                  <div className="pattern-review-progress" role="status" aria-live="polite">
-                    <span><LoaderCircle className="wb-spin" size={13} />{patternReview.stage || '분석 준비 중…'}</span>
-                    {patternReview.queuePosition ? <small>대기 {patternReview.queuePosition}번</small> : null}
-                  </div>
-                ) : null}
-                {patternReview.status === 'cancelled' ? <p className="pattern-review-note">검토를 취소했습니다.</p> : null}
-                {patternReview.status === 'failed' ? <p className="pattern-review-error"><AlertTriangle size={13} />{patternReview.error || '검토에 실패했습니다.'}</p> : null}
-                {patternReview.result ? (
-                  <div className="pattern-review-result">
-                    <div className="pattern-review-result-meta"><strong>검토 결과</strong>{patternReview.result.warnings.length ? <small>경고 {patternReview.result.warnings.length}건</small> : null}</div>
-                    <p>{patternReview.result.summary}</p>
-                    {patternReview.result.suggestedTags.length ? (
-                      <div className="pattern-review-suggestions">
-                        <span>추천 태그·검색</span>
-                        <div>{patternReview.result.suggestedTags.slice(0, 6).map((suggestion) => <button key={suggestion} onClick={() => applySuggestedSearch(suggestion)} title="눌러서 현재 로그 검색에 사용">{suggestion}</button>)}</div>
-                      </div>
-                    ) : null}
-                    {patternReview.result.metadataSuggestions?.length ? (
-                      <div className="pattern-review-suggestions" aria-label="메타데이터 제안">
-                        <span>메타데이터 제안</span>
-                        <div>
-                          {patternReview.result.metadataSuggestions.slice(0, 6).map((suggestion) => (
-                            <div key={`${suggestion.field}-${suggestion.value}`}>
-                              <span><b>{suggestion.field}</b> {suggestion.value} · 신뢰도 {Math.round(suggestion.confidence * 100)}% · {suggestion.reason}</span>
-                              <button type="button" onClick={() => void applyMetadataSuggestion(suggestion)} disabled={!onApplyMetadataSuggestion}>적용</button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {patternReview.result.warnings.length ? <ul>{patternReview.result.warnings.slice(0, 4).map((warning) => <li key={warning}><AlertTriangle size={12} />{warning}</li>)}</ul> : null}
-                  </div>
-                ) : null}
+              <section className="folder-rule-context" aria-label="평가 폴더의 적용 규칙">
+                <div><span>평가 폴더</span><strong title={workbenchFolderLabel(activeFile)}>{workbenchFolderLabel(activeFile)}</strong></div>
+                <div><span>적용 규칙 {activeFolderRules.length}개</span><button onClick={() => void applyRulesToScope(activeFolderRules, '폴더 재검사')} disabled={ruleSaving || decisionSaving || batchPreview.status === 'running'}><RotateCcw size={13} />폴더 재검사</button></div>
+                {files.some((file) => workbenchRootGroupKey(file) === activeFolderKey && file.ruleStale) ? <p role="status">규칙이 변경되었습니다. 폴더를 다시 검사하세요.</p> : null}
               </section>
 
-              {fileFilter !== 'all' && (activeBatchConflict || activeBatchEvaluation?.exceptions.length) ? (
+              {activeBatchConflict || (batchPreview.exceptionIds?.includes(activeFile.id) && activeBatchEvaluation?.exceptions.length) ? (
                 <section className="exception-detail" aria-label="예외 이유">
                   <div className="section-label"><span>검토 이유</span></div>
                   {activeBatchConflict ? <p><AlertTriangle size={14} /><span>엔지니어 판정과 규칙 결과가 다릅니다.</span></p> : null}
@@ -3895,17 +3803,21 @@ export function WorkbenchView({
                   <div className="section-label"><span>원문 북마크</span><small>{evidenceLines.length}</small></div>
                   {evidenceLines.slice(0, 4).map((lineNumber) => <button onClick={() => void revealLine(activeFile, lineNumber)} key={lineNumber}><b>Ln {lineNumber}</b><code>{activeSourceLines.find((line) => line.lineNumber === lineNumber)?.text.trim() ?? '원문 위치로 이동'}</code></button>)}
                 </section>
-              ) : (
-                <div className="evidence-hint"><span>줄 왼쪽을 눌러 다시 볼 원문을 표시하세요.</span></div>
-              )}
+              ) : null}
 
               {ruleEditorUi.showOpenButton ? (
-                <button className="recipe-reopen" onClick={() => { setEditingRecipeId(undefined); setRecipeSaved(false); setRecipeVisible(true) }}><Braces size={17} /><strong>규칙 추가</strong></button>
+                <div className="rule-quick-actions">
+                  <button className="rule-quick-apply" onClick={() => void saveRecipe()} disabled={ruleSaving || decisionSaving || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>
+                    {batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={15} /> : <Play size={15} />}
+                    <strong>{ruleSaving || batchPreview.status === 'running' ? '적용 중' : recipeEvidenceBusy ? '파일 검사 중' : '현재 폴더에 적용'}</strong>
+                  </button>
+                  <button className="rule-condition-edit" onClick={() => { setEditingRecipeId(undefined); setRecipeSaved(false); setRecipeVisible(true) }}><SlidersHorizontal size={14} />규칙 편집</button>
+                </div>
               ) : null}
 
               {ruleEditorUi.showEditor && draft ? (
                 <section className="recipe-suggestion">
-                  <div className="recipe-title"><div><strong>{editingRecipeId ? '규칙 수정' : '규칙 추가'}</strong><span>판정에 사용할 검색을 선택하세요</span></div><button type="button" className="recipe-clear-observations" onClick={clearRecipeObservations}><Trash2 size={13} />전체 삭제</button><button onClick={closeRuleEditor} aria-label="규칙 만들기 닫기"><X size={15} /></button></div>
+                  <div className="recipe-title"><div><strong>{editingRecipeId ? '규칙 편집' : '규칙 추가'}</strong><span>판정에 사용할 검색을 선택하세요</span></div><button type="button" className="recipe-clear-observations" onClick={clearRecipeObservations}><Trash2 size={13} />전체 삭제</button><button onClick={closeRuleEditor} aria-label="규칙 만들기 닫기"><X size={15} /></button></div>
                   <div className="recipe-observations" aria-label="판정에 사용할 검색 근거">
                     {orderedRecipeObservationRows.map((observation) => {
                       const selected = selectedRecipeObservations.some((item) => item.id === observation.id)
@@ -3922,6 +3834,7 @@ export function WorkbenchView({
                             onMoveDown: () => movePinnedClause(observation.id, 1),
                             moveUpDisabled: !canArrangeMarkerOrder || selectedIndex === 0,
                             moveDownDisabled: !canArrangeMarkerOrder || selectedIndex === selectedRecipeObservations.length - 1,
+                            orderDisabledReason: canArrangeMarkerOrder ? undefined : '발생한 본문 검색만 순서를 지정할 수 있습니다.',
                           } : {})}
                         />
                         {selected && recipeDetailsOpen ? <div className="recipe-condition-editor">
@@ -3940,20 +3853,24 @@ export function WorkbenchView({
                   </div>
                   <button type="button" className="recipe-details-toggle" aria-expanded={recipeDetailsOpen} onClick={() => setRecipeDetailsOpen((open) => !open)}><SlidersHorizontal size={13} /><span>세부 설정</span><ChevronDown className={recipeDetailsOpen ? 'open' : ''} size={14} /></button>
                   <div className="recipe-actions">
-                    <button className="save" onClick={() => void saveRecipe()} disabled={recipeSaved || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Play size={14} />}{batchPreview.status === 'running' ? '규칙 적용 중' : recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '적용 완료' : editingRecipeId ? '수정 적용' : '현재 폴더에 추가'}</button>
+                    <button className="save" onClick={() => void saveRecipe()} disabled={ruleSaving || decisionSaving || batchPreview.status === 'running' || recipeEvidenceBusy || unresolvedRecipeClauseIds.size > 0 || !selectedRecipeObservations.length}>{batchPreview.status === 'running' || recipeEvidenceBusy ? <LoaderCircle className="wb-spin" size={14} /> : recipeSaved ? <Check size={14} /> : <Play size={14} />}{ruleSaving || batchPreview.status === 'running' ? '규칙 적용 중' : recipeEvidenceBusy ? '파일 검사 중' : recipeSaved ? '다시 적용' : editingRecipeId ? '변경 적용' : '현재 폴더에 적용'}</button>
                   </div>
                 </section>
               ) : null}
 
               {batchPreview.status === 'running' ? (
                 <section className="batch-summary batch-summary-running" aria-live="polite">
-                  <div><LoaderCircle className="wb-spin" size={15} /><span><strong>{batchPreview.scope === 'project' ? '전체 프로젝트 판정 중' : '현재 폴더 판정 중'}</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
+                  <div className="batch-summary-head"><LoaderCircle className="wb-spin" size={15} /><strong>{batchPreview.scope === 'project' ? '전체 프로젝트 적용 중' : '현재 폴더 적용 중'}</strong></div>
                 </section>
               ) : batchPreview.status === 'done' ? (
-                <section className="batch-summary">
-                  <div><Check size={15} /><span><strong>{batchPreview.scope === 'project' ? '전체 프로젝트 판정 완료' : '현재 폴더 판정 완료'}</strong>{batchPreview.ruleName ? <small>{batchPreview.ruleName}</small> : null}</span></div>
-                  <p>판정 완료 {batchPreview.matched}개 · 확인 필요 {batchPreview.exceptions}개</p>
-                  {batchPreview.exceptions > 0 ? <button onClick={openBatchExceptions}><AlertTriangle size={13} /><span>확인 필요 보기</span><ChevronRight size={13} /></button> : null}
+                <section className="batch-summary" aria-live="polite">
+                  <div className="batch-summary-head"><Check size={15} /><strong>{batchPreview.ruleName === '규칙 적용 해제' ? '폴더 규칙 해제 완료' : batchPreview.ruleName === '폴더 재검사' || batchPreview.ruleName === '수동 판정 취소' ? '폴더 재검사 완료' : batchPreview.scope === 'project' ? '전체 프로젝트 적용 완료' : '현재 폴더 적용 완료'} <span>({batchPreview.matched}개)</span></strong></div>
+                  {batchExceptionFiles.length ? <div className="batch-review-list">
+                    <div className="batch-review-heading"><AlertTriangle size={14} /><strong>{batchExceptionFiles.length}개 로그 확인 필요</strong></div>
+                    <div className="batch-review-files">
+                      {batchExceptionFiles.map((file) => <button type="button" key={file.id} onClick={() => openBatchException(file.id)} title={file.relativePath ?? file.name}><FileText size={13} /><span>{file.name}</span><ChevronRight size={13} /></button>)}
+                    </div>
+                  </div> : null}
                 </section>
               ) : batchPreview.status === 'error' ? <div className="batch-error"><AlertTriangle size={13} />{batchPreview.error}</div> : null}
             </>
@@ -3961,39 +3878,19 @@ export function WorkbenchView({
         </div>
 
         {recipeManagerOpen ? (
-          <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) { setRecipeApplyId(null); setRecipeManagerOpen(false) } }}>
+          <div className="recipe-manager-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecipeManagerOpen(false) }}>
             <div ref={recipeManagerRef} className="recipe-manager" role="dialog" aria-modal="true" aria-labelledby="recipe-manager-title">
-              <div className="recipe-manager-heading"><strong id="recipe-manager-title">{recipeApplyId ? '규칙 적용' : '프로젝트 규칙'}</strong><button type="button" onClick={() => { setRecipeApplyId(null); setRecipeManagerOpen(false) }} aria-label="프로젝트 규칙 닫기"><X size={16} /></button></div>
-              {recipeApplyId ? (() => {
-                const recipe = activeRecipeRevisions.find((item) => item.recipeId === recipeApplyId)
-                if (!recipe) return <div className="recipe-manager-empty">규칙을 찾을 수 없습니다.</div>
-                const usage = ruleFolderUsage(recipe.rules as RecipeRule[], effectiveRulesByFolder, projectFolderGroups.map((group) => group.key), activeFolderKey)
-                return <div className="recipe-apply-scope">
-                  <button className="recipe-scope-back" type="button" onClick={() => setRecipeApplyId(null)}><ChevronRight size={13} />목록</button>
-                  <strong className="recipe-scope-name">{recipe.name}</strong>
-                  <button type="button" className="recipe-scope-option" onClick={() => void applySavedRecipe(recipe, 'folder')} disabled={!activeFile || batchPreview.status === 'running'}>
-                    <Folder size={17} /><span><strong>현재 폴더</strong><small>{activeFile ? workbenchFolderLabel(activeFile) : '선택된 폴더 없음'}</small></span>{usage.appliedToCurrentFolder ? <em><Check size={12} />적용됨</em> : <ChevronRight size={14} />}
-                  </button>
-                  <button type="button" className="recipe-scope-option" onClick={() => void applySavedRecipe(recipe, 'project')} disabled={!projectFolderGroups.length || batchPreview.status === 'running'}>
-                    <FolderOpen size={17} /><span><strong>전체 프로젝트</strong><small>평가 폴더 {projectFolderGroups.length}개</small></span>{usage.appliedToEntireProject ? <em><Check size={12} />적용됨</em> : <ChevronRight size={14} />}
-                  </button>
-                </div>
-              })() : <div className="recipe-manager-list">
+              <div className="recipe-manager-heading"><strong id="recipe-manager-title">규칙 관리</strong><button type="button" onClick={() => setRecipeManagerOpen(false)} aria-label="규칙 관리 닫기"><X size={16} /></button></div>
+              <div className="recipe-manager-list">
                 {activeRecipeRevisions.length ? activeRecipeRevisions.map((recipe) => {
                   const usage = ruleFolderUsage(recipe.rules as RecipeRule[], effectiveRulesByFolder, projectFolderGroups.map((group) => group.key), activeFolderKey)
-                  const usageLabel = usage.appliedToEntireProject
-                    ? '전체 프로젝트'
-                    : usage.appliedToCurrentFolder
-                      ? '현재 폴더'
-                      : usage.appliedFolderCount > 0
-                        ? `${usage.appliedFolderCount}개 폴더`
-                        : '미적용'
+                  const usageLabel = usage.appliedToCurrentFolder ? '현재 폴더에 적용됨' : usage.appliedFolderCount > 0 ? `${usage.appliedFolderCount}개 폴더에서 사용` : '저장됨'
                   return <div className="recipe-manager-item" key={recipe.recipeId}>
-                    <button className="recipe-manager-copy" type="button" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></button>
-                    <div className="recipe-manager-item-actions"><span className={`recipe-usage ${usage.appliedFolderCount ? 'active' : ''}`}>{usageLabel}</span><button type="button" className="recipe-add" onClick={() => setRecipeApplyId(recipe.recipeId)} disabled={!recipe.rules.length || batchPreview.status === 'running'}><Play size={12} />적용</button><button type="button" className="recipe-edit" onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)} disabled={!recipe.rules.length}><Pencil size={12} />수정</button><button type="button" className="recipe-delete" onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />삭제</button></div>
+                    <div className="recipe-manager-copy"><strong>{recipe.name}</strong><span>{recipe.rules[0] ? recipeRuleSummary(recipe.rules[0] as RecipeRule) : '조건 없음'}</span></div>
+                    <div className="recipe-manager-item-actions"><span className={`recipe-usage ${usage.appliedToCurrentFolder ? 'active' : ''}`}>{usageLabel}</span>{activeFile && recipe.rules.length ? <button type="button" className="recipe-add" disabled={ruleSaving || decisionSaving || batchPreview.status === 'running'} onClick={() => void (usage.appliedToCurrentFolder ? unapplyRecipe(recipe) : applySavedRecipe(recipe))}>{usage.appliedToCurrentFolder ? <RotateCcw size={12} /> : <Play size={12} />}{usage.appliedToCurrentFolder ? '이 폴더에서 해제' : '이 폴더에 적용'}</button> : null}{recipe.rules.length ? <button type="button" className="recipe-edit" disabled={ruleSaving || batchPreview.status === 'running'} onClick={() => loadRecipeIntoDraft(recipe, recipe.rules[0] as RecipeRule)}><Pencil size={12} />규칙 편집</button> : null}<button type="button" className="recipe-delete" disabled={ruleSaving || batchPreview.status === 'running'} onClick={() => void archiveRecipe(recipe.recipeId)}><Trash2 size={12} />프로젝트에서 삭제</button></div>
                   </div>
                 }) : <div className="recipe-manager-empty">활성 저장 규칙이 없습니다.</div>}
-              </div>}
+              </div>
             </div>
           </div>
         ) : null}

@@ -14,6 +14,8 @@ describe('packaged LPDDR failure-analysis Skill policy', () => {
     expect(policy.instructions).toContain('RT means the same Sample')
     expect(policy.instructions).toContain('side-effect candidate')
     expect(policy.instructions).toContain('numerator and denominator')
+    expect(policy.instructions).toContain('root-cause or improvement question')
+    expect(policy.instructions).toContain('counterevidence')
 
     const prompts: string[] = []
     const runtime = new EvaluationAgentRuntime({
@@ -22,7 +24,8 @@ describe('packaged LPDDR failure-analysis Skill policy', () => {
     }, { complete: async (prompt) => { prompts.push(prompt); return { content: '{"action":"complete"}' } } }, undefined, policy)
     await runtime.start('packaged-skill', { evaluationIntent: '동일 조건 재현(RT)' })
     expect(prompts[0]).toContain(`APPLIED SKILL: ${LPDDR_FAILURE_ANALYSIS_SKILL_ID}@${policy.version}`)
-    expect(prompts[0]).toContain('FILES (metadata and local stage counts only)')
+    expect(prompts[0]).toContain('REPRESENTATIVE FILES (metadata, local stage counts, operator commands)')
+    expect(prompts[0]).toContain('FOLDER SUMMARY (complete local aggregation)')
     expect(prompts[0]).toContain('BOUNDED EVIDENCE')
     expect(prompts[0]).toContain('meta-a')
     expect((await runtime.start('packaged-skill-fallback', { evaluationIntent: '동일 조건 재현(RT)' })).proposal?.outcome).toBe('TEST_FAIL')
