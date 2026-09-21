@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
@@ -35,6 +35,27 @@ describe('NativeAgentStore', () => {
     await store.appendMessage(created.id, { role: 'user', content: ',         .' })
     expect(await store.list('project-a')).toEqual([])
     expect(await store.get(created.id)).toBeNull()
+  })
+
+  it('retains more than 100 conversations, 500 messages and 300 evidence traces after restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-retention-'))
+    try {
+      const store = new NativeAgentStore(root)
+      const first = await store.create('p', '첫 대화', 'internal')
+      await store.update(first.id, (session) => {
+        session.messages = Array.from({ length: 502 }, (_, index) => ({ id: `m-${index}`, role: index % 2 ? 'assistant' : 'user', content: `메시지 ${index}`, createdAt: new Date(index).toISOString() }))
+        session.tools = Array.from({ length: 302 }, (_, index) => ({ id: `t-${index}`, name: 'log_read_window', label: '근거', state: 'completed', summary: `근거 ${index}`, startedAt: new Date(index).toISOString() }))
+      })
+      for (let index = 0; index < 100; index++) await store.create('p', `후속 ${index}`, 'internal')
+      const reopened = new NativeAgentStore(root)
+      await reopened.initialize()
+      expect(await reopened.list('p')).toHaveLength(101)
+      const restored = await reopened.get(first.id)
+      expect(restored?.messages).toHaveLength(502)
+      expect(restored?.messages[0].content).toBe('메시지 0')
+      expect(restored?.tools).toHaveLength(302)
+      expect(restored?.tools[0].summary).toBe('근거 0')
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('deduplicates rapid identical Ctrl-F observations', async () => {

@@ -1,6 +1,8 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { projectLogRecords } from '../../src/state/logRecords'
-import { createResultsCsvBlob, normalizedMetadataEdit } from '../../src/views/ResultsView'
+import { createResultsCsvBlob, normalizedMetadataEdit, ResultsView } from '../../src/views/ResultsView'
 import {
   RESULT_EXPORT_PRESET_ID,
   normalizeResultExportLayout,
@@ -71,4 +73,22 @@ describe('result metadata review', () => {
     expect(normalizedMetadataEdit('vdd', 'invalid')).toBeNull()
     expect(normalizedMetadataEdit('sample', ' DHCST-89 ')).toBe('DHCST-89')
   })
+})
+
+
+it('blocks result export and explains why while address inspection is incomplete', () => {
+  const rows = projectLogRecords([{ id: 'one', name: 'one.log', rootId: 'a', text: '@PASS' }])
+  const render = (status: 'loading' | 'ready') => renderToStaticMarkup(createElement(ResultsView, {
+    records: rows, onOpenFile: () => {}, stageInspectionStates: { one: { status: 'ready' } },
+    addressInspectionStates: { one: { status } },
+  }))
+  const pending = render('loading')
+  expect(pending).toContain('주소 검사')
+  const copyButton = (html: string) => html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find((button) => button.includes('TSV 복사'))
+  expect(copyButton(pending)).toMatch(/^<button[^>]*disabled=/)
+  expect(pending).toContain('검사가 끝난 뒤 내보낼 수 있습니다.')
+  const ready = render('ready')
+  expect(ready).not.toContain('검사가 끝난 뒤 내보낼 수 있습니다.')
+  expect(copyButton(ready)).toBeDefined()
+  expect(copyButton(ready)).not.toMatch(/^<button[^>]*disabled=/)
 })

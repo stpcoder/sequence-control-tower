@@ -1,3 +1,4 @@
+import { AsyncActionGate } from '../state/asyncActionGate'
 import { agentRuleSummary, prepareAgentRuleSave, isAgentRuleProposalSaved } from '../domain/agent-rule-proposal'
 import { useViewDraft, readViewDraft, writeViewDraft, useViewScopeGuard } from '../state/viewDrafts'
 import { FormEvent, useEffect, useRef, useState } from 'react'
@@ -325,6 +326,16 @@ export function acceptNativeSession(current: NativeAgentSessionView | null, next
   return (next.revision ?? 0) < (current.revision ?? 0) || ((next.revision ?? 0) === (current.revision ?? 0) && next.updatedAt < current.updatedAt) ? current : next
 }
 
+export function mergeNativeSessionSummaries(current: readonly NativeAgentSessionSummary[], incoming: readonly NativeAgentSessionSummary[]): NativeAgentSessionSummary[] {
+  const sessions = new Map(current.map((session) => [session.id, session]))
+  for (const session of incoming) {
+    const previous = sessions.get(session.id)
+    if (!previous || (session.revision ?? 0) > (previous.revision ?? 0)
+      || ((session.revision ?? 0) === (previous.revision ?? 0) && session.updatedAt >= previous.updatedAt)) sessions.set(session.id, session)
+  }
+  return [...sessions.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
 export function evaluationDimensionSummary(dimensions: EvaluationAgentSessionView['dimensions']): string[] {
   const values: Array<[string, unknown]> = [
     ['Skew', dimensions.skew], ['Sample', dimensions.sample ?? dimensions.material], ['Die', dimensions.die], ['Grid', dimensions.gridId],
@@ -512,7 +523,11 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
   const [nativeSessions, setNativeSessions] = useState<NativeAgentSessionSummary[]>([])
   const [nativeSession, setNativeSession] = useState<NativeAgentSessionView | null>(null)
   const nativeSessionRef = useRef(nativeSession)
-  nativeSessionRef.current = nativeSession
+  const updateNativeSession = (next: NativeAgentSessionView) => {
+    const accepted = acceptNativeSession(nativeSessionRef.current, next)
+    nativeSessionRef.current = accepted
+    setNativeSession(accepted)
+  }
   const [nativeHistoryOpen, setNativeHistoryOpen] = useState(false)
   const [nativeSessionsLoading, setNativeSessionsLoading] = useState(false)
   const [mentionedSourceIds, setMentionedSourceIds] = useState<string[]>([])
@@ -523,7 +538,9 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
   const [savedMessage, setSavedMessage] = useState('')
   const [savedNativeProposalId, setSavedNativeProposalId] = useState('')
   const [savedRuleProposalId, setSavedRuleProposalId] = useState('')
-  const savingRuleRef = useRef(false)
+  const nativeAction = useRef(new AsyncActionGate())
+  const [stopping, setStopping] = useState(false)
+  const stoppingAction = useRef<symbol | null>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const followLatestRef = useRef(true)
@@ -541,7 +558,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
   const [input, setInput] = useViewDraft(`agent-input:${projectScopeKey}`, '')
   const captureScope = useViewScopeGuard(projectScopeKey)
   const selectedSessionRef = useRef<string | null>(null)
-  const sendingRef = useRef(false)
+  const sendingRef = useRef<symbol | null>(null)
   const projectKeyRef = useRef(projectKey)
   projectKeyRef.current = projectKey
   const projectScopeKeyRef = useRef(projectScopeKey)
@@ -563,6 +580,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
     activeRunId.current = null
     setRun(null)
     setNativeSessions([])
+    nativeSessionRef.current = null
     setNativeSession(null)
     setNativeHistoryOpen(false)
     setNativeSessionsLoading(false)
@@ -579,6 +597,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
   useEffect(() => {
     activeRunId.current = null
     setRun(null)
+    nativeSessionRef.current = null
     setNativeSession(null)
     setNativeSessions([])
     setNativeHistoryOpen(false)
@@ -588,12 +607,20 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
     setError('')
     setSavedMessage('')
     setSavedNativeProposalId('')
-    setMentionedSourceIds((current) => current.filter((sourceId) => project?.artifacts.some((source) => source.sourceId === sourceId)))
+    setMentionedSourceIds([])
     setNativeContextSourceIds([])
     selectedSessionRef.current = null
-    sendingRef.current = false
+    sendingRef.current = null
+    nativeAction.current.reset()
+    stoppingAction.current = null
+    setStopping(false)
     setAppliedAnalysisViewId('')
   }, [projectScopeKey])
+
+  useEffect(() => {
+    setMentionedSourceIds([])
+    setSavedMessage('')
+  }, [nativeSession?.id])
 
   useEffect(() => {
     if (nativeSession?.analysisViewProposal?.id !== appliedAnalysisViewId) setAppliedAnalysisViewId('')
@@ -613,13 +640,14 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
     setNativeSessionsLoading(true)
     void api.list({ projectId: project.id, ...(evaluationScopeId ? { evaluationScopeId } : {}) }).then(async (sessions) => {
       if (!active || projectScopeKeyRef.current !== projectScopeKey) return
-      setNativeSessions(sessions)
+      setNativeSessions((current) => mergeNativeSessionSummaries(current, sessions))
+      if (nativeAction.current.pending) return
       const rememberedId = selectedSessionRef.current ?? readViewDraft<string | null>(`agent-session:${projectScopeKey}`, null)
-      const first = evaluationScopeId || !project.artifacts.length ? sessions.find((item) => item.id === rememberedId) ?? sessions[0] : undefined
+      const first = evaluationScopeId || !project.artifacts.length ? (selectedSessionRef.current ? sessions.find((item) => item.id === selectedSessionRef.current) : sessions.find((item) => item.id === rememberedId) ?? sessions[0]) : undefined
       if (first) {
         selectedSessionRef.current = first.id
         const detail = await api.get({ sessionId: first.id })
-        if (active && detail && selectedSessionRef.current === first.id && projectScopeKeyRef.current === projectScopeKey) setNativeSession((current) => acceptNativeSession(current, detail))
+        if (active && detail && selectedSessionRef.current === first.id && projectScopeKeyRef.current === projectScopeKey) updateNativeSession(detail)
       }
     }).catch((reason) => { if (active) setError(boundedError(reason)) })
       .finally(() => { if (active && projectScopeKeyRef.current === projectScopeKey) setNativeSessionsLoading(false) })
@@ -627,10 +655,10 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
       if (!active || next.projectId !== projectKeyRef.current || (evaluationScopeId !== undefined && next.evaluationScopeId !== evaluationScopeId)) return
       setNativeSessions((current) => {
         const { messages: _messages, tools: _tools, ...summary } = next
-        return [summary, ...current.filter((item) => item.id !== next.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        return mergeNativeSessionSummaries(current, [summary])
       })
       if (selectedSessionRef.current === next.id) {
-        setNativeSession((current) => acceptNativeSession(current, next))
+        updateNativeSession(next)
       }
     })
     return () => { active = false; unsubscribe() }
@@ -639,7 +667,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
   useEffect(() => {
     if (!nativeSession || nativeSession.projectId !== projectKey || nativeSession.evaluationScopeId !== evaluationScopeId) return
     writeViewDraft(`agent-session:${projectScopeKey}`, nativeSession.id)
-    if (!sendingRef.current && !['queued', 'running'].includes(nativeSession.status)) setBusy(false)
+    if (!nativeAction.current.pending && !sendingRef.current && !['queued', 'running'].includes(nativeSession.status)) setBusy(false)
   }, [nativeSession?.id, nativeSession?.revision, nativeSession?.status, projectScopeKey])
 
   useEffect(() => {
@@ -715,9 +743,11 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
     } catch (reason) { setBusy(false); setError(boundedError(reason)) }
   }
 
-  const createNativeSession = async (request?: Pick<NativeAgentLaunchRequest, 'title' | 'sourceIds' | 'evaluationScopeId'>) => {
+  const createNativeSession = async (request?: Pick<NativeAgentLaunchRequest, 'title' | 'sourceIds' | 'evaluationScopeId'>, owner?: symbol) => {
     const api = window.sequenceIntelligence?.nativeAgent
-    if (!api || !project || busy) return null
+    if (!api || !project || (busy && !owner)) return null
+    const token = owner ?? nativeAction.current.begin()
+    if (!token || !nativeAction.current.owns(token)) return null
     const scopeIsActive = captureScope()
     const requestedScopeId = request ? request.evaluationScopeId : evaluationScopeId
     followLatestRef.current = true
@@ -734,41 +764,50 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
       })
       if (!scopeIsActive()) return null
       selectedSessionRef.current = next.id
-      setNativeSession((current) => acceptNativeSession(current, next))
+      updateNativeSession(next)
       setNativeContextSourceIds(request ? requestedSourceIds : [])
       setNativeSessions((current) => [{ ...next }, ...current.filter((item) => item.id !== next.id)])
       return next
     } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)); return null }
-    finally { if (scopeIsActive()) setBusy(false) }
+    finally { if (!owner) nativeAction.current.finish(token); if (!owner && scopeIsActive()) setBusy(false) }
   }
 
   const openNativeSession = async (sessionId: string) => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || busy) return
+    const token = nativeAction.current.begin()
+    if (!token) return
     followLatestRef.current = true
-    selectedSessionRef.current = sessionId
     setBusy(true); setError(''); setNativeHistoryOpen(false)
     const scopeIsActive = captureScope()
     try {
       const next = await api.get({ sessionId })
-      if (next && selectedSessionRef.current === sessionId && scopeIsActive()) {
-        setNativeSession((current) => acceptNativeSession(current, next))
+      if (!next) throw new Error('대화를 찾을 수 없습니다. 기존 대화는 유지됩니다.')
+      if (scopeIsActive()) {
+        selectedSessionRef.current = sessionId
+        updateNativeSession(next)
         setNativeContextSourceIds([])
       }
     }
     catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) }
-    finally { if (scopeIsActive()) setBusy(false) }
+    finally { nativeAction.current.finish(token); if (scopeIsActive()) setBusy(false) }
   }
 
-  const sendNativeText = async (content: string, targetSession?: NativeAgentSessionView, sourceOverride?: readonly string[], turnContextKind: NativeAgentContextKind = 'free_chat', turnEvaluationStage?: NativeAgentEvaluationStage) => {
+  const sendNativeText = async (content: string, targetSession?: NativeAgentSessionView, sourceOverride?: readonly string[], turnContextKind: NativeAgentContextKind = 'free_chat', turnEvaluationStage?: NativeAgentEvaluationStage, owner?: symbol) => {
     const api = window.sequenceIntelligence?.nativeAgent
-    if (!api || !project || busy || sendingRef.current) return
+    if (!api || !project || (busy && !owner) || sendingRef.current) return
     if (!hasMeaningfulAgentMessage(content)) { setError('질문이나 확인할 로그 조건을 입력해 주세요.'); return }
+    const token = owner ?? nativeAction.current.begin()
+    if (!token || !nativeAction.current.owns(token)) return
     const scopeIsActive = captureScope()
-    sendingRef.current = true
+    sendingRef.current = token
     let target = targetSession ?? nativeSession
-    if (!target) target = await createNativeSession()
-    if (!target || !scopeIsActive()) { sendingRef.current = false; return }
+    if (!target) target = await createNativeSession(undefined, token)
+    if (!target || !scopeIsActive()) {
+      if (!owner) nativeAction.current.finish(token)
+      if (scopeIsActive()) { sendingRef.current = null; setBusy(false) }
+      return
+    }
     followLatestRef.current = true
     setBusy(true); setError(''); setNativeHistoryOpen(false)
     try {
@@ -780,45 +819,65 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
             ? nativeContextSourceIds
             : boundedAgentContextIds(evaluationSources.map((source) => source.sourceId))
       const next = await api.send({ sessionId: target.id, content: content.trim(), sourceIds: target.question?.kind === 'agent' && !sourceOverride?.length && !mentionedSourceIds.length ? undefined : sourceIds.length ? sourceIds : undefined, contextKind: turnContextKind, evaluationStage: turnEvaluationStage, ...(target.question?.kind === 'agent' ? { questionId: target.question.id } : {}) })
-      if (scopeIsActive()) {
-        selectedSessionRef.current = next.id
-        setNativeSession((current) => acceptNativeSession(current, next))
-        setInput('')
-        setBusy(['queued', 'running'].includes(acceptNativeSession(nativeSessionRef.current, next).status))
+      if (scopeIsActive() && selectedSessionRef.current === target.id) {
+        updateNativeSession(next)
+        if (nativeAction.current.owns(token) || stoppingAction.current) setInput((current) => current.trim() === content.trim() ? '' : current)
+        setBusy(Boolean(stoppingAction.current) || ['queued', 'running'].includes(acceptNativeSession(nativeSessionRef.current, next).status))
         setMentionedSourceIds([])
       }
     }
-    catch (reason) { if (scopeIsActive()) { setError(boundedError(reason)); setBusy(false) } }
-    finally { if (scopeIsActive()) sendingRef.current = false }
+    catch (reason) { if (scopeIsActive()) { setError(boundedError(reason)); setBusy(Boolean(stoppingAction.current)) } }
+    finally { if (!owner) nativeAction.current.finish(token); if (scopeIsActive() && sendingRef.current === token) sendingRef.current = null }
   }
 
   const retryNative = async () => {
     if (!nativeSession || busy || !window.sequenceIntelligence?.nativeAgent) return
+    const token = nativeAction.current.begin()
+    if (!token) return
+    sendingRef.current = token
     setBusy(true); setError('')
     const scopeIsActive = captureScope()
     try {
       const next = await window.sequenceIntelligence.nativeAgent.retry({ sessionId: nativeSession.id })
-      if (scopeIsActive()) setNativeSession((current) => acceptNativeSession(current, next))
+      if (scopeIsActive() && selectedSessionRef.current === nativeSession.id) {
+        updateNativeSession(next)
+        setBusy(Boolean(stoppingAction.current) || ['queued', 'running'].includes(acceptNativeSession(nativeSessionRef.current, next).status))
+      }
     }
-    catch (reason) { if (scopeIsActive()) { setError(boundedError(reason)); setBusy(false) } }
-    finally { if (scopeIsActive()) sendingRef.current = false }
+    catch (reason) { if (scopeIsActive()) { setError(boundedError(reason)); setBusy(Boolean(stoppingAction.current)) } }
+    finally { nativeAction.current.finish(token); if (scopeIsActive() && sendingRef.current === token) sendingRef.current = null }
   }
 
   const cancelNative = async () => {
     if (!nativeSession || !window.sequenceIntelligence?.nativeAgent) return
+    if (stoppingAction.current || (nativeAction.current.pending && !sendingRef.current)) return
+    const interruptedSend = sendingRef.current
+    const token = nativeAction.current.replace()
+    stoppingAction.current = token
     const scopeIsActive = captureScope()
+    setStopping(true); setBusy(true); setError('')
     try {
       const next = await window.sequenceIntelligence.nativeAgent.cancel({ sessionId: nativeSession.id })
-      if (scopeIsActive()) setNativeSession((current) => acceptNativeSession(current, next))
+      if (scopeIsActive()) updateNativeSession(next)
     }
     catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) }
-    finally { if (scopeIsActive()) setBusy(false) }
+    finally {
+      nativeAction.current.finish(token)
+      if (stoppingAction.current === token) stoppingAction.current = null
+      if (scopeIsActive()) {
+        if (sendingRef.current === interruptedSend) sendingRef.current = null
+        setBusy(false); setStopping(false)
+      }
+    }
   }
 
   const startProjectTrend = async (sourceIds?: readonly string[], requestedScopeId = evaluationScopeId, requestedIntent?: string) => {
     const api = window.sequenceIntelligence?.nativeAgent
     if (!api || !project || busy) return
     const scopeIsActive = captureScope()
+    const token = nativeAction.current.begin()
+    if (!token) return
+    setBusy(true)
     setEvaluationStarting(true); setError(''); setSavedMessage(''); setSavedNativeProposalId('')
     try {
       const scopedSourceIds = sourceIds?.length ? [...sourceIds] : evaluationSources.map((source) => source.sourceId)
@@ -833,14 +892,15 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
         const reusable = sessions.find((session) => session.status === 'idle')
         if (reusable) target = await api.get({ sessionId: reusable.id })
       }
-      if (!target) target = await createNativeSession({ title: '평가 요약', sourceIds: scopedSourceIds, evaluationScopeId: requestedScopeId })
-      if (!target || !scopeIsActive()) { sendingRef.current = false; return }
+      if (!scopeIsActive()) return
+      if (!target) target = await createNativeSession({ title: '평가 요약', sourceIds: scopedSourceIds, evaluationScopeId: requestedScopeId }, token)
+      if (!target || !scopeIsActive()) return
       selectedSessionRef.current = target.id
-      setNativeSession((current) => acceptNativeSession(current, target!))
+      updateNativeSession(target!)
       setNativeContextSourceIds(scopedSourceIds)
       const intentContext = evaluationIntent ? `\n현재 폴더에 저장된 목적 참고: ${evaluationIntent}` : ''
-      await sendNativeText(`현재 폴더를 평가 목적, 평가 결과, 결과 해석, 불량 경향, 다음 평가의 다섯 단계로 정리해줘.${intentContext}\n판정 수치는 현재 폴더 전체의 로컬 집계를 사용하고, 목적이나 이력 연결이 결론을 바꿀 만큼 애매할 때만 관찰 근거가 들어간 질문을 한 번 해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]`, target, scopedSourceIds, 'evaluation_history', 'interpretation')
-    } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) } finally { if (scopeIsActive()) setEvaluationStarting(false) }
+      await sendNativeText(`현재 폴더를 평가 목적, 평가 결과, 결과 해석, 불량 경향, 다음 평가의 다섯 단계로 정리해줘.${intentContext}\n판정 수치는 현재 폴더 전체의 로컬 집계를 사용하고, 목적이나 이력 연결이 결론을 바꿀 만큼 애매할 때만 관찰 근거가 들어간 질문을 한 번 해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]`, target, scopedSourceIds, 'evaluation_history', 'interpretation', token)
+    } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) } finally { nativeAction.current.finish(token); if (scopeIsActive()) { setEvaluationStarting(false); setBusy(Boolean(stoppingAction.current) || ['queued', 'running'].includes(nativeSessionRef.current?.status ?? '')) } }
   }
 
   useEffect(() => {
@@ -851,7 +911,10 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
 
   useEffect(() => {
     if (!open || !nativeLaunchRequest || !project || busy || handledNativeLaunch.current === nativeLaunchRequest.id) return
+    const token = nativeAction.current.begin()
+    if (!token) return
     handledNativeLaunch.current = nativeLaunchRequest.id
+    setBusy(true)
     const scopeIsActive = captureScope()
     void (async () => {
       const api = window.sequenceIntelligence?.nativeAgent
@@ -864,21 +927,24 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
         const reusableId = reusableNativeLaunchSessionId(null, listed, nativeLaunchRequest)
         if (reusableId) target = await api.get({ sessionId: reusableId })
       }
-      if (!target) target = await createNativeSession(nativeLaunchRequest)
-      if (!target || !scopeIsActive()) { sendingRef.current = false; return }
+      if (!scopeIsActive()) return
+      if (!target) target = await createNativeSession(nativeLaunchRequest, token)
+      if (!target || !scopeIsActive()) return
       selectedSessionRef.current = target.id
-      setNativeSession((current) => acceptNativeSession(current, target!))
+      updateNativeSession(target!)
       setNativeContextSourceIds(nativeLaunchRequest.sourceIds)
-      await sendNativeText(nativeLaunchRequest.prompt, target, nativeLaunchRequest.sourceIds, nativeLaunchRequest.contextKind, nativeLaunchRequest.evaluationStage)
+      await sendNativeText(nativeLaunchRequest.prompt, target, nativeLaunchRequest.sourceIds, nativeLaunchRequest.contextKind, nativeLaunchRequest.evaluationStage, token)
     })().catch((reason) => { if (scopeIsActive()) setError(boundedError(reason)) })
+      .finally(() => { nativeAction.current.finish(token); if (scopeIsActive()) setBusy(Boolean(stoppingAction.current) || ['queued', 'running'].includes(nativeSessionRef.current?.status ?? '')) })
   }, [busy, nativeLaunchRequest?.id, open, project?.id])
 
   const saveNativeRuleProposal = async () => {
     const proposal = nativeSession?.ruleProposal
     const api = window.sequenceIntelligence?.evaluations
-    if (!project || !proposal || !api || busy || savingRuleRef.current) return
+    if (!project || !proposal || !api || busy) return
     const scopeIsActive = captureScope()
-    savingRuleRef.current = true
+    const token = nativeAction.current.begin()
+    if (!token) return
     setBusy(true); setError('')
     try {
       const snapshot = await api.getSnapshot({ projectId: project.id })
@@ -889,7 +955,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
       setSavedRuleProposalId(proposal.id)
       setSavedMessage('규칙을 저장했습니다. 적용된 폴더는 로그 화면에서 재평가하세요.')
     } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) }
-    finally { savingRuleRef.current = false; if (scopeIsActive()) setBusy(false) }
+    finally { nativeAction.current.finish(token); if (scopeIsActive()) setBusy(false) }
   }
 
   const saveNativeEvaluationProposal = async () => {
@@ -898,6 +964,8 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
     if (!proposal || !nativeSession || !project || !scopeId || busy || !window.sequenceIntelligence?.projects) return
     const scopedRecords = records.filter((record) => record.evaluationScopeId === scopeId)
     if (!scopedRecords.length) { setError('현재 폴더의 결과가 없습니다.'); return }
+    const token = nativeAction.current.begin()
+    if (!token) return
     const scopeIsActive = captureScope()
     setBusy(true); setError('')
     try {
@@ -951,7 +1019,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
       onProjectUpdated(saved)
       setSavedNativeProposalId(proposal.id)
       setSavedMessage('평가 요약을 이력에 저장했습니다.')
-    } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) } finally { if (scopeIsActive()) setBusy(false) }
+    } catch (reason) { if (scopeIsActive()) setError(boundedError(reason)) } finally { nativeAction.current.finish(token); if (scopeIsActive()) setBusy(false) }
   }
 
   const answer = (value: string) => {
@@ -1082,7 +1150,7 @@ export function AgentPanel({ activePage, open, onClose, onOpen, project, selecte
       {savedMessage ? <div className="agent-saved" role="status">{savedMessage}</div> : null}
     </div>
     {scope === 'current' && pending ? <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{stageText(run!)}</span><button onClick={() => void cancel()}>취소</button></div> : null}
-    {scope === 'project' && nativeSession && nativeSession.status !== 'idle' && nativeSession.status !== 'waiting_question' ? nativeSession.status === 'paused' || nativeSession.status === 'failed' ? <div className="agent-stage retry-only" role="alert"><span>{nativeSession.failure ? boundedError(new Error(nativeSession.failure)) : nativeSession.status === 'paused' ? '분석이 중지되었습니다. 이어서 진행할 수 있습니다.' : '분석을 완료하지 못했습니다. 다시 시도하세요.'}</span><button onClick={() => void retryNative()} disabled={busy}><RotateCcw size={15} />재시도</button></div> : <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{nativeSession.status === 'queued' ? '대기 중' : '분석 중'}</span><button onClick={() => void cancelNative()}>중지</button></div> : null}
+    {scope === 'project' && nativeSession && nativeSession.status !== 'idle' && nativeSession.status !== 'waiting_question' ? nativeSession.status === 'paused' || nativeSession.status === 'failed' ? <div className="agent-stage retry-only" role="alert"><span>{stopping ? '분석을 중지하는 중…' : nativeSession.failure ? boundedError(new Error(nativeSession.failure)) : nativeSession.status === 'paused' ? '분석이 중지되었습니다. 이어서 진행할 수 있습니다.' : '분석을 완료하지 못했습니다. 다시 시도하세요.'}</span><button onClick={() => void retryNative()} disabled={busy}><RotateCcw size={15} />재시도</button></div> : <div className="agent-stage" role="status"><LoaderCircle size={12} className="wb-spin" /><span>{nativeSession.status === 'queued' ? '대기 중' : '분석 중'}</span><button onClick={() => void cancelNative()} disabled={stopping}>{stopping ? '중지 중…' : '중지'}</button></div> : null}
     {scope === 'current' ? <form className="agent-composer" onSubmit={send}>
       <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder="짧은 메시지 입력" rows={2} disabled={!run || busy} />
       <div><span /><button type="submit" aria-label="메시지 보내기" disabled={!run || busy || !input.trim()}><ArrowUp size={15} /></button></div>

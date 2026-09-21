@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, exactFolderOutcome, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, nativeEvaluationReport, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, reusableNativeLaunchSessionId, shouldRestoreEvaluationReview, shouldRetainAgentSession, acceptNativeSession, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
+import { agentEvaluationPurposeLabel, agentEvaluationRelationSuggestion, agentEvaluationSources, applyEvaluationAgentRelation, evaluationAgentRecordPrefix, evaluationDimensionSummary, evaluationIntentForAgent, evaluationOutcomeLabel, evaluationProposalTitle, exactFolderOutcome, isAgentThreadNearBottom, isEvaluationProposalSaved, mergeEvaluationAgentMemory, nativeEvaluationReport, proposalDecisionResult, proposalSourceDecisions, resolveEvaluationRelationChoice, reusableNativeLaunchSessionId, shouldRestoreEvaluationReview, shouldRetainAgentSession, acceptNativeSession, mergeNativeSessionSummaries, toolsForAssistantMessage, toolsForCurrentAgentRun } from './AgentPanel'
 import type { EvaluationAgentMemoryPayloadView, EvaluationAgentSessionView, NativeAgentEvaluationProposal, NativeAgentMessageView, NativeAgentSessionView, NativeAgentToolTraceView, ProjectSnapshot } from '../../electron/shared/contracts'
 import type { LogResultRecord } from '../state/logRecords'
 
@@ -233,5 +233,17 @@ describe('mergeEvaluationAgentMemory', () => {
     }
     expect(toolsForCurrentAgentRun(session).map((tool) => tool.id)).toEqual(['new'])
     expect(toolsForCurrentAgentRun({ ...session, status: 'idle' })).toEqual([])
+  })
+})
+
+
+describe('conversation list races', () => {
+  it('merges a delayed list without dropping a newly created session or regressing live status', () => {
+    const session = { id: 'a', projectId: 'p1', title: 'A', backend: 'internal' as const, status: 'idle' as const, createdAt: '', updatedAt: '2026-09-22', revision: 5 }
+    const newSession = { ...session, id: 'b', title: 'B' }
+    const merged = mergeNativeSessionSummaries([session, newSession], [{ ...session, status: 'running', revision: 2 }])
+    expect(merged).toHaveLength(2)
+    expect(merged.find((item) => item.id === 'a')).toMatchObject({ revision: 5, status: 'idle' })
+    expect(mergeNativeSessionSummaries(merged, [{ ...session, revision: 6, status: 'waiting_question' }]).find((item) => item.id === 'a')?.status).toBe('waiting_question')
   })
 })

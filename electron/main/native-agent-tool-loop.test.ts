@@ -113,6 +113,31 @@ describe('model-driven Agent conversation', () => {
     expect((await h.service.get(h.session.id))?.messages.at(-1)?.content).toBe('이전 기록에 어떤 문제가 있었나요? 사용자가 직접 작성한 내용을 비교하겠습니다.')
   })
 
+  it('coalesces stop clicks and blocks retry until both the run and provider cancellation finish', async () => {
+    const h = await setup([], true)
+    let finish!: (value: unknown) => void
+    let aborted!: () => void
+    h.opencode.send.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    h.opencode.abort.mockImplementationOnce(() => new Promise<undefined>((resolve) => { aborted = () => resolve(undefined) }))
+    await h.store.update(h.session.id, (session) => { session.externalSessionId = 'ext' })
+    await h.service.send(h.session.id, '이력을 확인해 줘')
+    await vi.waitFor(() => expect(h.opencode.send).toHaveBeenCalled())
+    const cancel = h.service.cancel(h.session.id)
+    expect(h.service.cancel(h.session.id)).toBe(cancel)
+    await vi.waitFor(() => expect(h.opencode.abort).toHaveBeenCalled())
+    finish({ externalSessionId: 'ext', content: '이미 중지된 응답', toolNames: [] })
+    await settled(h.service, h.session.id, 'paused')
+    await expect(h.service.retry(h.session.id)).rejects.toThrow('중지하고 있습니다')
+    await expect(h.service.send(h.session.id, '새 요청')).rejects.toThrow('중지하고 있습니다')
+    aborted()
+    await cancel
+    await h.service.cancel(h.session.id)
+    expect((await h.service.get(h.session.id))?.messages.filter((message) => message.role === 'system')).toHaveLength(1)
+    h.opencode.send.mockResolvedValueOnce({ externalSessionId: 'ext', content: '정상 재시도', toolNames: [] })
+    await h.service.retry(h.session.id)
+    expect((await settled(h.service, h.session.id)).messages.at(-1)?.content).toBe('정상 재시도')
+  })
+
   it('renders an OpenCode-authored question without forcing unrelated tools first', async () => {
     const h = await setup([], true)
     h.opencode.send.mockResolvedValueOnce({ externalSessionId: 'ext', toolNames: [], content: '<sct-question>{"prompt":"이전 기록은 어느 평가 차수에 해당하나요?","choices":["1차","2차"]}</sct-question>' })

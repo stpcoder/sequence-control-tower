@@ -186,6 +186,7 @@ export function enforceWorkflowProvenance(content: string, confirmedWorkflow: bo
 export class NativeAgentService {
   private readonly controllers = new Map<string, AbortController>()
   private readonly runningTasks = new Map<string, Promise<void>>()
+  private readonly stoppingTasks = new Map<string, Promise<NativeAgentSessionView>>()
   private readonly listeners = new Set<(session: NativeAgentSessionView) => void>()
 
   constructor(private readonly deps: {
@@ -239,6 +240,7 @@ export class NativeAgentService {
   }
 
   async send(sessionId: string, content: string, requestedSourceIds?: string[], requestedContextKind?: NativeAgentContextKind, requestedEvaluationStage?: NativeAgentEvaluationStage, questionId?: string): Promise<NativeAgentSessionView> {
+    this.assertNotStopping(sessionId)
     const session = await this.require(sessionId)
     if (session.status === 'queued' || session.status === 'running') throw new Error('현재 분석이 끝난 후 다시 보내 주세요.')
     const message = safe(content, 800_001)
@@ -259,6 +261,7 @@ export class NativeAgentService {
     const sourceIds = await this.authorize(session.projectId, requestedSourceIds ?? (answering ? session.lastRequest?.sourceIds : undefined), session.evaluationScopeId)
     const project = await this.deps.projects.get(session.projectId)
     const next = await this.deps.store.update(session.id, (draft) => {
+      this.assertNotStopping(session.id)
       if (draft.status === 'queued' || draft.status === 'running') throw new Error('현재 분석이 끝난 후 다시 보내 주세요.')
       if (questionId && draft.question?.id !== questionId) throw new Error('이미 답변했거나 변경된 질문입니다.')
       draft.messages.push({ id: randomUUID(), createdAt: now(), role: 'user', content: visibleMessage, ...(sourceIds.length < (project?.artifacts.filter((source) => !session.evaluationScopeId || source.rootId === session.evaluationScopeId).length ?? 0) ? { evidenceSourceIds: sourceIds } : {}), ...(answering ? { questionId: answering.id } : {}), ...(turnContextKind ? { contextKind: turnContextKind } : {}), ...(turnEvaluationStage ? { evaluationStage: turnEvaluationStage } : {}) })
@@ -276,11 +279,13 @@ export class NativeAgentService {
   }
 
   async retry(sessionId: string): Promise<NativeAgentSessionView> {
+    this.assertNotStopping(sessionId)
     const session = await this.require(sessionId)
     if (!session.lastRequest) throw new Error('재시도할 요청이 없습니다.')
     if (session.status === 'queued' || session.status === 'running') return this.public(session)
     if (session.question?.kind === 'agent') return this.public(session)
     const next = await this.deps.store.update(session.id, (draft) => {
+      this.assertNotStopping(session.id)
       if (draft.status === 'queued' || draft.status === 'running') throw new Error('현재 분석이 진행 중입니다.')
       draft.status = 'queued'; draft.failure = undefined
     })
@@ -288,14 +293,33 @@ export class NativeAgentService {
     return this.public(next)
   }
 
-  async cancel(sessionId: string): Promise<NativeAgentSessionView> {
-    this.controllers.get(safe(sessionId, 160))?.abort()
+  cancel(sessionId: string): Promise<NativeAgentSessionView> {
+    const id = safe(sessionId, 160)
+    const pending = this.stoppingTasks.get(id)
+    if (pending) return pending
+    this.controllers.get(id)?.abort()
+    const task = this.stopRun(id)
+    this.stoppingTasks.set(id, task)
+    const clear = () => { if (this.stoppingTasks.get(id) === task) this.stoppingTasks.delete(id) }
+    void task.then(clear, clear)
+    return task
+  }
+
+  private assertNotStopping(sessionId: string): void {
+    if (this.stoppingTasks.has(safe(sessionId, 160))) throw new Error('분석을 중지하고 있습니다. 중지가 끝난 후 다시 보내 주세요.')
+  }
+
+  private async stopRun(sessionId: string): Promise<NativeAgentSessionView> {
     const session = await this.require(sessionId)
+    if (!this.runningTasks.has(session.id) && session.status !== 'queued' && session.status !== 'running') return this.public(session)
     this.controllers.get(session.id)?.abort()
     if (session.externalSessionId) await this.deps.opencode.abort(session.externalSessionId).catch(() => undefined)
     await this.runningTasks.get(session.id)
-    let next = await this.deps.store.setStatus(session.id, 'paused', '사용자가 중지했습니다. 이어서 진행할 수 있습니다.')
-    next = await this.deps.store.appendMessage(session.id, { role: 'system', content: '사용자가 분석을 중지했습니다.' })
+    const next = await this.deps.store.update(session.id, (draft) => {
+      draft.status = 'paused'
+      draft.failure = '사용자가 중지했습니다. 이어서 진행할 수 있습니다.'
+      draft.messages.push({ id: randomUUID(), createdAt: now(), role: 'system', content: '사용자가 분석을 중지했습니다.' })
+    })
     this.emit(next); return this.public(next)
   }
 

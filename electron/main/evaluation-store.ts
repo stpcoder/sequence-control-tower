@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { clauseOrderingError } from '../../src/domain/workbench/engine'
 import { readFile, rename } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
@@ -282,6 +283,8 @@ function recipeRule(value: EvaluationRecipeRule): EvaluationRecipeRule {
   if (!Array.isArray(value.createdFromSourceIds) || value.createdFromSourceIds.length > 10_000) {
     throw new Error('규칙 원본 참조가 올바르지 않습니다.')
   }
+  const clauses = value.clauses.map(recipeClause)
+  if (clauseOrderingError(clauses, value.id)) throw new Error('규칙 조건의 순서가 올바르지 않습니다. 중복·순환 참조와 본문 조건을 확인하세요.')
   return {
     id: safeIdentifier(value.id, 'ruleId'),
     label: value.label,
@@ -290,7 +293,7 @@ function recipeRule(value: EvaluationRecipeRule): EvaluationRecipeRule {
       kind: value.scope.kind,
       ...(value.scope.id === undefined ? {} : { id: safeIdentifier(value.scope.id, 'scopeId') })
     },
-    clauses: value.clauses.map(recipeClause),
+    clauses,
     priority: safeInteger(value.priority, 'priority', -10_000, 10_000),
     confidence: safeNumber(value.confidence, 'confidence', 0, 1),
     repetition: safeInteger(value.repetition, 'repetition', 1),

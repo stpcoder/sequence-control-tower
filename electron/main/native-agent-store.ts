@@ -38,9 +38,6 @@ interface NativeAgentDatabase {
   consolePromptRules: Record<string, EngineerConsolePromptRuleView[]>
 }
 
-const MAX_SESSIONS_PER_PROJECT = 100
-const MAX_MESSAGES = 500
-const MAX_TOOLS = 300
 const MAX_SEARCHES = 500
 const MAX_WORKFLOWS = 100
 const MAX_REVIEWS = 200
@@ -129,10 +126,6 @@ export class NativeAgentStore {
     if (!session.projectId) throw new Error('프로젝트를 선택해 주세요.')
     await this.store.update((database) => {
       database.sessions[session.id] = session
-      const all = Object.values(database.sessions)
-        .filter((item) => item.projectId === session.projectId)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      all.slice(MAX_SESSIONS_PER_PROJECT).forEach((item) => { delete database.sessions[item.id] })
     })
     return structuredClone(session)
   }
@@ -176,8 +169,10 @@ export class NativeAgentStore {
       session.evaluationProposal = evaluationProposal && session.evaluationProposal?.id
         ? { id: clean(session.evaluationProposal.id, 160), ...evaluationProposal }
         : undefined
-      session.messages = session.messages.slice(-MAX_MESSAGES).map(this.message)
-      session.tools = session.tools.slice(-MAX_TOOLS).map(this.tool)
+      // Durable evidence is not an LLM context window. Never silently evict
+      // earlier conversations, messages or tool traces when new ones arrive.
+      session.messages = session.messages.map(this.message)
+      session.tools = session.tools.map(this.tool)
       if (session.question) {
         const base = {
           id: clean(session.question.id, 160), prompt: clean(session.question.prompt, 500),

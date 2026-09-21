@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EvaluationStore } from './evaluation-store'
-import { extractAgentRuleProposal, prepareAgentRuleSave } from '../../src/domain/agent-rule-proposal'
+import { extractAgentRuleProposal, prepareAgentRuleSave, normalizeAgentRuleProposal, agentRuleSummary } from '../../src/domain/agent-rule-proposal'
 import type { EvaluationRecipeRule } from '../shared/contracts'
 
 const rule: EvaluationRecipeRule = { id: 'r', label: 'PASS', status: 'verified', scope: { kind: 'project' }, priority: 1, confidence: 1, repetition: 1, createdFromSourceIds: [], clauses: [{ id: 'c', presence: 'present', matcher: { kind: 'literal', target: 'content', pattern: 'END', caseSensitive: true } }] }
@@ -30,5 +30,37 @@ describe('reviewed Agent rule edits', () => {
     const result = extractAgentRuleProposal('확인했습니다.<sct-rule-proposal>{"rules":[]}</sct-rule-proposal>')
     expect(result.proposal).toBeUndefined()
     expect(result.content).toContain('저장할 수 없습니다')
+  })
+})
+
+
+describe('invalid Agent rule ordering', () => {
+  it.each(['self', 'cycle', 'absence', 'filename', 'minimum-zero'] as const)('rejects %s before exposing a save button', (kind) => {
+    const changed = structuredClone(rule)
+    changed.clauses.push({ ...structuredClone(rule.clauses[0]), id: 'second', order: { afterClauseId: 'c' } })
+    if (kind === 'self') changed.clauses[0].order = { afterClauseId: 'c' }
+    if (kind === 'cycle') changed.clauses[0].order = { afterClauseId: 'second' }
+    if (kind === 'absence') changed.clauses[0].presence = 'absent'
+    if (kind === 'filename') changed.clauses[0].matcher.target = 'file_name'
+    if (kind === 'minimum-zero') changed.clauses[0].occurrence = { kind: 'atLeast', count: 0 }
+    expect(normalizeAgentRuleProposal({ recipeId: 'recipe', baseRevision: 1, name: '규칙', rationale: '검토', rules: [changed] })).toBeUndefined()
+  })
+  it('rejects invalid order through the save API as well, preserving the last revision', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-rule-order-'))
+    try {
+      const store = new EvaluationStore(dir)
+      const original = await store.saveRecipe({ projectId: 'p', expectedRevision: 0, name: '규칙', rules: [rule] })
+      const invalid = structuredClone(rule)
+      invalid.clauses[0].order = { afterClauseId: 'c' }
+      await expect(store.saveRecipe({ projectId: 'p', expectedRevision: original.snapshot.revision, recipeId: original.recipe.recipeId, name: '규칙', rules: [invalid] })).rejects.toThrow('순서')
+      expect((await store.snapshot('p')).revision).toBe(original.snapshot.revision)
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+  it('shows the exact scope and predecessor pattern in the review', () => {
+    const changed = structuredClone(rule)
+    changed.scope.id = 'folder-a'
+    changed.clauses.push({ ...structuredClone(rule.clauses[0]), id: 'second', matcher: { ...rule.clauses[0].matcher, pattern: 'PASS' }, order: { afterClauseId: 'c' } })
+    expect(agentRuleSummary(changed)).toContain('프로젝트 범위 (folder-a)')
+    expect(agentRuleSummary(changed)).toContain('“END” 다음')
   })
 })

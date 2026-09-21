@@ -1,4 +1,5 @@
 import { evaluationRuleSignature } from './evaluation-rules'
+import { clauseOrderingError } from './workbench/engine'
 import type { EvaluationProjectSnapshot, EvaluationRecipeRule, NativeAgentRuleProposal } from '../../electron/shared/contracts'
 
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max
@@ -19,11 +20,11 @@ export function normalizeAgentRuleProposal(value: unknown): Omit<NativeAgentRule
       if (!clause || !text(clause.id, 160) || !['present', 'absent'].includes(clause.presence)
         || !clause.matcher || !['literal', 'regex'].includes(clause.matcher.kind) || !text(clause.matcher.pattern, 1000)
         || !['content', 'file_name', 'path'].includes(clause.matcher.target) || typeof clause.matcher.caseSensitive !== 'boolean'
-        || (clause.occurrence && (!['exact', 'atLeast'].includes(clause.occurrence.kind) || !Number.isSafeInteger(clause.occurrence.count) || clause.occurrence.count < 0))
+        || (clause.occurrence && (!['exact', 'atLeast'].includes(clause.occurrence.kind) || !Number.isSafeInteger(clause.occurrence.count) || clause.occurrence.count < (clause.occurrence.kind === 'atLeast' ? 1 : 0)))
         || (clause.order && !text(clause.order.afterClauseId, 160))) return undefined
       clauses.push({ id: clause.id, presence: clause.presence, matcher: { kind: clause.matcher.kind, pattern: clause.matcher.pattern, target: clause.matcher.target, caseSensitive: clause.matcher.caseSensitive }, ...(clause.occurrence ? { occurrence: clause.occurrence } : {}), ...(clause.order ? { order: clause.order } : {}) })
     }
-    if (new Set(clauses.map((clause) => clause.id)).size !== clauses.length || clauses.some((clause) => clause.order && !clauses.some((other) => other.id === clause.order!.afterClauseId))) return undefined
+    if (clauseOrderingError(clauses, rule.id)) return undefined
     rules.push({ id: rule.id, label: rule.label, status: 'candidate', scope: { kind: rule.scope.kind, ...(rule.scope.id ? { id: rule.scope.id } : {}) }, clauses, priority: rule.priority, confidence: rule.confidence, repetition: 1, createdFromSourceIds: [] })
   }
   if (new Set(rules.map((rule) => rule.id)).size !== rules.length) return undefined
@@ -41,10 +42,12 @@ export function extractAgentRuleProposal(content: string) {
 }
 
 export function agentRuleSummary(rule: EvaluationRecipeRule): string {
-  return `${rule.label} · 우선순위 ${rule.priority} · ${rule.scope.kind === 'project' ? '프로젝트' : rule.scope.kind} 범위 · ${rule.clauses.map((clause) => {
+  const scope = { analysis: '분석', project: '프로젝트', customer: '고객', global: '전체' }[rule.scope.kind]
+  return `${rule.label} · 우선순위 ${rule.priority} · ${scope} 범위${rule.scope.id ? ` (${rule.scope.id})` : ''} · ${rule.clauses.map((clause) => {
     const target = clause.matcher.target === 'content' ? '본문' : clause.matcher.target === 'file_name' ? '파일명' : '경로'
     const count = clause.occurrence ? `${clause.occurrence.kind === 'exact' ? '정확히' : '최소'} ${clause.occurrence.count}회` : clause.presence === 'absent' ? '없음' : '있음'
-    return `${target} ${clause.matcher.kind === 'regex' ? '정규식 ' : ''}“${clause.matcher.pattern}” ${count}${clause.matcher.caseSensitive ? ' (대소문자 구분)' : ''}${clause.order ? ` · ${clause.order.afterClauseId} 다음` : ''}`
+    const predecessor = rule.clauses.find((other) => other.id === clause.order?.afterClauseId)
+    return `${target} ${clause.matcher.kind === 'regex' ? '정규식 ' : ''}“${clause.matcher.pattern}” ${count}${clause.matcher.caseSensitive ? ' (대소문자 구분)' : ''}${predecessor ? ` · “${predecessor.matcher.pattern}” 다음` : ''}`
   }).join(' + ')}`
 }
 

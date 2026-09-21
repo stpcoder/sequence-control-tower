@@ -237,8 +237,10 @@ export function precomputeDocumentEvidence(
   };
 }
 
-export function clauseOrderingError(orderedClauses: readonly RuleClause[], ruleId = "rule"): string | null {
-  const clauses = new Map<string, RuleClause>();
+type OrderedClause = Pick<RuleClause, "id" | "presence" | "matcher" | "order">;
+
+export function clauseOrderingError(orderedClauses: readonly OrderedClause[], ruleId = "rule"): string | null {
+  const clauses = new Map<string, OrderedClause>();
   for (const clause of orderedClauses) {
     if (clauses.has(clause.id)) return `Rule ${ruleId} has duplicate clause ids.`;
     clauses.set(clause.id, clause);
@@ -255,7 +257,7 @@ export function clauseOrderingError(orderedClauses: readonly RuleClause[], ruleI
       return `Rule ${ruleId} applies ordering outside log content.`;
     }
     const seen = new Set([clause.id]);
-    let cursor: RuleClause | undefined = reference;
+    let cursor: OrderedClause | undefined = reference;
     while (cursor?.order?.afterClauseId) {
       if (seen.has(cursor.id)) return `Rule ${ruleId} contains a cyclic order.`;
       seen.add(cursor.id);

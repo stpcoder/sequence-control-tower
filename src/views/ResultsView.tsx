@@ -1,4 +1,5 @@
 import { inspectionSummary, type InspectionStates } from '../state/inspectionStatus'
+import { AsyncActionGate } from '../state/asyncActionGate'
 import { InspectionNotice } from '../components/InspectionNotice'
 import { useViewDraft, useViewScopeGuard } from '../state/viewDrafts'
 import { mergeProjectPresets } from '../state/projectPresets'
@@ -131,6 +132,8 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
   const draftKey = `${project?.id ?? 'preview'}:${effectiveScopeId ?? ''}:ResultsView`
   const captureViewScope = useViewScopeGuard(draftKey)
   const saveInFlight = useRef(false)
+  const metadataAction = useRef(new AsyncActionGate())
+  const clipboardAction = useRef(new AsyncActionGate())
   const initialLayout = resultExportLayoutFromPreset(project?.exportPresets.find((preset) => preset.id === RESULT_EXPORT_PRESET_ID && !preset.archived), effectiveScopeId)
   const [query, setQuery] = useViewDraft(draftKey + ':query', '')
   const [result, setResult] = useViewDraft<ResultLabel | 'all'>(draftKey + ':result', 'all')
@@ -157,7 +160,11 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
     setScopeId((current) => resolveEvaluationScopeId(records, current, selectedEvaluationScopeId) ?? '')
   }, [project?.id, records, selectedEvaluationScopeId])
 
-  useEffect(() => { setExportPreview(null); setEditingCell(null) }, [draftKey])
+  useEffect(() => {
+    setExportPreview(null); setEditingCell(null)
+    metadataAction.current.reset(); clipboardAction.current.reset()
+    setSavingMetadata(false); setApprovingSelection(false)
+  }, [draftKey])
 
   const filtered = useMemo(() => sortLogRecords(filterLogRecords(scopeRecords, { query, result, review, folder: 'all' }).filter((row) => {
     const checkpoints = resultStageCheckpoints(row.stageResults, row.fileName, row.result)
@@ -208,7 +215,7 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
     setPage(1)
   }
 
-  const inspectionIncomplete = inspectionSummary(stageInspectionStates, scopeRecords).incomplete
+  const inspectionIncomplete = inspectionSummary(stageInspectionStates, scopeRecords).incomplete || inspectionSummary(addressInspectionStates, scopeRecords).incomplete
 
   const beginExport = (format: 'csv' | 'tsv') => {
     if (inspectionIncomplete || !exportRows.length || !exportColumns.length) return
@@ -216,13 +223,17 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
   }
 
   const copyTsv = async (preview: LogRecordExportPreview) => {
+    const token = clipboardAction.current.begin()
+    if (!token) return
+    const scopeIsActive = captureViewScope()
     try {
       await navigator.clipboard.writeText(confirmLogRecordExport(preview))
-      setExportPreview(null)
+      if (!scopeIsActive()) return
+      setExportPreview((current) => current === preview ? null : current)
       onNotify?.(`${preview.rows.length}개 행을 TSV로 복사했습니다.`)
     } catch {
-      onNotify?.('클립보드에 복사하지 못했습니다.', 'error')
-    }
+      if (scopeIsActive()) onNotify?.('클립보드에 복사하지 못했습니다.', 'error')
+    } finally { clipboardAction.current.finish(token) }
   }
 
   const exportCsv = (preview: LogRecordExportPreview) => {
@@ -251,22 +262,30 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
       onNotify?.(editingCell.field === 'vdd' ? 'VDD를 숫자로 입력하세요.' : 'metadata 값은 비워 둘 수 없습니다.', 'error')
       return
     }
+    const token = metadataAction.current.begin()
+    if (!token) return
+    const scopeIsActive = captureViewScope()
     setSavingMetadata(true)
     try {
       await onEditMetadata(row, editingCell.field, value)
-      setEditingCell(null)
-    } catch { /* The durable queue reports the failure; keep the editor open. */ } finally { setSavingMetadata(false) }
+      if (scopeIsActive()) setEditingCell((current) => current === editingCell ? null : current)
+    } catch { /* The durable queue reports the failure; keep the editor open. */ }
+    finally { metadataAction.current.finish(token); if (scopeIsActive()) setSavingMetadata(false) }
   }
 
   const approveSelection = async () => {
     if (!onApproveSelectedMetadata || !selectedRows.length || !selectedCandidateCount) return
+    const token = metadataAction.current.begin()
+    if (!token) return
+    const scopeIsActive = captureViewScope()
     setApprovingSelection(true)
     try {
       const count = await onApproveSelectedMetadata(selectedRows)
+      if (!scopeIsActive()) return
       onNotify?.(`${selectedRows.length.toLocaleString()}개 로그의 값 ${count.toLocaleString()}개를 저장했습니다.`, 'success')
     } catch {
       // The app-level durable queue reports the detailed persistence error.
-    } finally { setApprovingSelection(false) }
+    } finally { metadataAction.current.finish(token); if (scopeIsActive()) setApprovingSelection(false) }
   }
 
   const toggleAllFiltered = () => {
@@ -345,6 +364,7 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
         </div>
       </header>
       <InspectionNotice label="단계 검사" states={stageInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
+      <InspectionNotice label="주소 검사" states={addressInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
       {activeHarness ? <section className="evaluation-harness-strip" aria-label="현재 폴더 분석 기준">
         <div><span>현재 폴더 기준</span><strong>분석 규칙 {activeHarness.rules.length}개</strong></div>
         <button type="button" onClick={() => { setSelectedExportColumnKeys(new Set(activeHarness.output.columns)); onNotify?.('현재 폴더의 열 구성을 적용했습니다.') }}>열 적용</button>
