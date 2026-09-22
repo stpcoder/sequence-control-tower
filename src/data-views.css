@@ -1274,6 +1274,9 @@
 .export-preview-dialog > header span { display: block; margin-top: 4px; color: var(--data-dim); font-size: 11px; }
 .export-preview-dialog > header button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--data-muted); }
 .export-preview-dialog > header button:hover { color: #fff; background: #242933; }
+.export-preview-stale { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 18px; border-bottom: 1px solid var(--data-line-soft); color: #e5ba7a; background: rgba(219, 169, 107, .08); font-size: 12px; }
+.export-preview-stale button { flex: 0 0 auto; padding: 5px 8px; border: 1px solid #68502e; border-radius: 6px; color: #f0c987; background: transparent; font-size: 12px; }
+.export-preview-stale button:disabled { opacity: .55; cursor: not-allowed; }
 .export-preview-table { overflow: auto; padding: 4px 12px 14px; }
 .export-preview-table table { min-width: 100%; border-collapse: collapse; }
 .export-preview-table th,

@@ -1391,6 +1391,8 @@ export interface LogRecordExportPreviewInit {
   readonly phase: 'init'
   readonly rows: readonly LogResultRecord[]
   readonly columns: readonly LogRecordExportColumn[]
+  /** Stable representation of the live export inputs at the time they were captured. */
+  readonly inputSignature: string
 }
 
 export interface LogRecordExportPreview {
@@ -1398,9 +1400,64 @@ export interface LogRecordExportPreview {
   readonly rows: readonly LogResultRecord[]
   readonly columns: readonly LogRecordExportColumn[]
   readonly format: LogRecordExportFormat
+  /** Lets a caller reject confirmation when the result rows or export layout have changed. */
+  readonly inputSignature: string
   readonly serialized: string
   readonly csv: string
   readonly tsv: string
+}
+
+/**
+ * Captures the result data that can affect an export, including ordering and the
+ * selected output columns. Callers compare this with a preview's signature
+ * before confirmation rather than exporting a now-stale immutable snapshot.
+ */
+export function logRecordExportInputSignature(
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  evaluationRevision?: number,
+): string {
+  const selectedColumns = normalizeExportColumns(columns)
+  // Use every exportable field so rule and inspection-derived result changes
+  // invalidate a preview even when the changed field is not currently visible.
+  const revisionColumns = EXPORT_COLUMN_DEFINITIONS.map((column) => column.key)
+  return JSON.stringify({
+    columns: selectedColumns,
+    evaluationRevision: evaluationRevision ?? null,
+    rows: exportableLogRecords(rows, selectedIds).map((row) => {
+      const values = exportRowValues(row)
+      return {
+        // Preserve durable source identity independently of display-safe export values.
+        identity: [row.id, row.artifactId ?? '', row.sourceKey ?? ''],
+        values: revisionColumns.map((column) => normalizedExportCell(values[column])),
+      }
+    }),
+  })
+}
+
+/** Returns whether an immutable preview still represents the current export inputs. */
+export function isLogRecordExportPreviewCurrent(
+  preview: LogRecordExportPreview,
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  evaluationRevision?: number,
+): boolean {
+  return preview.inputSignature === logRecordExportInputSignature(rows, selectedIds, columns, evaluationRevision)
+}
+
+/** Export confirmation requires both an unchanged preview and completed live inspections. */
+export function canConfirmLogRecordExport(
+  preview: LogRecordExportPreview,
+  rows: readonly LogResultRecord[],
+  selectedIds: ReadonlySet<string> = new Set(),
+  columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  inspectionComplete = true,
+  evaluationRevision?: number,
+  metadataSaveComplete = true,
+): boolean {
+  return inspectionComplete && metadataSaveComplete && isLogRecordExportPreviewCurrent(preview, rows, selectedIds, columns, evaluationRevision)
 }
 
 /** Creates the immutable input snapshot used by an export init → preview flow. */
@@ -1408,6 +1465,7 @@ export function initLogRecordExportPreview(
   rows: readonly LogResultRecord[],
   selectedIds: ReadonlySet<string> = new Set(),
   columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
+  evaluationRevision?: number,
 ): LogRecordExportPreviewInit {
   const snapshotRows = exportableLogRecords(rows, selectedIds).map((row) => Object.freeze({
     ...row,
@@ -1421,6 +1479,7 @@ export function initLogRecordExportPreview(
     phase: 'init' as const,
     rows: Object.freeze(snapshotRows),
     columns: Object.freeze(normalizeExportColumns(columns)),
+    inputSignature: logRecordExportInputSignature(rows, selectedIds, columns, evaluationRevision),
   })
 }
 
@@ -1436,6 +1495,7 @@ export function previewLogRecordExport(
     rows: init.rows,
     columns: init.columns,
     format,
+    inputSignature: init.inputSignature,
     serialized: format === 'csv' ? csv : tsv,
     csv,
     tsv,
@@ -1452,6 +1512,7 @@ export function buildLogRecordExportPreview(
   selectedIds: ReadonlySet<string> = new Set(),
   columns: readonly LogRecordExportColumn[] = DEFAULT_EXPORT_COLUMNS,
   format: LogRecordExportFormat = 'csv',
+  evaluationRevision?: number,
 ): LogRecordExportPreview {
-  return previewLogRecordExport(initLogRecordExportPreview(rows, selectedIds, columns), format)
+  return previewLogRecordExport(initLogRecordExportPreview(rows, selectedIds, columns, evaluationRevision), format)
 }
