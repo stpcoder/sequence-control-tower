@@ -395,6 +395,18 @@ export class EvaluationStore {
     return this.toSnapshot(key, database.projects[key] ?? emptyProject())
   }
 
+  /** Save an external report against one evaluation revision without a check/write race. */
+  async withRevision<T>(projectId: string, expected: number, save: () => Promise<T>): Promise<T> {
+    await this.initialize()
+    const key = projectKey(projectId)
+    const revision = safeInteger(expected, 'expectedEvaluationRevision')
+    return this.store.withSnapshot(async (database) => {
+      const current = database.projects[key]?.revision ?? 0
+      if (current !== revision) throw new EvaluationRevisionConflictError(revision, current)
+      return save()
+    })
+  }
+
   async saveDecision(input: EvaluationSaveDecisionInput): Promise<EvaluationDecisionSaveResult> {
     rejectSensitivePayload(input)
     if (!RESULT_LABELS.has(input.result)) throw new Error('판정 결과가 올바르지 않습니다.')

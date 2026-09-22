@@ -2,11 +2,40 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceGeneralEngineeringClaims, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, isStandardCommandSignature, NativeAgentService, openCodeToolPresentation } from './native-agent-service'
+import { enforceAgentScopeClaims, enforceEvidenceBoundHistory, enforceGeneralEngineeringClaims, enforceWorkflowProvenance, hasConfirmedWorkflowEvidence, hasHistoricalTool, isStandardCommandSignature, NativeAgentService, openCodeToolPresentation } from './native-agent-service'
 import { NativeAgentStore } from './native-agent-store'
 import type { NativeAgentSessionView } from '../shared/contracts'
 
 describe('Native Agent sessions and evidence', () => {
+  it('uses a bounded, explicitly retrievable transcript for both internal and OpenCode runs', async () => {
+    for (const backend of ['internal', 'opencode'] as const) {
+      const store = new NativeAgentStore(await mkdtemp(join(tmpdir(), `native-long-${backend}-`)))
+      let internalOptions: unknown
+      const complete = vi.fn(async (...args: unknown[]) => { internalOptions = args[3]; return { content: '확인했습니다.' } })
+      const send = vi.fn(async ({ content }: { content: string }) => ({ content: '확인했습니다.', externalSessionId: 'external', toolNames: [], toolTraces: [] }))
+      const service = new NativeAgentService({
+        store, tools: { execute: vi.fn() }, projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [], evaluationNodes: [] })) }, artifacts: { list: vi.fn(async () => []) },
+        llm: { complete }, opencode: { available: vi.fn(async () => backend === 'opencode'), send, abort: vi.fn(), close: vi.fn() },
+      } as never)
+      await service.initialize()
+      const session = await service.create('p')
+      await store.update(session.id, (draft) => {
+        draft.messages = Array.from({ length: 180 }, (_, index) => ({ id: `m-${index}`, role: index % 2 ? 'assistant' : 'user', content: `${index}:${'history '.repeat(900)}`, createdAt: new Date(index * 1_000).toISOString() }))
+      })
+      const done = new Promise<NativeAgentSessionView>((resolve) => {
+        const unsubscribe = service.onUpdate((next) => { if (next.id === session.id && next.status === 'idle') { unsubscribe(); resolve(next) } })
+      })
+      await service.send(session.id, '현재 요청')
+      await done
+      const encoded = backend === 'internal'
+        ? JSON.stringify((internalOptions as { messages?: unknown } | undefined)?.messages)
+        : send.mock.calls[0]?.[0]?.content as string
+      expect(encoded.length).toBeLessThan(200_000)
+      expect(encoded).toContain('conversation_history_get')
+      expect(encoded).toContain('생략되었습니다')
+    }
+  })
+
   it('presents OpenCode tool traces as product language', () => {
     expect(openCodeToolPresentation('sct_pass_fail_scan')).toEqual({ name: 'pass_fail_scan', label: 'Pass/Fail 판정' })
     expect(openCodeToolPresentation('sct_evaluation_relation_suggest')).toEqual({ name: 'evaluation_relation_suggest', label: '평가 관계 제안' })
@@ -62,6 +91,11 @@ describe('Native Agent sessions and evidence', () => {
     const answer = '- 현재 폴더는 9600MHz 단일 조건입니다. 과거 누적 데이터에서는 8533MHz 2/2, 9600MHz 4/6 FAIL입니다.\n- 다음 split 평가가 필요합니다.'
     expect(enforceEvidenceBoundHistory(answer, false)).toBe('- 현재 폴더는 9600MHz 단일 조건입니다.\n- 다음 split 평가가 필요합니다.')
     expect(enforceEvidenceBoundHistory(answer, true)).toContain('4/6 FAIL')
+  })
+
+  it('accepts previous-chat claims only after the conversation history tool ran', () => {
+    expect(hasHistoricalTool(['conversation_history_get'])).toBe(true)
+    expect(enforceEvidenceBoundHistory('이전 대화에서 확인한 DQ9 경향입니다.', hasHistoricalTool(['conversation_history_get']))).toContain('이전 대화')
   })
 
   it('does not interrupt the engineer for standard test and condition commands', () => {
@@ -202,7 +236,7 @@ describe('Native Agent sessions and evidence', () => {
       tools: { execute: vi.fn(async (_projectId: string, call: { name: string }, sourceIds: string[]) => result(call.name, sourceIds)) },
       projects: { get: vi.fn(async () => ({ id: 'p', name: 'P', artifacts: [{ sourceId: 's1', rootId: 'folder-a', artifactId: 'a1', relativePath: 'SM8975_SS.log' }], evaluationNodes: [] })) },
       artifacts: { list: vi.fn(async () => []) },
-      llm: { complete: vi.fn(async () => ({ content: `평가 목적과 경향을 정리했습니다.\n<sct-evaluation-proposal>{"outcome":"TEST_FAIL","purpose":"characterization","dimensions":{"skew":"SS","dq":9},"rationale":"DQ9 반복","draft":{"purpose":"DQ9 불량 경향 확인","changedConditions":["온도"],"fixedConditions":["VDD"],"interpretation":"고온에서 재현 가능성이 높음","findings":["DQ9 반복"],"counterEvidence":[],"caveats":[],"trends":"DQ9 집중","nextPlan":"같은 Sample로 온도만 비교","levels":["Hot","Room"],"heldConditions":["VDD"],"samples":["S1"],"successCriteria":["동일 signature 재현"]},"evidenceSourceIds":["s1"]}</sct-evaluation-proposal>` })) },
+      llm: { complete: vi.fn(async () => ({ content: `평가 목적과 경향을 정리했습니다.\n<sct-evaluation-proposal>{"basis":{"projectRevision":999,"evaluationRevision":999,"recordsFingerprint":"v1:ffffffffffffffff"},"outcome":"TEST_FAIL","purpose":"characterization","dimensions":{"skew":"SS","dq":9},"rationale":"DQ9 반복","draft":{"purpose":"DQ9 불량 경향 확인","changedConditions":["온도"],"fixedConditions":["VDD"],"interpretation":"고온에서 재현 가능성이 높음","findings":["DQ9 반복"],"counterEvidence":[],"caveats":[],"trends":"DQ9 집중","nextPlan":"같은 Sample로 온도만 비교","levels":["Hot","Room"],"heldConditions":["VDD"],"samples":["S1"],"successCriteria":["동일 signature 재현"]},"evidenceSourceIds":["s1"]}</sct-evaluation-proposal>` })) },
       opencode: { available: vi.fn(async () => false) },
     } as never)
     await service.initialize()
@@ -212,12 +246,13 @@ describe('Native Agent sessions and evidence', () => {
         if (next.id === created.id && next.status === 'idle' && next.evaluationProposal) { unsubscribe(); resolve(next) }
       })
     })
-    await service.send(created.id, '다섯 단계로 정리해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]', ['s1'], 'evaluation_history', 'interpretation')
+    await service.send(created.id, '다섯 단계로 정리해줘.\n[SCT_EVALUATION_REPORT_CONTEXT]', ['s1'], 'evaluation_history', 'interpretation', undefined, { projectRevision: 2, evaluationRevision: 3, recordsFingerprint: 'v1:0123456789abcdef' })
     const completed = await idle
     expect(completed.messages.at(-1)?.content).toBe('평가 목적과 경향을 정리했습니다.')
     expect(completed.evaluationProposal).toMatchObject({
       outcome: 'TEST_FAIL', purpose: 'characterization', dimensions: { skew: 'SS', dq: 9 },
       draft: { purpose: 'DQ9 불량 경향 확인' }, evidenceSourceIds: ['s1'],
+      basis: { projectRevision: 2, evaluationRevision: 3, recordsFingerprint: 'v1:0123456789abcdef' },
     })
   })
 

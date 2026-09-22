@@ -39,6 +39,16 @@ export class AtomicJsonStore<T> {
     return structuredClone(this.value)
   }
 
+  /** Keep writes queued while another store commits work based on this snapshot.
+   * The reader must not read or mutate this same store (that would deadlock). */
+  async withSnapshot<R>(reader: (snapshot: T) => Promise<R>): Promise<R> {
+    await this.initialize()
+    const run = () => reader(structuredClone(this.value))
+    const result = this.operation.then(run, run)
+    this.operation = result.then(() => undefined, () => undefined)
+    return result
+  }
+
   async update(mutator: (draft: T) => void | T): Promise<T> {
     await this.initialize()
     const run = async (): Promise<T> => {

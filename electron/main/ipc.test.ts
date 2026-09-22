@@ -85,14 +85,17 @@ const evaluationAgentStart = vi.fn(async () => ({ id: 'eval-1', status: 'paused'
 const evaluationAgentGet = vi.fn(() => ({ id: 'eval-1', status: 'paused', schemaVersion: 1, files: [], evidence: [], transcript: [], context: { dimensions: {} }, depth: 0, calls: 0, searches: 0 }))
 const evaluationAgentResume = vi.fn(async () => ({ id: 'eval-1', status: 'completed', schemaVersion: 1, files: [], evidence: [], transcript: [], context: { dimensions: {} }, depth: 0, calls: 1, searches: 0 }))
 const evaluationAgentMemory = vi.fn(() => null)
+const projectSave = vi.fn(async (input: unknown) => input)
+const withEvaluationRevision = vi.fn(async (_projectId: string, _revision: number, save: () => Promise<unknown>) => save())
 const services = {
+  projects: { save: projectSave },
   artifacts: {
     search: search.fn,
     inspectEvidence: evidence.fn,
     importFolders,
     lineWindow
   },
-  evaluations: { saveRecipeAndBatch, archiveRecipe, approveMetadataBatch },
+  evaluations: { saveRecipeAndBatch, archiveRecipe, approveMetadataBatch, withRevision: withEvaluationRevision },
   llmConfig: { summary: vi.fn(), save: saveLlm, discoverModels: vi.fn() },
   agent: { start: agentStart, get: agentGet, answer: vi.fn(), message: vi.fn(), confirm: vi.fn(), cancel: agentCancel, onUpdate: agentOnUpdate, cancelAll: agentCancelAll },
   evaluationAgent: { start: evaluationAgentStart, get: evaluationAgentGet, resume: evaluationAgentResume, memorySavePayload: evaluationAgentMemory }
@@ -145,6 +148,7 @@ beforeEach(() => {
   search.requests.length = 0
   evidence.requests.length = 0
   folderImportRequests.length = 0
+  projectSave.mockClear(); withEvaluationRevision.mockClear()
   registerIpc(services)
 })
 
@@ -442,5 +446,26 @@ describe('evaluation IPC persistence', () => {
     await expect(invoke(IPC_CHANNELS.evaluationApproveMetadataBatch, input)).resolves.toEqual({ input })
     expect(approveMetadataBatch).toHaveBeenCalledOnce()
     expect(approveMetadataBatch).toHaveBeenCalledWith(input)
+  })
+})
+
+
+describe('evaluation report save IPC', () => {
+  it('checks and holds the evaluation revision before saving the project', async () => {
+    const input = { projectId: 'p', expectedRevision: 3, expectedEvaluationRevision: 7, evaluationNodes: [] }
+    await invoke(IPC_CHANNELS.projectSave, input)
+    expect(withEvaluationRevision).toHaveBeenCalledWith('p', 7, expect.any(Function))
+    expect(projectSave).toHaveBeenCalledWith(input)
+    projectSave.mockClear()
+    withEvaluationRevision.mockRejectedValueOnce(new Error('EVALUATION_REVISION_CONFLICT'))
+    await expect(invoke(IPC_CHANNELS.projectSave, input)).rejects.toThrow('EVALUATION_REVISION_CONFLICT')
+    expect(projectSave).not.toHaveBeenCalled()
+  })
+
+  it('keeps ordinary project edits independent of the evaluation guard', async () => {
+    const input = { projectId: 'p', expectedRevision: 3, name: 'renamed' }
+    await invoke(IPC_CHANNELS.projectSave, input)
+    expect(withEvaluationRevision).not.toHaveBeenCalled()
+    expect(projectSave).toHaveBeenCalledWith(input)
   })
 })

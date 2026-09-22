@@ -1,3 +1,4 @@
+import type { ProjectEvaluationNode } from '../../electron/shared/contracts'
 import type { EvaluationReport } from './evaluation-report'
 
 /**
@@ -92,6 +93,7 @@ export interface EvaluationNode {
    * compact legacy/search summary for projects created before report v1. */
   report?: EvaluationReport;
   /** Creation source and review state are kept separately for clear provenance. */
+  agentProposal?: ProjectEvaluationNode['agentProposal'];
   authorship?: EvaluationAuthorship;
   reviewState?: EvaluationReviewState;
   sequenceSignature?: string;

@@ -7,6 +7,8 @@ import {
   filterLogRecords,
   exportableLogRecords,
   initLogRecordExportPreview,
+  isLogRecordExportPreviewCurrent,
+  logRecordExportInputSignature,
   patternMatrix,
   projectLogRecords,
   resultStageCheckpoints,
@@ -405,6 +407,28 @@ describe('renderer log result projection', () => {
     expect(init.rows[0].sample).not.toBe(rows[0].sample)
     expect(Object.isFrozen(init.rows[0])).toBe(true)
     expect(Object.isFrozen(init.rows[0].sample)).toBe(true)
+  })
+
+  it('rejects a stale export preview only when its relevant export inputs change', () => {
+    const rows = projectLogRecords(files)
+    const preview = buildLogRecordExportPreview(rows, new Set(['pass']), ['filename', 'result'], 'csv')
+    rows[1].result = 'PASS'
+
+    expect(isLogRecordExportPreviewCurrent(preview, rows, new Set(['pass']), ['filename', 'result'])).toBe(true)
+    expect(logRecordExportInputSignature([rows[0]], new Set(['pass']), ['filename', 'result'])).toBe(preview.inputSignature)
+
+    const differentSource = projectLogRecords([{ ...files[0], id: 'pass-reimported' }])
+    expect(isLogRecordExportPreviewCurrent(preview, differentSource, new Set(), ['filename', 'result'])).toBe(false)
+
+    const ruleRevisionPreview = buildLogRecordExportPreview([rows[0]], new Set(), ['filename', 'result'], 'csv', 4)
+    expect(isLogRecordExportPreviewCurrent(ruleRevisionPreview, [rows[0]], new Set(), ['filename', 'result'], 5)).toBe(false)
+
+    const changed = projectLogRecords(files)
+    changed[0].result = 'DIAG_FAIL'
+    expect(isLogRecordExportPreviewCurrent(preview, changed, new Set(['pass']), ['filename', 'result'])).toBe(false)
+
+    const refreshed = buildLogRecordExportPreview(changed, new Set(['pass']), ['filename', 'result'], 'csv')
+    expect(isLogRecordExportPreviewCurrent(refreshed, changed, new Set(['pass']), ['filename', 'result'])).toBe(true)
   })
 
   it('exports safe spreadsheet text and preserves the visible row count', () => {

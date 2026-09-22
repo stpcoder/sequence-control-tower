@@ -10,6 +10,7 @@ import type { ProjectSnapshot } from '../../electron/shared/contracts'
 import {
   filterLogRecords,
   buildLogRecordExportPreview,
+  canConfirmLogRecordExport,
   confirmLogRecordExport,
   DEFAULT_EXPORT_COLUMNS,
   EVIDENCE_EXPORT_COLUMNS,
@@ -66,6 +67,8 @@ interface ResultsViewProps {
   onApproveSelectedMetadata?: (records: readonly LogResultRecord[]) => Promise<number>
   onNotify?: (message: string, tone?: 'success' | 'error' | 'info') => void
   project: ProjectSnapshot | null
+  /** Parent passes the live evaluation snapshot revision when rule-only changes must invalidate exports. */
+  evaluationRevision?: number
   onProjectUpdated: (project: ProjectSnapshot) => void
   onAnalyzeContext?: (request: AgentAnalysisContextRequest) => void
   selectedEvaluationScopeId?: string
@@ -123,7 +126,7 @@ function metadataValue(field: CandidateValue, suffix = '', onOpen?: () => void) 
   return <button className={`candidate-value candidate-action ${field.state}`} title="클릭하여 수정" onClick={(event) => { event.stopPropagation(); onOpen() }}>{content}</button>
 }
 
-export function ResultsView({ stageInspectionStates, addressInspectionStates, onRetryInspections, records, onOpenFile, onEditMetadata, onApproveSelectedMetadata, onNotify, project, onProjectUpdated, onAnalyzeContext, selectedEvaluationScopeId, onSelectedEvaluationScopeChange }: ResultsViewProps) {
+export function ResultsView({ stageInspectionStates, addressInspectionStates, onRetryInspections, records, onOpenFile, onEditMetadata, onApproveSelectedMetadata, onNotify, project, evaluationRevision, onProjectUpdated, onAnalyzeContext, selectedEvaluationScopeId, onSelectedEvaluationScopeChange }: ResultsViewProps) {
   const [scopeId, setScopeId] = useViewDraft<string>(`${project?.id ?? 'preview'}:ResultsView:scope`, selectedEvaluationScopeId ?? '')
   const scopeOptions = useMemo(() => evaluationScopeOptions(records), [records])
   const effectiveScopeId = resolveEvaluationScopeId(records, scopeId, selectedEvaluationScopeId)
@@ -216,13 +219,18 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
   }
 
   const inspectionIncomplete = inspectionSummary(stageInspectionStates, scopeRecords).incomplete || inspectionSummary(addressInspectionStates, scopeRecords).incomplete
+  const metadataSavePending = savingMetadata || approvingSelection
+  const previewCanConfirm = exportPreview
+    ? canConfirmLogRecordExport(exportPreview, filtered, selectedIds, exportColumns, !inspectionIncomplete, evaluationRevision, !metadataSavePending)
+    : false
 
   const beginExport = (format: 'csv' | 'tsv') => {
-    if (inspectionIncomplete || !exportRows.length || !exportColumns.length) return
-    setExportPreview(buildLogRecordExportPreview(filtered, selectedIds, exportColumns, format))
+    if (inspectionIncomplete || metadataSavePending || !exportRows.length || !exportColumns.length) return
+    setExportPreview(buildLogRecordExportPreview(filtered, selectedIds, exportColumns, format, evaluationRevision))
   }
 
   const copyTsv = async (preview: LogRecordExportPreview) => {
+    if (!previewCanConfirm || preview !== exportPreview) return
     const token = clipboardAction.current.begin()
     if (!token) return
     const scopeIsActive = captureViewScope()
@@ -237,6 +245,7 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
   }
 
   const exportCsv = (preview: LogRecordExportPreview) => {
+    if (!previewCanConfirm || preview !== exportPreview) return
     const blob = new Blob([confirmLogRecordExport(preview)], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -359,8 +368,8 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
               <div className="export-columns-footer"><button className="export-columns-save" type="button" onClick={() => void saveExportLayout()} disabled={!project || savingExportLayout || !exportColumns.length}>{savingExportLayout ? '저장 중…' : '기본값 저장'}</button></div>
             </div>
           </details>
-          <button onClick={() => beginExport('tsv')} disabled={inspectionIncomplete || !exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>
-          <button onClick={() => beginExport('csv')} disabled={inspectionIncomplete || !exportRows.length || !exportColumns.length}><Download size={16} />{selectedIds.size ? `선택 ${selectedFilteredCount}개 CSV` : `결과 ${exportRows.length}개 CSV`}</button>
+          <button onClick={() => beginExport('tsv')} disabled={inspectionIncomplete || metadataSavePending || !exportRows.length || !exportColumns.length}><Clipboard size={16} />TSV 복사</button>
+          <button onClick={() => beginExport('csv')} disabled={inspectionIncomplete || metadataSavePending || !exportRows.length || !exportColumns.length}><Download size={16} />{selectedIds.size ? `선택 ${selectedFilteredCount}개 CSV` : `결과 ${exportRows.length}개 CSV`}</button>
         </div>
       </header>
       <InspectionNotice label="단계 검사" states={stageInspectionStates} records={scopeRecords} onRetry={onRetryInspections} />
@@ -422,7 +431,7 @@ export function ResultsView({ stageInspectionStates, addressInspectionStates, on
         onClose={() => setEditingCell(null)}
         onSave={() => void saveEdit()}
       /> : null}
-      {exportPreview ? <ExportPreviewModal preview={exportPreview} onClose={() => setExportPreview(null)} onCopy={copyTsv} onCsv={exportCsv} /> : null}
+      {exportPreview ? <ExportPreviewModal preview={exportPreview} current={previewCanConfirm} inspectionIncomplete={inspectionIncomplete} metadataSavePending={metadataSavePending} onClose={() => setExportPreview(null)} onRefresh={() => beginExport(exportPreview.format)} onCopy={copyTsv} onCsv={exportCsv} /> : null}
     </div>
   )
 }
@@ -457,7 +466,16 @@ function MetadataReviewDialog({ field, value, busy, onValueChange, onClose, onSa
   </div>
 }
 
-function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogRecordExportPreview; onClose: () => void; onCopy: (preview: LogRecordExportPreview) => void; onCsv: (preview: LogRecordExportPreview) => void }) {
+function ExportPreviewModal({ preview, current, inspectionIncomplete, metadataSavePending, onClose, onRefresh, onCopy, onCsv }: {
+  preview: LogRecordExportPreview
+  current: boolean
+  inspectionIncomplete: boolean
+  metadataSavePending: boolean
+  onClose: () => void
+  onRefresh: () => void
+  onCopy: (preview: LogRecordExportPreview) => void
+  onCsv: (preview: LogRecordExportPreview) => void
+}) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const previewColumns = preview.columns
   useEffect(() => {
@@ -478,8 +496,9 @@ function ExportPreviewModal({ preview, onClose, onCopy, onCsv }: { preview: LogR
   }, [onClose])
   return <div className="export-preview-modal" role="dialog" aria-modal="true" aria-labelledby="export-preview-title" ref={dialogRef}>
         <div className="export-preview-dialog"><header><div><h2 id="export-preview-title">{preview.format.toUpperCase()} 내보내기 확인</h2><span>{preview.rows.length}개 행 · {preview.columns.length}개 열 · 상위 5행 미리보기</span></div><button onClick={onClose} aria-label="내보내기 미리보기 닫기"><X size={16} /></button></header>
+          {!current ? <div className="export-preview-stale" role="status">{metadataSavePending ? '메타데이터 저장이 끝날 때까지 내보낼 수 없습니다.' : inspectionIncomplete ? '검사가 완료될 때까지 내보낼 수 없습니다.' : '결과가 변경되었습니다. 미리보기를 새로고침하세요.'}<button type="button" onClick={onRefresh} disabled={inspectionIncomplete || metadataSavePending}>미리보기 새로고침</button></div> : null}
           <div className="export-preview-table"><table><thead><tr>{previewColumns.map((column) => <th key={column}>{PREVIEW_LABELS.get(column) ?? column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 5).map((row) => <tr key={row.id}>{previewColumns.map((column) => <td key={column} title={exportCellValue(row, column)}>{exportCellValue(row, column)}</td>)}</tr>)}</tbody></table></div>
-          <footer><button onClick={onClose}>취소</button><button onClick={() => preview.format === 'tsv' ? void onCopy(preview) : onCsv(preview)}>{preview.format === 'tsv' ? 'TSV 복사' : 'CSV 저장'}</button></footer>
+          <footer><button onClick={onClose}>취소</button><button disabled={!current} onClick={() => preview.format === 'tsv' ? void onCopy(preview) : onCsv(preview)}>{preview.format === 'tsv' ? 'TSV 복사' : 'CSV 저장'}</button></footer>
         </div>
       </div>
 }

@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { projectLogRecords } from '../../src/state/logRecords'
+import { buildLogRecordExportPreview, canConfirmLogRecordExport, projectLogRecords } from '../../src/state/logRecords'
 import { createResultsCsvBlob, normalizedMetadataEdit, ResultsView } from '../../src/views/ResultsView'
 import {
   RESULT_EXPORT_PRESET_ID,
@@ -91,4 +91,17 @@ it('blocks result export and explains why while address inspection is incomplete
   expect(ready).not.toContain('검사가 끝난 뒤 내보낼 수 있습니다.')
   expect(copyButton(ready)).toBeDefined()
   expect(copyButton(ready)).not.toMatch(/^<button[^>]*disabled=/)
+})
+
+it('keeps a refreshed preview valid only after inspections are complete', () => {
+  const rows = projectLogRecords([{ id: 'one', name: 'one.log', rootId: 'a', text: '@PASS' }])
+  const preview = buildLogRecordExportPreview(rows, new Set(), ['filename', 'result'], 'tsv')
+  expect(canConfirmLogRecordExport(preview, rows, new Set(), ['filename', 'result'], false)).toBe(false)
+  expect(canConfirmLogRecordExport(preview, rows, new Set(), ['filename', 'result'], true, undefined, false)).toBe(false)
+
+  const changed = projectLogRecords([{ id: 'one', name: 'one.log', rootId: 'a', text: '@FAIL' }])
+  expect(canConfirmLogRecordExport(preview, changed, new Set(), ['filename', 'result'], true)).toBe(false)
+
+  const refreshed = buildLogRecordExportPreview(changed, new Set(), ['filename', 'result'], 'tsv')
+  expect(canConfirmLogRecordExport(refreshed, changed, new Set(), ['filename', 'result'], true)).toBe(true)
 })

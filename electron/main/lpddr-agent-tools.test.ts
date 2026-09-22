@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { EngineerWorkflowMemoryView } from '../shared/contracts'
 import { classifyLpddrStatus, engineerWorkflowCompatibility, extractLpddrFilenameDimensions, LpddrAgentToolService, sourceEngineeringContext } from './lpddr-agent-tools'
+import { NativeAgentStore } from './native-agent-store'
+import { boundedToolResult } from './native-agent-context'
 
 const project = {
   id: 'p', name: 'LPDDR6 Xiaomi', artifacts: [
@@ -10,6 +15,38 @@ const project = {
 }
 
 describe('LPDDR agent tools', () => {
+  it('retrieves conversation pages only from the allowed evaluation scope and keeps long rows pageable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-tool-history-'))
+    try {
+      const store = new NativeAgentStore(root)
+      await store.initialize()
+      const current = await store.create('p', 'current', 'internal', 'r')
+      const other = await store.create('p', 'other', 'internal', 'other-folder')
+      await store.update(current.id, (session) => {
+        session.messages = Array.from({ length: 55 }, (_, index) => ({ id: `a-${index}`, role: 'user', content: index === 54 ? `start-${'x'.repeat(2_000)}-end` : `A-${index}`, createdAt: new Date(index * 1_000).toISOString() }))
+      })
+      await store.update(other.id, (session) => {
+        session.messages = Array.from({ length: 55 }, (_, index) => ({ id: `b-${index}`, role: 'user', content: `B-${index}`, createdAt: new Date(index * 1_000).toISOString() }))
+      })
+      const contextProject = { ...project, folders: [{ rootId: 'r', displayLabel: 'current', status: 'available' as const, connectedAt: '' }, { rootId: 'other-folder', displayLabel: 'other', status: 'available' as const, connectedAt: '' }] }
+      const tools = new LpddrAgentToolService({
+        artifacts: { inspectEvidence: vi.fn(), list: vi.fn(), search: vi.fn(), lineWindow: vi.fn() } as never,
+        projects: { get: vi.fn(async () => contextProject), list: vi.fn(async () => [contextProject]) } as never,
+        agentStore: store,
+      })
+      const result = await tools.execute('p', { name: 'conversation_history_get' }, ['s1'])
+      const data = result.data as { messages: Array<{ messageId: string; content: string; nextContentOffset?: number | null; evaluationScopeId?: string }> }
+      expect(data.messages).toHaveLength(5)
+      expect(data.messages.every((item) => item.messageId.startsWith('a-') && item.evaluationScopeId === 'r')).toBe(true)
+      expect(data.messages.find((item) => item.messageId === 'a-54')).toMatchObject({ content: expect.stringContaining('start-'), nextContentOffset: 1_000 })
+      expect(() => JSON.parse(boundedToolResult(JSON.stringify(result)))).not.toThrow()
+      await expect(tools.execute('p', { name: 'conversation_history_get', args: { sessionId: current.id, query: 'no-such-message' } }, ['s1']))
+        .resolves.toMatchObject({ data: { messages: [] } })
+      await expect(tools.execute('p', { name: 'conversation_history_get', args: { evaluationScopeId: 'other-folder' } }, ['s1'])).rejects.toThrow('벗어났습니다')
+      await expect(tools.execute('p', { name: 'conversation_history_get', args: { sessionId: other.id } }, ['s1'])).rejects.toThrow('현재 평가 폴더')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('prioritizes Training Fail over reboot recovery markers', () => {
     expect(classifyLpddrStatus({ 'training-fail': 1, reboot: 1, halt: 1, 'at-fail': 1 })).toMatchObject({ status: 'TRAINING_FAIL' })
   })
