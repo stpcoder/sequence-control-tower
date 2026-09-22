@@ -9,6 +9,20 @@ async function tempRoot(): Promise<string> { const root = await mkdtemp(join(tmp
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 
 describe('ProjectStore', () => {
+  it('preserves saved Agent proposal identity across reloads and engineer edits', async () => {
+    const dataRoot = await tempRoot()
+    const store = new ProjectStore(dataRoot)
+    const project = await store.create({ name: 'Agent proposal history' })
+    const agentProposal = { sessionId: 'session-1', proposalId: 'proposal-1', basis: { projectRevision: 0, evaluationRevision: 4, recordsFingerprint: 'v1:1234567890abcdef' } }
+    const saved = await store.save({ projectId: project.id, expectedRevision: project.revision, evaluationNodes: [{ id: 'node-1', name: '평가', dimensions: {}, interpretation: '초안 해석', agentProposal }] })
+    const reloaded = await new ProjectStore(dataRoot).get(project.id)
+    expect(reloaded?.evaluationNodes?.[0].agentProposal).toEqual(agentProposal)
+    const edited = await store.save({ projectId: project.id, expectedRevision: saved.revision, evaluationNodes: saved.evaluationNodes!.map((node) => ({ ...node, interpretation: '엔지니어가 수정한 해석' })) })
+    expect(edited.evaluationNodes?.[0]).toMatchObject({ interpretation: '엔지니어가 수정한 해석', agentProposal })
+    await expect(store.save({ projectId: project.id, expectedRevision: saved.revision, evaluationNodes: saved.evaluationNodes })).rejects.toThrow(ProjectRevisionConflictError)
+    expect((await store.get(project.id))?.evaluationNodes?.[0].interpretation).toBe('엔지니어가 수정한 해석')
+  })
+
   it('persists project metadata, canonical roots separately, and never returns a path', async () => {
     const dataRoot = await tempRoot(); const folder = await mkdtemp(join(tmpdir(), 'project-folder-')); roots.push(folder)
     const store = new ProjectStore(dataRoot); const project = await store.create({ name: 'Bring-up' })

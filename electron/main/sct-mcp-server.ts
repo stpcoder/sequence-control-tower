@@ -112,7 +112,13 @@ export async function startSctMcpServer(tools: LpddrAgentToolService): Promise<S
           projectId: z.string().min(1).max(160),
           scopeToken: z.string().min(16).max(160),
           sourceIds: z.array(z.string().min(1).max(160)).max(100).optional(),
-          args: z.record(z.unknown()).optional()
+          args: z.object({
+            sourceIds: z.array(z.string().min(1).max(160)).max(10_000).optional(), sourceId: z.string().min(1).max(160).optional(),
+            query: z.string().max(500).optional(), mode: z.enum(['literal', 'regex']).optional(), caseSensitive: z.boolean().optional(),
+            offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(),
+            sessionId: z.string().min(1).max(160).optional(), evaluationScopeId: z.string().min(1).max(160).optional(), cursor: z.string().min(1).max(500).optional(),
+            messageId: z.string().min(1).max(160).optional(), contentOffset: z.number().int().min(0).optional(), contentLimit: z.number().int().min(1).max(1_000).optional(),
+          }).passthrough().optional()
         },
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
       }, async ({ projectId, scopeToken, sourceIds, args }) => {

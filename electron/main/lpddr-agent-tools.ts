@@ -19,7 +19,7 @@ import type { ProjectStore } from './project-store'
 
 export type LpddrAgentToolName =
   | 'source_list' | 'evaluation_state_get' | 'project_context_get' | 'project_history_get' | 'evaluation_relation_suggest' | 'similar_case_search'
-  | 'search_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'console_transcript_scan' | 'pass_fail_scan'
+  | 'search_history_get' | 'conversation_history_get' | 'engineer_workflow_memory_get' | 'engineer_workflow_apply' | 'filename_dimensions_scan' | 'soc_boot_profile_scan' | 'console_transcript_scan' | 'pass_fail_scan'
   | 'evaluation_grid_scan' | 'log_search' | 'log_read_window' | 'failure_trends_get'
 
 export interface LpddrAgentToolCall { name: LpddrAgentToolName; args?: Record<string, unknown> }
@@ -39,6 +39,7 @@ export const LPDDR_AGENT_TOOL_DESCRIPTIONS: Record<LpddrAgentToolName, string> =
   evaluation_relation_suggest: '현재 평가 폴더의 근거를 기존 불량 이슈와 비교해 RT, 조건 비교, 개선, 검증, Side effect 또는 분류 대기를 제안합니다. 저장하거나 자동 확정하지 않습니다.',
   similar_case_search: '다른 LPDDR5/LPDDR6 프로젝트에서 제목과 가설, 평가 요약이 비슷한 사례를 찾습니다.',
   search_history_get: '엔지니어가 Ctrl-F/정규식으로 확인한 검색어와 일치 개수를 조회합니다.',
+  conversation_history_get: '저장된 Agent 대화 원문을 프로젝트 범위에서 페이지로 조회합니다. args: evaluationScopeId(선택), sessionId(선택), query(선택), cursor(선택: 이전 결과의 nextCursor), offset(명시 시 오래된 항목부터), limit(최대5). 특정 긴 원문은 messageId와 contentOffset/contentLimit(최대1000)으로 이어 읽고 nextContentOffset을 사용합니다. 모델 창에서 생략된 과거 대화는 이 도구로 확인해야 하며, 발췌를 전체 기록으로 취급하지 않습니다.',
   engineer_workflow_memory_get: '엔지니어가 확정한 검색 순서, 있음/없음 조건, 평가 단계와 목적을 조회합니다.',
   engineer_workflow_apply: '확정된 분석 절차의 있음/없음 조건과 실제 로그 발생 순서를 선택 로그에 일괄 적용해 후보 판정을 계산합니다.',
   filename_dimensions_scan: '로그 파일명과 저장된 fingerprint에서 SoC, Boot profile, Skew, Die, Sample, DRAM 위치, Sequence signature와 명령 후보를 추출합니다.',
@@ -144,7 +145,7 @@ export class LpddrAgentToolService {
     artifacts: Pick<ArtifactService, 'list' | 'search' | 'lineWindow' | 'inspectEvidence'>
     projects: Pick<ProjectStore, 'get' | 'list'>
     evaluations?: Pick<EvaluationStore, 'snapshot'>
-    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings' | 'consolePromptRules'>
+    agentStore: Pick<NativeAgentStore, 'searchHistory' | 'workflowMemories' | 'conversationHistory' | 'attemptHistory' | 'commandKnowledge' | 'profileBindings' | 'consolePromptRules'> & Partial<Pick<NativeAgentStore, 'conversationHistoryPage' | 'get'>>
   }) {}
 
   async execute(projectId: string, call: LpddrAgentToolCall, allowedSourceIds?: string[]): Promise<LpddrAgentToolResult> {
@@ -163,6 +164,7 @@ export class LpddrAgentToolService {
       case 'evaluation_relation_suggest': return this.relationSuggestion(project, allowed, call.args)
       case 'similar_case_search': return this.similar(project, safe(call.args?.query, 240))
       case 'search_history_get': return this.searchHistory(project, allowed)
+      case 'conversation_history_get': return this.conversationHistory(project, allowed, call.args)
       case 'engineer_workflow_memory_get': return this.workflowMemory(project, allowed)
       case 'engineer_workflow_apply': return this.applyWorkflow(project, allowed, call.args)
       case 'filename_dimensions_scan': return this.filenames(project, allowed)
@@ -352,6 +354,54 @@ export class LpddrAgentToolService {
     }
   }
 
+  private async conversationHistory(project: ProjectSnapshot, sources: ProjectSnapshot['artifacts'], args?: Record<string, unknown>): Promise<LpddrAgentToolResult> {
+    const permittedScopes = new Set(sources.map((source) => source.rootId).filter(Boolean))
+    const requestedScope = safe(args?.evaluationScopeId, 160)
+    if (!permittedScopes.size) throw new Error('대화 조회 범위가 비어 있습니다.')
+    if (requestedScope && !permittedScopes.has(requestedScope)) throw new Error('대화 조회 범위가 현재 평가 폴더를 벗어났습니다.')
+    if (!requestedScope && permittedScopes.size !== 1) throw new Error('여러 평가 폴더에서는 evaluationScopeId를 지정해 대화를 조회하십시오.')
+    const evaluationScopeId = requestedScope || [...permittedScopes][0]
+    const sessionId = safe(args?.sessionId, 160)
+    const query = safe(args?.query, 500)
+    const cursor = safe(args?.cursor, 500)
+    const offset = finite(args?.offset)
+    const limit = Math.max(1, Math.min(5, Math.trunc(finite(args?.limit) ?? 5)))
+    const messageId = safe(args?.messageId, 160)
+    const contentOffset = finite(args?.contentOffset)
+    const contentLimit = finite(args?.contentLimit)
+    if (sessionId && this.deps.agentStore.get) {
+      const session = await this.deps.agentStore.get(sessionId)
+      if (!session || session.evaluationScopeId !== evaluationScopeId) throw new Error('지정한 대화는 현재 평가 폴더 범위에 없습니다.')
+    }
+    const historyOptions = {
+      evaluationScopeId, sessionId, query, cursor, ...(offset === undefined ? {} : { offset: Math.max(0, Math.trunc(offset)) }), limit,
+      ...(messageId ? { messageId } : {}), contentOffset: Math.max(0, Math.trunc(contentOffset ?? 0)), contentLimit: Math.max(1, Math.min(1_000, Math.trunc(contentLimit ?? 1_000))),
+    }
+    const page = this.deps.agentStore.conversationHistoryPage
+      ? await this.deps.agentStore.conversationHistoryPage(project.id, historyOptions)
+      : { messages: await this.deps.agentStore.conversationHistory(project.id, historyOptions), nextCursor: null }
+    const rows = page.messages
+    const visible = [] as typeof rows
+    for (const row of rows) {
+      const candidate = {
+        ...row, title: promptSafe(row.title, 80), evidenceSourceIds: row.evidenceSourceIds?.slice(0, 2),
+      }
+      if (JSON.stringify({ messages: [...visible, candidate] }).length > 7_000) break
+      visible.push(candidate)
+    }
+    const nextCursor = visible.length < rows.length ? visible.at(-1)?.cursor ?? null : page.nextCursor
+    return {
+      name: 'conversation_history_get', label: '이전 대화',
+      summary: `대화 원문 ${visible.length}개${evaluationScopeId ? ' · 현재 폴더 범위' : ''}${sessionId ? ' · 지정 세션' : ''}${query ? ' · 검색 적용' : ''}`,
+      data: {
+        ...(offset === undefined ? {} : { offset: Math.max(0, Math.trunc(offset)) }), limit, nextCursor,
+        notice: '반환된 행은 저장된 대화 원문입니다. 다음 페이지가 있으면 nextCursor를 그대로 지정해 이어서 조회하십시오.',
+        messages: visible.map(({ cursor: _cursor, ...item }) => item),
+      },
+      evidenceSourceIds: [...new Set(visible.flatMap((item) => item.evidenceSourceIds ?? []))],
+    }
+  }
+
   private async relationSuggestion(
     project: ProjectSnapshot,
     sources: ProjectSnapshot['artifacts'],
@@ -468,7 +518,9 @@ export class LpddrAgentToolService {
     const [allWorkflows, allSearches, allConversation, allAttempts, commandKnowledge, profileBindings, consolePromptRules] = await Promise.all([
       this.deps.agentStore.workflowMemories(project.id, 50),
       this.deps.agentStore.searchHistory(project.id, 100),
-      this.deps.agentStore.conversationHistory(project.id, 50),
+      scopeIds.size === 1
+        ? this.deps.agentStore.conversationHistory(project.id, { evaluationScopeId: [...scopeIds][0], limit: 20 })
+        : this.deps.agentStore.conversationHistory(project.id, { limit: 20 }),
       this.deps.agentStore.attemptHistory(project.id, 500),
       this.deps.agentStore.commandKnowledge(project.id, 100),
       this.deps.agentStore.profileBindings(project.id),

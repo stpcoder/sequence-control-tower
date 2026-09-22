@@ -11,6 +11,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
+  ProjectSaveInput,
   ArtifactImportOptions,
   ArtifactEvidenceInput,
   ArtifactFailureAddressScanInput,
@@ -290,7 +291,12 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.projectList, (_event, input) => services.projects.list((input as { includeArchived?: boolean } | undefined)?.includeArchived === true))
   handle(IPC_CHANNELS.projectGet, (_event, input) => services.projects.get((input as { projectId: string }).projectId))
   handle(IPC_CHANNELS.projectLoad, async (_event, input) => hydrateProject(await services.projects.load((input as { projectId: string }).projectId)))
-  handle(IPC_CHANNELS.projectSave, (_event, input) => services.projects.save(input as never))
+  handle(IPC_CHANNELS.projectSave, (_event, input) => {
+    const value = input as ProjectSaveInput
+    return value.expectedEvaluationRevision === undefined
+      ? services.projects.save(value)
+      : services.evaluations.withRevision(value.projectId, value.expectedEvaluationRevision, () => services.projects.save(value))
+  })
   handle(IPC_CHANNELS.projectArchive, (_event, input) => services.projects.archive(input as never))
   handle(IPC_CHANNELS.projectValidateFolders, (_event, input) => {
     const value = input as { projectId: string; rootIds?: string[] }
@@ -550,7 +556,7 @@ export function registerIpc(services: Services): void {
   handle(IPC_CHANNELS.nativeAgentSend, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')
     const value = input as NativeAgentSendRequest
-    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds, value.contextKind, value.evaluationStage, value.questionId)
+    return services.nativeAgent.send(value.sessionId, value.content, value.sourceIds, value.contextKind, value.evaluationStage, value.questionId, value.evaluationBasis)
   })
   handle(IPC_CHANNELS.nativeAgentRetry, (_event, input) => {
     if (!services.nativeAgent) throw new Error('Native Agent를 사용할 수 없습니다.')

@@ -58,6 +58,80 @@ describe('NativeAgentStore', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
+  it('filters conversation history by folder before applying the page limit and can page old turns', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-scoped-history-'))
+    try {
+      const store = new NativeAgentStore(root)
+      await store.initialize()
+      const scoped = await store.create('p', 'folder A', 'internal', 'folder-a')
+      const other = await store.create('p', 'folder B', 'internal', 'folder-b')
+      await store.update(scoped.id, (session) => {
+        session.messages = Array.from({ length: 55 }, (_, index) => ({ id: `a-${index}`, role: 'user', content: `A-${index}`, createdAt: new Date(index * 1_000).toISOString() }))
+      })
+      await store.update(other.id, (session) => {
+        session.messages = Array.from({ length: 55 }, (_, index) => ({ id: `b-${index}`, role: 'user', content: `B-${index}`, createdAt: new Date(index * 1_000).toISOString() }))
+      })
+      const first = await store.conversationHistory('p', { evaluationScopeId: 'folder-a', limit: 10 })
+      expect(first).toHaveLength(10)
+      expect(first.at(-1)?.content).toBe('A-54')
+      expect(first.every((item) => item.evaluationScopeId === 'folder-a')).toBe(true)
+      const page = await store.conversationHistory('p', { evaluationScopeId: 'folder-a', offset: 50, limit: 10 })
+      expect(page).toHaveLength(5)
+      expect(page.every((item) => item.content.startsWith('A-'))).toBe(true)
+      expect(await store.conversationHistory('p', { evaluationScopeId: 'folder-a', query: 'A-54', limit: 10 })).toMatchObject([{ content: 'A-54' }])
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('uses opaque message cursors with stable ties, rejects corrupt cursors, and pages long message content', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-history-cursor-'))
+    try {
+      const store = new NativeAgentStore(root, (() => { let id = 0; return () => `id-${++id}` })())
+      await store.initialize()
+      const session = await store.create('p', 'tied', 'internal', 'folder-a')
+      await store.update(session.id, (draft) => {
+        draft.messages = [
+          { id: 'message-a', role: 'user', content: 'first', createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'message-b', role: 'assistant', content: 'middle', createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'message-c', role: 'user', content: `start-${'x'.repeat(10_000)}-end`, createdAt: '2026-01-01T00:00:00.000Z' },
+        ]
+      })
+      const first = await store.conversationHistoryPage('p', { evaluationScopeId: 'folder-a', offset: 0, limit: 1 })
+      expect(first.messages[0]?.messageId).toBe('message-a')
+      const second = await store.conversationHistoryPage('p', { evaluationScopeId: 'folder-a', cursor: first.nextCursor!, limit: 1 })
+      expect(second.messages[0]?.messageId).toBe('message-b')
+      const third = await store.conversationHistoryPage('p', { evaluationScopeId: 'folder-a', cursor: second.nextCursor!, limit: 1 })
+      expect(third.messages[0]?.messageId).toBe('message-c')
+      expect((await store.conversationHistoryPage('p', { evaluationScopeId: 'folder-a', cursor: third.nextCursor!, limit: 1 })).messages).toEqual([])
+      await expect(store.conversationHistoryPage('p', { cursor: 'not-a-cursor' })).rejects.toThrow('커서')
+      const middle = await store.conversationHistoryPage('p', { messageId: 'message-c', contentOffset: 4_000, contentLimit: 100 })
+      expect(middle.messages[0]).toMatchObject({ contentOffset: 4_000, nextContentOffset: 4_100, contentLength: 10_010 })
+      expect(middle.messages[0]?.content).toBe('x'.repeat(100))
+      const end = await store.conversationHistoryPage('p', { messageId: 'message-c', contentOffset: 10_000, contentLimit: 100 })
+      expect(end.messages[0]?.content).toBe('xxxxxx-end')
+      expect(end.messages[0]?.nextContentOffset).toBeNull()
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('restores only a validated host evaluation basis without accepting arbitrary proposal basis data', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sct-evaluation-basis-'))
+    try {
+      const store = new NativeAgentStore(root)
+      await store.initialize()
+      const created = await store.create('p', 'basis', 'internal')
+      await store.update(created.id, (session) => {
+        session.lastRequest = { content: '평가 요약', sourceIds: ['s1'], evaluationBasis: { projectRevision: 2, evaluationRevision: 3, recordsFingerprint: 'v1:0123456789abcdef' } }
+        session.evaluationProposal = {
+          id: 'proposal', outcome: 'UNKNOWN', dimensions: {}, rationale: '근거', evidenceSourceIds: [],
+          draft: { purpose: '목적', changedConditions: [], fixedConditions: [], interpretation: '해석', findings: [], counterEvidence: [], caveats: [], trends: '경향', nextPlan: '계획', levels: [], heldConditions: [], samples: [], successCriteria: [] },
+          basis: { projectRevision: 2, evaluationRevision: 3, recordsFingerprint: 'v1:0123456789abcdef' },
+        }
+      })
+      expect((await store.get(created.id))?.evaluationProposal?.basis).toEqual({ projectRevision: 2, evaluationRevision: 3, recordsFingerprint: 'v1:0123456789abcdef' })
+      await store.update(created.id, (session) => { if (session.evaluationProposal) session.evaluationProposal.basis = { projectRevision: -1, evaluationRevision: 3, recordsFingerprint: 'model supplied' } })
+      expect((await store.get(created.id))?.evaluationProposal?.basis).toBeUndefined()
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('deduplicates rapid identical Ctrl-F observations', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sct-search-history-'))
     const store = new NativeAgentStore(root)

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type {
   EngineerBootProfileBindingView, EngineerCommandKnowledgeView, EngineerConsolePromptRuleView, EngineerEvaluationAttemptView, EngineerWorkflowCheckView, EngineerWorkflowMemoryView, EngineerWorkflowReviewView, EngineerWorkflowResult,
-  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentContextKind, NativeAgentEvaluationStage, NativeAgentMessageView, NativeAgentSearchEventInput,
+  NativeAgentBackend, NativeAgentCompleteEvaluationResult, NativeAgentContextKind, NativeAgentEvaluationBasis, NativeAgentEvaluationStage, NativeAgentMessageView, NativeAgentSearchEventInput,
   NativeAgentSessionStatus, NativeAgentSessionSummary, NativeAgentSessionView,
   NativeAgentToolTraceView, ProjectEvaluationDimensions
 } from '../shared/contracts'
@@ -13,10 +13,11 @@ import { buildEngineerWorkflowCandidate, compactIncrementalWorkflowChecks, engin
 import { hasMeaningfulAgentMessage } from '../../src/domain/agent-message'
 import { normalizeAnalysisViewProposal } from '../../src/domain/agent-analysis-view'
 import { normalizeNativeEvaluationProposal } from '../../src/domain/agent-evaluation-proposal'
+import { normalizeNativeEvaluationBasis } from '../../src/domain/agent-evaluation-basis'
 
 export interface StoredNativeAgentSession extends NativeAgentSessionView {
   externalSessionId?: string
-  lastRequest?: { content: string; sourceIds: string[]; contextKind?: NativeAgentContextKind; evaluationStage?: NativeAgentEvaluationStage }
+  lastRequest?: { content: string; sourceIds: string[]; contextKind?: NativeAgentContextKind; evaluationStage?: NativeAgentEvaluationStage; evaluationBasis?: NativeAgentEvaluationBasis }
 }
 
 export interface SearchEvent extends NativeAgentSearchEventInput { id: string; occurredAt: string }
@@ -25,6 +26,17 @@ interface StoredEngineerWorkflowReview extends EngineerWorkflowReviewView {
   fingerprint: string
   dimensions?: Partial<ProjectEvaluationDimensions>
   searchEventIds: string[]
+}
+export interface ConversationHistoryOptions {
+  limit?: number; offset?: number; cursor?: string; sessionId?: string; evaluationScopeId?: string; query?: string
+  messageId?: string; contentOffset?: number; contentLimit?: number
+}
+export interface ConversationHistoryPage {
+  messages: Array<{
+    messageId: string; sessionId: string; title: string; role: 'user' | 'assistant'; content: string; createdAt: string
+    evidenceSourceIds?: string[]; evaluationScopeId?: string; contentOffset?: number; nextContentOffset?: number | null; contentLength?: number; cursor?: string
+  }>
+  nextCursor: string | null
 }
 interface NativeAgentDatabase {
   schemaVersion: 6
@@ -48,6 +60,19 @@ const FAILURE_RESULTS = new Set<EngineerWorkflowResult>(['DIAG_FAIL', 'TEST_FAIL
 const clean = (value: unknown, max: number): string => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
   : ''
+type ConversationPosition = Pick<ConversationHistoryPage['messages'][number], 'createdAt' | 'sessionId' | 'messageId'>
+const compareConversationPosition = (left: ConversationPosition, right: ConversationPosition): number =>
+  left.createdAt.localeCompare(right.createdAt) || left.sessionId.localeCompare(right.sessionId) || left.messageId.localeCompare(right.messageId)
+const encodeConversationCursor = (value: ConversationPosition): string =>
+  Buffer.from(JSON.stringify({ createdAt: value.createdAt, sessionId: value.sessionId, messageId: value.messageId })).toString('base64url')
+const decodeConversationCursor = (value: string): ConversationPosition => {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>
+    const createdAt = clean(parsed.createdAt, 64); const sessionId = clean(parsed.sessionId, 160); const messageId = clean(parsed.messageId, 160)
+    if (!createdAt || !sessionId || !messageId || Number.isNaN(Date.parse(createdAt))) throw new Error('invalid')
+    return { createdAt, sessionId, messageId }
+  } catch { throw new Error('대화 페이지 커서가 올바르지 않습니다.') }
+}
 const now = (): string => new Date().toISOString()
 
 export class NativeAgentStore {
@@ -159,6 +184,16 @@ export class NativeAgentStore {
       session.failure = session.failure ? clean(session.failure, 500) : undefined
       session.evaluationIntent = session.evaluationIntent ? clean(session.evaluationIntent, 400) : undefined
       session.evaluationReportPending = session.evaluationReportPending === true ? true : undefined
+      if (session.lastRequest) {
+        const requestBasis = normalizeNativeEvaluationBasis(session.lastRequest.evaluationBasis)
+        session.lastRequest = {
+          content: clean(session.lastRequest.content, 800_000),
+          sourceIds: [...new Set(session.lastRequest.sourceIds.map((sourceId) => clean(sourceId, 160)).filter(Boolean))].slice(0, MAX_SOURCE_IDS),
+          ...(session.lastRequest.contextKind ? { contextKind: session.lastRequest.contextKind } : {}),
+          ...(session.lastRequest.evaluationStage ? { evaluationStage: session.lastRequest.evaluationStage } : {}),
+          ...(requestBasis ? { evaluationBasis: requestBasis } : {}),
+        }
+      }
       const ruleProposal = normalizeAgentRuleProposal(session.ruleProposal)
       session.ruleProposal = ruleProposal && session.ruleProposal?.id ? { id: clean(session.ruleProposal.id, 160), ...ruleProposal } : undefined
       const proposal = normalizeAnalysisViewProposal(session.analysisViewProposal)
@@ -166,8 +201,9 @@ export class NativeAgentStore {
         ? { id: clean(session.analysisViewProposal.id, 160), ...proposal }
         : undefined
       const evaluationProposal = normalizeNativeEvaluationProposal(session.evaluationProposal)
+      const proposalBasis = normalizeNativeEvaluationBasis(session.evaluationProposal?.basis)
       session.evaluationProposal = evaluationProposal && session.evaluationProposal?.id
-        ? { id: clean(session.evaluationProposal.id, 160), ...evaluationProposal }
+        ? { id: clean(session.evaluationProposal.id, 160), ...evaluationProposal, ...(proposalBasis ? { basis: proposalBasis } : {}) }
         : undefined
       // Durable evidence is not an LLM context window. Never silently evict
       // earlier conversations, messages or tool traces when new ones arrive.
@@ -488,18 +524,45 @@ export class NativeAgentStore {
     return added
   }
 
-  async conversationHistory(projectId: string, limit = 20): Promise<Array<{
-    sessionId: string; title: string; role: 'user' | 'assistant'; content: string; createdAt: string; evidenceSourceIds?: string[]; evaluationScopeId?: string
-  }>> {
+  async conversationHistory(projectId: string, options: number | ConversationHistoryOptions = 20): Promise<ConversationHistoryPage['messages']> {
+    return (await this.conversationHistoryPage(projectId, options)).messages
+  }
+
+  async conversationHistoryPage(projectId: string, options: number | ConversationHistoryOptions = 20): Promise<ConversationHistoryPage> {
     const wanted = clean(projectId, 160)
+    const input = typeof options === 'number' ? { limit: options } : options
+    const limit = Math.min(Math.max(Math.trunc(input.limit ?? 20), 1), 100)
+    const offset = Math.max(0, Math.trunc(input.offset ?? 0))
+    const sessionId = clean(input.sessionId, 160)
+    const scopeId = clean(input.evaluationScopeId, 160)
+    const query = clean(input.query, 500).toLocaleLowerCase()
+    const cursor = clean(input.cursor, 500)
     const database = await this.store.read()
-    return Object.values(database.sessions)
+    const rows: ConversationHistoryPage['messages'] = Object.values(database.sessions)
       .filter((session) => session.projectId === wanted)
+      .filter((session) => !sessionId || session.id === sessionId)
+      .filter((session) => !scopeId || session.evaluationScopeId === scopeId)
       .flatMap((session) => session.messages.flatMap((message) => message.role === 'user' || message.role === 'assistant'
-        ? [{ sessionId: session.id, title: session.title, role: message.role, content: message.content, createdAt: message.createdAt, evidenceSourceIds: message.evidenceSourceIds, evaluationScopeId: session.evaluationScopeId }]
+        ? [{ messageId: message.id, sessionId: session.id, title: session.title, role: message.role, content: message.content, createdAt: message.createdAt, evidenceSourceIds: message.evidenceSourceIds, evaluationScopeId: session.evaluationScopeId }]
         : []))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .slice(-Math.min(Math.max(limit, 1), 50))
+      .filter((item) => !input.messageId || item.messageId === clean(input.messageId, 160))
+      .filter((item) => !query || `${item.title}\n${item.content}`.toLocaleLowerCase().includes(query))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.sessionId.localeCompare(b.sessionId) || a.messageId.localeCompare(b.messageId))
+    const after = cursor ? decodeConversationCursor(cursor) : undefined
+    const start = after
+      ? rows.findIndex((item) => compareConversationPosition(item, after) > 0)
+      : input.offset !== undefined ? offset : Math.max(0, rows.length - limit)
+    if (after && start < 0) return { messages: [], nextCursor: null }
+    const page = rows.slice(start, start + limit).map((item) => {
+      const contentOffset = input.contentLimit !== undefined ? Math.max(0, Math.trunc(input.contentOffset ?? 0)) : 0
+      const contentLimit = input.contentLimit !== undefined ? Math.min(Math.max(Math.trunc(input.contentLimit), 1), 12_000) : undefined
+      const content = contentLimit === undefined ? item.content : item.content.slice(contentOffset, contentOffset + contentLimit)
+      return { ...item, content, cursor: encodeConversationCursor(item), ...(contentLimit !== undefined ? { contentOffset, nextContentOffset: contentOffset + content.length < item.content.length ? contentOffset + content.length : null, contentLength: item.content.length } : {}) }
+    })
+    const last = page.at(-1)
+    // Return the final position too: a caller can safely probe it and gets an
+    // empty EOF page instead of restarting from the beginning.
+    return { messages: page, nextCursor: last ? encodeConversationCursor(last) : null }
   }
 
   async attemptHistory(projectId: string, limit = 200): Promise<EngineerEvaluationAttemptView[]> {

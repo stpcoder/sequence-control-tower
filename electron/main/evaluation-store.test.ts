@@ -616,3 +616,25 @@ describe('EvaluationStore', () => {
     expect(JSON.parse(await readFile(join(metadata, 'evaluations.json'), 'utf8'))).toEqual({ schemaVersion: 1, projects: {} })
   })
 })
+
+
+describe('evaluation report save consistency', () => {
+  it('holds the evaluated revision until the report commit completes and releases after errors', async () => {
+    const store = new EvaluationStore(await tempRoot())
+    let enter!: () => void, release!: () => void
+    const entered = new Promise<void>((resolve) => { enter = resolve })
+    const released = new Promise<void>((resolve) => { release = resolve })
+    let reportCommitted = false
+    const report = store.withRevision(PROJECT, 0, async () => { enter(); await released; reportCommitted = true; return 'saved' })
+    await entered
+    const decision = store.saveDecision({ projectId: PROJECT, expectedRevision: 0, source: source(), result: 'PASS' }).then((value) => { expect(reportCommitted).toBe(true); return value })
+    release()
+    expect(await report).toBe('saved')
+    expect((await decision).snapshot.revision).toBe(1)
+    let staleCommitCalled = false
+    await expect(store.withRevision(PROJECT, 0, async () => { staleCommitCalled = true })).rejects.toThrow(EvaluationRevisionConflictError)
+    expect(staleCommitCalled).toBe(false)
+    await expect(store.withRevision(PROJECT, 1, async () => { throw new Error('disk failed') })).rejects.toThrow('disk failed')
+    expect((await store.saveDecision({ projectId: PROJECT, expectedRevision: 1, source: source(), result: 'TEST_FAIL' })).snapshot.revision).toBe(2)
+  })
+})
